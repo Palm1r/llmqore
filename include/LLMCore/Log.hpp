@@ -1,0 +1,15 @@
+// Copyright (C) 2026 Petr Mironychev
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <QLoggingCategory>
+
+Q_DECLARE_LOGGING_CATEGORY(llmCoreLog)
+Q_DECLARE_LOGGING_CATEGORY(llmClaudeLog)
+Q_DECLARE_LOGGING_CATEGORY(llmOpenAILog)
+Q_DECLARE_LOGGING_CATEGORY(llmOllamaLog)
+Q_DECLARE_LOGGING_CATEGORY(llmGoogleLog)
+Q_DECLARE_LOGGING_CATEGORY(llmLlamaCppLog)
+Q_DECLARE_LOGGING_CATEGORY(llmNetworkLog)
+Q_DECLARE_LOGGING_CATEGORY(llmToolsLog)

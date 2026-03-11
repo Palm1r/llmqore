@@ -1,0 +1,10 @@
+// Copyright (C) 2026 Petr Mironychev
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "LLMCore_global.h"
+
+#include <LLMCore/Core>
+#include <LLMCore/Clients>
+#include <LLMCore/Tools>

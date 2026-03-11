@@ -1,0 +1,313 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+env:
+  CMAKE_VERSION: "3.29.6"
+  NINJA_VERSION: "1.12.1"
+
+jobs:
+  build:
+    name: ${{ matrix.name }} (Qt ${{ matrix.qt_version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+        # ── Qt 6.5.3 ──
+        # - {
+        #     name: "Windows MSVC 2019", os: windows-latest,
+        #     cc: "cl", cxx: "cl",
+        #     environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat",
+        #     qt_version: "6.5.3",
+        #     url_os: "windows_x86",
+        #     qt_repo_path: "qt6_653",
+        #     qt_arch_suffix: "win64_msvc2019_64",
+        #     qt_dir_prefix: "6.5.3/msvc2019_64",
+        #     qt_pkg_suffix: "-Windows-Windows_10_22H2-MSVC2019-Windows-Windows_10_22H2-X86_64",
+        #     qt_addon_infix: "",
+        #     qt_icu_suffix: "",
+        #     qt_icu_workdir: "",
+        #   }
+        # - {
+        #     name: "Ubuntu 22.04 GCC", os: ubuntu-22.04,
+        #     cc: "gcc", cxx: "g++",
+        #     environment_script: "",
+        #     qt_version: "6.5.3",
+        #     url_os: "linux_x64",
+        #     qt_repo_path: "qt6_653",
+        #     qt_arch_suffix: "gcc_64",
+        #     qt_dir_prefix: "6.5.3/gcc_64",
+        #     qt_pkg_suffix: "-Linux-RHEL_8_4-GCC-Linux-RHEL_8_4-X86_64",
+        #     qt_addon_infix: "",
+        #     qt_icu_suffix: "Rhel7.2-x64",
+        #     qt_icu_workdir: "qt6",
+        #   }
+        # - {
+        #     name: "macOS Clang", os: macos-latest,
+        #     cc: "clang", cxx: "clang++",
+        #     environment_script: "",
+        #     qt_version: "6.5.3",
+        #     url_os: "mac_x64",
+        #     qt_repo_path: "qt6_653",
+        #     qt_arch_suffix: "clang_64",
+        #     qt_dir_prefix: "6.5.3/macos",
+        #     qt_pkg_suffix: "-MacOS-MacOS_12-Clang-MacOS-MacOS_12-X86_64-ARM64",
+        #     qt_addon_infix: "",
+        #     qt_icu_suffix: "",
+        #     qt_icu_workdir: "",
+        #   }
+        # ── Qt 6.8.3 ──
+        - {
+            name: "Windows MSVC 2022", os: windows-latest,
+            cc: "cl", cxx: "cl",
+            environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat",
+            qt_version: "6.8.3",
+            url_os: "windows_x86",
+            qt_repo_path: "qt6_683/qt6_683",
+            qt_arch_suffix: "win64_msvc2022_64",
+            qt_dir_prefix: "",
+            qt_pkg_suffix: "-Windows-Windows_11_23H2-MSVC2022-Windows-Windows_11_23H2-X86_64",
+            qt_addon_infix: "addons.",
+            qt_icu_suffix: "",
+            qt_icu_workdir: "",
+          }
+        - {
+            name: "Ubuntu 22.04 GCC", os: ubuntu-22.04,
+            cc: "gcc", cxx: "g++",
+            environment_script: "",
+            qt_version: "6.8.3",
+            url_os: "linux_x64",
+            qt_repo_path: "qt6_683/qt6_683",
+            qt_arch_suffix: "linux_gcc_64",
+            qt_dir_prefix: "",
+            qt_pkg_suffix: "-Linux-RHEL_8_10-GCC-Linux-RHEL_8_10-X86_64",
+            qt_addon_infix: "addons.",
+            qt_icu_suffix: "Rhel8.6-x86_64",
+            qt_icu_workdir: "qt6/lib",
+          }
+        - {
+            name: "macOS Clang", os: macos-latest,
+            cc: "clang", cxx: "clang++",
+            environment_script: "",
+            qt_version: "6.8.3",
+            url_os: "mac_x64",
+            qt_repo_path: "qt6_683/qt6_683",
+            qt_arch_suffix: "clang_64",
+            qt_dir_prefix: "",
+            qt_pkg_suffix: "-MacOS-MacOS_14-Clang-MacOS-MacOS_14-X86_64-ARM64",
+            qt_addon_infix: "addons.",
+            qt_icu_suffix: "",
+            qt_icu_workdir: "",
+          }
+        # ── Qt 6.10.2 ──
+        - {
+            name: "Windows MSVC 2022", os: windows-latest,
+            cc: "cl", cxx: "cl",
+            environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat",
+            qt_version: "6.10.2",
+            url_os: "windows_x86",
+            qt_repo_path: "qt6_6102/qt6_6102",
+            qt_arch_suffix: "win64_msvc2022_64",
+            qt_dir_prefix: "",
+            qt_pkg_suffix: "-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64",
+            qt_addon_infix: "addons.",
+            qt_icu_suffix: "",
+            qt_icu_workdir: "",
+          }
+        - {
+            name: "Ubuntu 22.04 GCC", os: ubuntu-22.04,
+            cc: "gcc", cxx: "g++",
+            environment_script: "",
+            qt_version: "6.10.2",
+            url_os: "linux_x64",
+            qt_repo_path: "qt6_6102/qt6_6102",
+            qt_arch_suffix: "linux_gcc_64",
+            qt_dir_prefix: "",
+            qt_pkg_suffix: "-Linux-RHEL_9_4-GCC-Linux-RHEL_9_4-X86_64",
+            qt_addon_infix: "addons.",
+            qt_icu_suffix: "Rhel8.6-x86_64",
+            qt_icu_workdir: "qt6/lib",
+          }
+        - {
+            name: "macOS Clang", os: macos-latest,
+            cc: "clang", cxx: "clang++",
+            environment_script: "",
+            qt_version: "6.10.2",
+            url_os: "mac_x64",
+            qt_repo_path: "qt6_6102/qt6_6102",
+            qt_arch_suffix: "clang_64",
+            qt_dir_prefix: "",
+            qt_pkg_suffix: "-MacOS-MacOS_15-Clang-MacOS-MacOS_15-X86_64-ARM64",
+            qt_addon_infix: "addons.",
+            qt_icu_suffix: "",
+            qt_icu_workdir: "",
+          }
+
+    steps:
+    - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+
+    - name: Download Ninja and CMake
+      uses: lukka/get-cmake@2ecc21724e5215b0e567bc399a2602d2ecb48541
+      with:
+        cmakeVersion: ${{ env.CMAKE_VERSION }}
+        ninjaVersion: ${{ env.NINJA_VERSION }}
+
+    - name: Install dependencies
+      shell: cmake -P {0}
+      run: |
+        if ("${{ runner.os }}" STREQUAL "Linux")
+          execute_process(
+            COMMAND sudo apt update
+          )
+          execute_process(
+            COMMAND sudo apt install
+              libgl1-mesa-dev libgtest-dev libgmock-dev
+              libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-render0
+              libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 libxcb-xkb1 libxkbcommon-x11-0 xvfb
+            RESULT_VARIABLE result
+          )
+          if (NOT result EQUAL 0)
+            message(FATAL_ERROR "Failed to install dependencies")
+          endif()
+        endif()
+
+    - name: Download Qt
+      id: qt
+      shell: cmake -P {0}
+      run: |
+        set(qt_version "${{ matrix.qt_version }}")
+        string(REPLACE "." "" qt_version_dotless "${qt_version}")
+
+        set(qt_base_url "https://download.qt.io/online/qtsdkrepository/${{ matrix.url_os }}/desktop/${{ matrix.qt_repo_path }}")
+        file(DOWNLOAD "${qt_base_url}/Updates.xml" ./Updates.xml SHOW_PROGRESS)
+
+        file(READ ./Updates.xml updates_xml)
+        string(REGEX MATCH "<Name>qt.qt6.*<Version>([0-9+-.]+)</Version>" updates_xml_output "${updates_xml}")
+        set(qt_package_version ${CMAKE_MATCH_1})
+
+        file(MAKE_DIRECTORY qt6)
+
+        set(qt_dir_suffix "${{ matrix.qt_dir_prefix }}")
+        if (qt_dir_suffix)
+          file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/qt6/${qt_dir_suffix}" qt_dir)
+        else()
+          file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/qt6" qt_dir)
+        endif()
+        file(APPEND "$ENV{GITHUB_OUTPUT}" "qt_dir=${qt_dir}\n")
+
+        message("Downloading Qt to ${qt_dir}")
+        function(downloadAndExtract url archive)
+          message("Downloading ${url}")
+          file(DOWNLOAD "${url}" ./${archive} SHOW_PROGRESS)
+          execute_process(COMMAND ${CMAKE_COMMAND} -E tar xvf ../${archive} WORKING_DIRECTORY qt6)
+        endfunction()
+
+        foreach(package qtbase qtdeclarative qttools qtsvg)
+          downloadAndExtract(
+            "${qt_base_url}/qt.qt6.${qt_version_dotless}.${{ matrix.qt_arch_suffix }}/${qt_package_version}${package}${{ matrix.qt_pkg_suffix }}.7z"
+            ${package}.7z
+          )
+        endforeach()
+
+        foreach(package qt5compat qtshadertools)
+          downloadAndExtract(
+            "${qt_base_url}/qt.qt6.${qt_version_dotless}.${{ matrix.qt_addon_infix }}${package}.${{ matrix.qt_arch_suffix }}/${qt_package_version}${package}${{ matrix.qt_pkg_suffix }}.7z"
+            ${package}.7z
+          )
+        endforeach()
+
+        # uic and Qt libs depend on libicu*.so
+        if (NOT "${{ matrix.qt_icu_suffix }}" STREQUAL "")
+          set(icu_archive "$ENV{GITHUB_WORKSPACE}/icu.7z")
+          set(icu_workdir "$ENV{GITHUB_WORKSPACE}/${{ matrix.qt_icu_workdir }}")
+          message("Downloading ICU to ${icu_archive}, extracting to ${icu_workdir}")
+          file(DOWNLOAD
+            "${qt_base_url}/qt.qt6.${qt_version_dotless}.${{ matrix.qt_arch_suffix }}/${qt_package_version}icu-linux-${{ matrix.qt_icu_suffix }}.7z"
+            "${icu_archive}"
+            SHOW_PROGRESS
+          )
+          file(MAKE_DIRECTORY "${icu_workdir}")
+          execute_process(COMMAND ${CMAKE_COMMAND} -E tar xvf "${icu_archive}" WORKING_DIRECTORY "${icu_workdir}")
+        endif()
+
+
+    - name: Build
+      shell: cmake -P {0}
+      run: |
+        set(ENV{CC} ${{ matrix.cc }})
+        set(ENV{CXX} ${{ matrix.cxx }})
+        set(ENV{NINJA_STATUS} "[%f/%t %o/sec] ")
+
+        if ("${{ runner.os }}" STREQUAL "Windows" AND NOT "x${{ matrix.environment_script }}" STREQUAL "x")
+          execute_process(
+            COMMAND "${{ matrix.environment_script }}" && set
+            OUTPUT_FILE environment_script_output.txt
+          )
+          file(STRINGS environment_script_output.txt output_lines)
+          foreach(line IN LISTS output_lines)
+            if (line MATCHES "^([a-zA-Z0-9_-]+)=(.*)$")
+              set(ENV{${CMAKE_MATCH_1}} "${CMAKE_MATCH_2}")
+            endif()
+          endforeach()
+        endif()
+
+        if ("${{ runner.os }}" STREQUAL "macOS")
+          set(ENV{CMAKE_OSX_ARCHITECTURES} "x86_64;arm64")
+        endif()
+
+        # Configure
+        set(linker_flags "")
+        if ("${{ runner.os }}" STREQUAL "Linux")
+          set(linker_flags "-Wl,-rpath-link,${{ steps.qt.outputs.qt_dir }}/lib")
+        endif()
+
+        execute_process(
+          COMMAND cmake
+            -S .
+            -B build
+            -G Ninja
+            -DCMAKE_BUILD_TYPE=Release
+            "-DCMAKE_PREFIX_PATH=${{ steps.qt.outputs.qt_dir }}"
+            "-DCMAKE_EXE_LINKER_FLAGS=${linker_flags}"
+            -DLLMCORE_BUILD_TESTS=ON
+            -DLLMCORE_BUILD_EXAMPLES=OFF
+          RESULT_VARIABLE result
+        )
+        if (NOT result EQUAL 0)
+          message(FATAL_ERROR "CMake configure failed")
+        endif()
+
+        # Build
+        execute_process(
+          COMMAND cmake --build build
+          RESULT_VARIABLE result
+        )
+        if (NOT result EQUAL 0)
+          message(FATAL_ERROR "Build failed")
+        endif()
+
+    - name: Run unit tests
+      if: startsWith(matrix.os, 'ubuntu')
+      run: |
+        export LD_LIBRARY_PATH=${{ steps.qt.outputs.qt_dir }}/lib:$LD_LIBRARY_PATH
+        xvfb-run ./build/tests/LLMCoreUnitTests
+
+  release:
+    name: Create Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631
+      with:
+        draft: true

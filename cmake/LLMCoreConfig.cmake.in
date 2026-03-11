@@ -1,0 +1,9 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(Qt6 COMPONENTS Core Network)
+
+include("${CMAKE_CURRENT_LIST_DIR}/LLMCoreTargets.cmake")
+
+check_required_components(LLMCore)

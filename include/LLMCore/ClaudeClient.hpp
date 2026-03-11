@@ -1,0 +1,53 @@
+// Copyright (C) 2026 Petr Mironychev
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <QFuture>
+#include <QHash>
+#include <QJsonObject>
+#include <QUrl>
+
+#include <LLMCore/BaseClient.hpp>
+
+namespace LLMCore {
+
+class ClaudeMessage;
+
+class LLMCORE_EXPORT ClaudeClient : public BaseClient
+{
+    Q_OBJECT
+public:
+    explicit ClaudeClient(
+        const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
+
+    RequestID sendMessage(
+        const QJsonObject &payload,
+        RequestCallbacks callbacks = {},
+        RequestMode mode = RequestMode::Streaming) override;
+    RequestID ask(
+        const QString &prompt,
+        RequestCallbacks callbacks = {},
+        RequestMode mode = RequestMode::Streaming) override;
+    ToolSchemaFormat toolSchemaFormat() const override { return ToolSchemaFormat::Claude; }
+
+    QFuture<QList<QString>> listModels() override;
+
+protected:
+    QNetworkRequest prepareNetworkRequest(const QUrl &url) const override;
+    void processData(const RequestID &id, const QByteArray &data) override;
+    void processBufferedResponse(const RequestID &id, const QByteArray &data) override;
+    BaseMessage *messageForRequest(const RequestID &id) const override;
+    void cleanupDerivedData(const RequestID &id) override;
+    QJsonObject buildContinuationPayload(
+        const QJsonObject &originalPayload,
+        BaseMessage *message,
+        const QHash<QString, QString> &toolResults) override;
+
+private:
+    void processStreamEvent(const RequestID &id, const QJsonObject &event);
+
+    QHash<RequestID, ClaudeMessage *> m_messages;
+};
+
+} // namespace LLMCore
