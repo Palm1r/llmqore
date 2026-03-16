@@ -5,6 +5,8 @@
 
 Qt/C++ library for integrating LLM providers into Qt applications. Provides a unified streaming API across multiple backends with built-in tool calling support.
 
+> **Note:** The library does not cover the full API surface of each provider. Missing features will be added over time.
+
 ## Supported Providers
 
 | Provider | Client class | Streaming | Tools | Thinking |
