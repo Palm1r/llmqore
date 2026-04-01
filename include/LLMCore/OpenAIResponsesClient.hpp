@@ -18,6 +18,7 @@ class LLMCORE_EXPORT OpenAIResponsesClient : public BaseClient
 {
     Q_OBJECT
 public:
+    explicit OpenAIResponsesClient(QObject *parent = nullptr);
     explicit OpenAIResponsesClient(
         const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
 

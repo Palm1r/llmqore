@@ -15,6 +15,10 @@
 
 namespace LLMCore {
 
+ClaudeClient::ClaudeClient(QObject *parent)
+    : ClaudeClient({}, {}, {}, parent)
+{}
+
 ClaudeClient::ClaudeClient(
     const QString &url, const QString &apiKey, const QString &model, QObject *parent)
     : BaseClient(url, apiKey, model, parent)

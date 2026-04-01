@@ -74,6 +74,7 @@ class LLMCORE_EXPORT BaseClient : public QObject
 {
     Q_OBJECT
 public:
+    explicit BaseClient(QObject *parent = nullptr);
     explicit BaseClient(
         const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
     ~BaseClient() override;

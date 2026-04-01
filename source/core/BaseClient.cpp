@@ -12,6 +12,10 @@
 
 namespace LLMCore {
 
+BaseClient::BaseClient(QObject *parent)
+    : LLMCore::BaseClient({}, {}, {}, parent)
+{}
+
 BaseClient::BaseClient(
     const QString &url, const QString &apiKey, const QString &model, QObject *parent)
     : QObject(parent)

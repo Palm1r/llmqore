@@ -18,6 +18,7 @@ class LLMCORE_EXPORT ClaudeClient : public BaseClient
 {
     Q_OBJECT
 public:
+    explicit ClaudeClient(QObject *parent = nullptr);
     explicit ClaudeClient(
         const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
 

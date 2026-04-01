@@ -22,12 +22,34 @@ TEST(ClaudeClientConstructor, Basic)
     EXPECT_NE(client.tools(), nullptr);
 }
 
+TEST(ClaudeClientConstructor, Default)
+{
+    ClaudeClient client;
+
+    EXPECT_EQ(client.toolSchemaFormat(), ToolSchemaFormat::Claude);
+    EXPECT_NE(client.tools(), nullptr);
+    EXPECT_TRUE(client.url().isEmpty());
+    EXPECT_TRUE(client.apiKey().isEmpty());
+    EXPECT_TRUE(client.model().isEmpty());
+}
+
 TEST(OpenAIClientConstructor, Basic)
 {
     OpenAIClient client("https://api.openai.com", "sk-test", "gpt-4");
 
     EXPECT_EQ(client.toolSchemaFormat(), ToolSchemaFormat::OpenAI);
     EXPECT_NE(client.tools(), nullptr);
+}
+
+TEST(OpenAIClientConstructor, Default)
+{
+    OpenAIClient client;
+
+    EXPECT_EQ(client.toolSchemaFormat(), ToolSchemaFormat::OpenAI);
+    EXPECT_NE(client.tools(), nullptr);
+    EXPECT_TRUE(client.url().isEmpty());
+    EXPECT_TRUE(client.apiKey().isEmpty());
+    EXPECT_TRUE(client.model().isEmpty());
 }
 
 TEST(OpenAIResponsesClientConstructor, Basic)
@@ -38,12 +60,34 @@ TEST(OpenAIResponsesClientConstructor, Basic)
     EXPECT_NE(client.tools(), nullptr);
 }
 
+TEST(OpenAIResponsesClientConstructor, Default)
+{
+    OpenAIResponsesClient client;
+
+    EXPECT_EQ(client.toolSchemaFormat(), ToolSchemaFormat::OpenAIResponses);
+    EXPECT_NE(client.tools(), nullptr);
+    EXPECT_TRUE(client.url().isEmpty());
+    EXPECT_TRUE(client.apiKey().isEmpty());
+    EXPECT_TRUE(client.model().isEmpty());
+}
+
 TEST(OllamaClientConstructor, Basic)
 {
     OllamaClient client("http://localhost:11434", "", "llama3");
 
     EXPECT_EQ(client.toolSchemaFormat(), ToolSchemaFormat::Ollama);
     EXPECT_NE(client.tools(), nullptr);
+}
+
+TEST(OllamaClientConstructor, Default)
+{
+    OllamaClient client;
+
+    EXPECT_EQ(client.toolSchemaFormat(), ToolSchemaFormat::Ollama);
+    EXPECT_NE(client.tools(), nullptr);
+    EXPECT_TRUE(client.url().isEmpty());
+    EXPECT_TRUE(client.apiKey().isEmpty());
+    EXPECT_TRUE(client.model().isEmpty());
 }
 
 TEST(GoogleAIClientConstructor, Basic)
@@ -55,10 +99,32 @@ TEST(GoogleAIClientConstructor, Basic)
     EXPECT_NE(client.tools(), nullptr);
 }
 
+TEST(GoogleAIClientConstructor, Default)
+{
+    GoogleAIClient client;
+
+    EXPECT_EQ(client.toolSchemaFormat(), ToolSchemaFormat::Google);
+    EXPECT_NE(client.tools(), nullptr);
+    EXPECT_TRUE(client.url().isEmpty());
+    EXPECT_TRUE(client.apiKey().isEmpty());
+    EXPECT_TRUE(client.model().isEmpty());
+}
+
 TEST(LlamaCppClientConstructor, Basic)
 {
     LlamaCppClient client("http://localhost:8080", "", "my-model");
 
     EXPECT_EQ(client.toolSchemaFormat(), ToolSchemaFormat::OpenAI);
     EXPECT_NE(client.tools(), nullptr);
+}
+
+TEST(LlamaCppClientConstructor, Default)
+{
+    LlamaCppClient client;
+
+    EXPECT_EQ(client.toolSchemaFormat(), ToolSchemaFormat::OpenAI);
+    EXPECT_NE(client.tools(), nullptr);
+    EXPECT_TRUE(client.url().isEmpty());
+    EXPECT_TRUE(client.apiKey().isEmpty());
+    EXPECT_TRUE(client.model().isEmpty());
 }

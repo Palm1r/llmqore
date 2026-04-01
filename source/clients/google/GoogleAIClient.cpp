@@ -15,6 +15,10 @@
 
 namespace LLMCore {
 
+GoogleAIClient::GoogleAIClient(QObject *parent)
+    : GoogleAIClient({}, {}, {}, parent)
+{}
+
 GoogleAIClient::GoogleAIClient(
     const QString &url, const QString &apiKey, const QString &model, QObject *parent)
     : BaseClient(url, apiKey, model, parent)

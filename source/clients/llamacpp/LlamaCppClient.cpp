@@ -14,6 +14,10 @@
 
 namespace LLMCore {
 
+LlamaCppClient::LlamaCppClient(QObject *parent)
+    : LlamaCppClient({}, {}, {}, parent)
+{}
+
 LlamaCppClient::LlamaCppClient(
     const QString &url, const QString &apiKey, const QString &model, QObject *parent)
     : BaseClient(url, apiKey, model, parent)

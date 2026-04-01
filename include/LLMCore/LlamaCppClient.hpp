@@ -19,6 +19,7 @@ class LLMCORE_EXPORT LlamaCppClient : public BaseClient
 {
     Q_OBJECT
 public:
+    explicit LlamaCppClient(QObject *parent = nullptr);
     explicit LlamaCppClient(
         const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
 
