@@ -14,6 +14,10 @@
 
 namespace LLMCore {
 
+OpenAIClient::OpenAIClient(QObject *parent)
+    : OpenAIClient({}, {}, {}, parent)
+{}
+
 OpenAIClient::OpenAIClient(
     const QString &url, const QString &apiKey, const QString &model, QObject *parent)
     : BaseClient(url, apiKey, model, parent)

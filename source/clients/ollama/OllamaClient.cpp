@@ -14,6 +14,10 @@
 
 namespace LLMCore {
 
+OllamaClient::OllamaClient(QObject *parent)
+    : OllamaClient({}, {}, {}, parent)
+{}
+
 OllamaClient::OllamaClient(
     const QString &url, const QString &apiKey, const QString &model, QObject *parent)
     : BaseClient(url, apiKey, model, parent)

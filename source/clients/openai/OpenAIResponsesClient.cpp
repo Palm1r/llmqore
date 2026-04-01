@@ -14,6 +14,10 @@
 
 namespace LLMCore {
 
+OpenAIResponsesClient::OpenAIResponsesClient(QObject *parent)
+    : OpenAIResponsesClient({}, {}, {}, parent)
+{}
+
 OpenAIResponsesClient::OpenAIResponsesClient(
     const QString &url, const QString &apiKey, const QString &model, QObject *parent)
     : BaseClient(url, apiKey, model, parent)
