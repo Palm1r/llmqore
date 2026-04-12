@@ -9,8 +9,7 @@
 #include "OpenAIMessage.hpp"
 #include <LLMCore/HttpClient.hpp>
 #include <LLMCore/Log.hpp>
-#include <LLMCore/SSEBuffer.hpp>
-#include <LLMCore/SSEUtils.hpp>
+#include <LLMCore/SSEParser.hpp>
 
 namespace LLMCore {
 
@@ -64,11 +63,16 @@ QFuture<QList<QString>> OpenAIClient::listModels()
     QNetworkRequest request = prepareNetworkRequest(url);
 
     return httpClient()
-        ->get(request)
-        .then([](const QByteArray &data) {
+        ->send(request, QByteArrayView("GET"))
+        .then(this, [](const HttpResponse &response) {
             QList<QString> models;
-            QJsonObject json = QJsonDocument::fromJson(data).object();
+            if (!response.isSuccess()) {
+                qCDebug(llmOpenAILog).noquote()
+                    << QString("Error fetching models: HTTP %1").arg(response.statusCode);
+                return models;
+            }
 
+            QJsonObject json = QJsonDocument::fromJson(response.body).object();
             if (json.contains("data")) {
                 QJsonArray modelArray = json["data"].toArray();
                 for (const QJsonValue &value : modelArray) {
@@ -79,10 +83,30 @@ QFuture<QList<QString>> OpenAIClient::listModels()
             }
             return models;
         })
-        .onFailed([](const std::exception &e) {
+        .onFailed(this, [](const std::exception &e) {
             qCDebug(llmOpenAILog).noquote() << QString("Error fetching models: %1").arg(e.what());
             return QList<QString>{};
         });
+}
+
+QString OpenAIClient::parseHttpError(const HttpResponse &response) const
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(response.body);
+    if (doc.isObject()) {
+        const QJsonObject error = doc.object().value("error").toObject();
+        const QString message = error.value("message").toString();
+        const QString type = error.value("type").toString();
+        const QString code = error.value("code").toString();
+        if (!message.isEmpty()) {
+            QString out = QString("HTTP %1: %2").arg(response.statusCode).arg(message);
+            if (!type.isEmpty())
+                out += QString(" (type: %1)").arg(type);
+            if (!code.isEmpty())
+                out += QString(" (code: %1)").arg(code);
+            return out;
+        }
+    }
+    return BaseClient::parseHttpError(response);
 }
 
 void OpenAIClient::processData(const RequestID &id, const QByteArray &data)
@@ -90,16 +114,13 @@ void OpenAIClient::processData(const RequestID &id, const QByteArray &data)
     if (!hasRequest(id))
         return;
 
-    QStringList lines = requestSSEBuffer(id).processData(data);
-
-    for (const QString &line : lines) {
-        if (line.trimmed().isEmpty() || line == "data: [DONE]")
+    const QList<SSEEvent> events = requestSSEParser(id).append(data);
+    for (const SSEEvent &ev : events) {
+        if (ev.data.isEmpty() || ev.data == "[DONE]")
             continue;
-
-        QJsonObject chunk = SSEUtils::parseEventLine(line);
+        const QJsonObject chunk = QJsonDocument::fromJson(ev.data).object();
         if (chunk.isEmpty())
             continue;
-
         if (chunk.contains("choices"))
             processStreamChunk(id, chunk);
     }
@@ -119,7 +140,7 @@ void OpenAIClient::cleanupDerivedData(const RequestID &id)
 QJsonObject OpenAIClient::buildContinuationPayload(
     const QJsonObject &originalPayload,
     BaseMessage *message,
-    const QHash<QString, QString> &toolResults)
+    const QHash<QString, ToolResult> &toolResults)
 {
     auto *openaiMsg = qobject_cast<OpenAIMessage *>(message);
     if (!openaiMsg)

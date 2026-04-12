@@ -10,8 +10,7 @@
 #include "GoogleMessage.hpp"
 #include <LLMCore/HttpClient.hpp>
 #include <LLMCore/Log.hpp>
-#include <LLMCore/SSEBuffer.hpp>
-#include <LLMCore/SSEUtils.hpp>
+#include <LLMCore/SSEParser.hpp>
 
 namespace LLMCore {
 
@@ -73,11 +72,16 @@ QFuture<QList<QString>> GoogleAIClient::listModels()
     QNetworkRequest request = prepareNetworkRequest(url);
 
     return httpClient()
-        ->get(request)
-        .then([](const QByteArray &data) {
+        ->send(request, QByteArrayView("GET"))
+        .then(this, [](const HttpResponse &response) {
             QList<QString> models;
-            QJsonObject json = QJsonDocument::fromJson(data).object();
+            if (!response.isSuccess()) {
+                qCDebug(llmGoogleLog).noquote()
+                    << QString("Error fetching models: HTTP %1").arg(response.statusCode);
+                return models;
+            }
 
+            QJsonObject json = QJsonDocument::fromJson(response.body).object();
             if (json.contains("models")) {
                 QJsonArray modelArray = json["models"].toArray();
                 for (const QJsonValue &value : modelArray) {
@@ -92,10 +96,30 @@ QFuture<QList<QString>> GoogleAIClient::listModels()
             }
             return models;
         })
-        .onFailed([](const std::exception &e) {
+        .onFailed(this, [](const std::exception &e) {
             qCDebug(llmGoogleLog).noquote() << QString("Error fetching models: %1").arg(e.what());
             return QList<QString>{};
         });
+}
+
+QString GoogleAIClient::parseHttpError(const HttpResponse &response) const
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(response.body);
+    if (doc.isObject()) {
+        const QJsonObject error = doc.object().value("error").toObject();
+        const QString message = error.value("message").toString();
+        const int code = error.value("code").toInt();
+        const QString status = error.value("status").toString();
+        if (!message.isEmpty()) {
+            QString out = QString("HTTP %1: %2").arg(response.statusCode).arg(message);
+            if (code != 0)
+                out += QString(" (code: %1)").arg(code);
+            if (!status.isEmpty())
+                out += QString(" (status: %1)").arg(status);
+            return out;
+        }
+    }
+    return BaseClient::parseHttpError(response);
 }
 
 void GoogleAIClient::processData(const RequestID &id, const QByteArray &data)
@@ -103,7 +127,6 @@ void GoogleAIClient::processData(const RequestID &id, const QByteArray &data)
     if (data.isEmpty())
         return;
 
-    // Check for top-level API error (non-SSE JSON response)
     QJsonDocument doc = QJsonDocument::fromJson(data);
     if (!doc.isNull() && doc.isObject()) {
         QJsonObject obj = doc.object();
@@ -123,16 +146,13 @@ void GoogleAIClient::processData(const RequestID &id, const QByteArray &data)
     if (!hasRequest(id))
         return;
 
-    QStringList lines = requestSSEBuffer(id).processData(data);
-
-    for (const QString &line : lines) {
-        if (line.trimmed().isEmpty())
+    const QList<SSEEvent> events = requestSSEParser(id).append(data);
+    for (const SSEEvent &ev : events) {
+        if (ev.data.isEmpty() || ev.data == "[DONE]")
             continue;
-
-        QJsonObject chunk = SSEUtils::parseEventLine(line);
+        const QJsonObject chunk = QJsonDocument::fromJson(ev.data).object();
         if (chunk.isEmpty())
             continue;
-
         processStreamChunk(id, chunk);
     }
 }
@@ -262,7 +282,7 @@ void GoogleAIClient::cleanupDerivedData(const RequestID &id)
 QJsonObject GoogleAIClient::buildContinuationPayload(
     const QJsonObject &originalPayload,
     BaseMessage *message,
-    const QHash<QString, QString> &toolResults)
+    const QHash<QString, ToolResult> &toolResults)
 {
     auto *googleMsg = qobject_cast<GoogleMessage *>(message);
     if (!googleMsg)

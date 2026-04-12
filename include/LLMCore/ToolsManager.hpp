@@ -6,9 +6,11 @@
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QMap>
 #include <QObject>
 
 #include <LLMCore/BaseTool.hpp>
+#include <LLMCore/ToolResult.hpp>
 #include <LLMCore/ToolSchemaFormat.hpp>
 
 namespace LLMCore {
@@ -20,7 +22,8 @@ struct PendingTool
     QString id;
     QString name;
     QJsonObject input;
-    QString result;
+    ToolResult result;
+    QString resultText;
     bool complete = false;
 };
 
@@ -64,16 +67,21 @@ signals:
         const QString &toolId,
         const QString &toolName,
         const QString &result);
-    void toolExecutionComplete(const QString &requestId, const QHash<QString, QString> &toolResults);
+    void toolExecutionComplete(
+        const QString &requestId, const QHash<QString, ToolResult> &toolResults);
 
 private slots:
-    void onToolFinished(
-        const QString &requestId, const QString &toolId, const QString &result, bool success);
+    void onToolCompleted(
+        const QString &requestId, const QString &toolId, const ToolResult &result);
+    void onToolErrored(
+        const QString &requestId, const QString &toolId, const QString &errorText);
 
 private:
     void initConnections();
     void executeNextTool(const QString &requestId);
-    QHash<QString, QString> getToolResults(const QString &requestId) const;
+    void finalizePendingTool(
+        const QString &requestId, const QString &toolId, const ToolResult &rich, bool success);
+    QHash<QString, ToolResult> getToolResults(const QString &requestId) const;
     QJsonArray buildToolsDefinitions() const;
     QJsonObject wrapDefinition(const BaseTool *tool) const;
 
@@ -82,7 +90,9 @@ private:
     QHash<QString, ToolQueue> m_toolQueues;
     int m_toolExecutionDelayMs = 0;
 
-    QHash<QString, BaseTool *> m_tools;
+    // QMap for deterministic alphabetical iteration order — important for
+    // reproducible test output and stable round-trips on the wire.
+    QMap<QString, BaseTool *> m_tools;
 };
 
 } // namespace LLMCore

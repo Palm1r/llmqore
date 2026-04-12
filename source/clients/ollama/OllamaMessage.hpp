@@ -4,6 +4,7 @@
 #pragma once
 
 #include <LLMCore/BaseMessage.hpp>
+#include <LLMCore/ToolResult.hpp>
 
 namespace LLMCore {
 
@@ -20,7 +21,7 @@ public:
     void handleDone(bool done);
 
     QJsonObject toProviderFormat() const;
-    QJsonArray createToolResultMessages(const QHash<QString, QString> &toolResults) const;
+    QJsonArray createToolResultMessages(const QHash<QString, ToolResult> &toolResults) const;
 
     void startNewContinuation() override;
 

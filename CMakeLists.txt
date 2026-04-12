@@ -8,6 +8,12 @@ project(LLMCore
 
 find_package(Qt6 REQUIRED COMPONENTS Core Network Concurrent)
 
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/LLMCore/Version.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/include/LLMCore/Version.hpp
+    @ONLY
+)
+
 add_library(LLMCore)
 
 add_library(LLMCore::LLMCore ALIAS LLMCore)
@@ -18,6 +24,8 @@ set_target_properties(LLMCore PROPERTIES
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR}
 )
 
 add_subdirectory(source)
@@ -25,6 +33,7 @@ add_subdirectory(source)
 target_include_directories(LLMCore
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/source
@@ -65,6 +74,11 @@ if(LLMCORE_INSTALL)
 
     install(DIRECTORY include/LLMCore
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        PATTERN "*.in" EXCLUDE
+    )
+
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/LLMCore/Version.hpp
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/LLMCore
     )
 
     install(EXPORT LLMCoreTargets

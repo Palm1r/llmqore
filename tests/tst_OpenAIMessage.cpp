@@ -207,9 +207,9 @@ TEST(OpenAIMessage, CreateToolResultMessages)
     msg.handleToolCallStart(0, "call_1", "read");
     msg.handleToolCallStart(1, "call_2", "write");
 
-    QHash<QString, QString> results;
-    results["call_1"] = "file content";
-    results["call_2"] = "write ok";
+    QHash<QString, ToolResult> results;
+    results["call_1"] = ToolResult::text("file content");
+    results["call_2"] = ToolResult::text("write ok");
 
     QJsonArray toolResults = msg.createToolResultMessages(results);
     EXPECT_EQ(toolResults.size(), 2);

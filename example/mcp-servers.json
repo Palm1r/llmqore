@@ -1,0 +1,15 @@
+{
+  "_comment": "MCP servers loaded by the chat example on startup. Each entry is either stdio (uses 'command' and optional 'args'/'env'/'cwd') or http (uses 'url' and optional 'spec'). Relative 'command' paths are resolved next to the example-chat executable. Remove or comment out entries you don't have running.",
+
+  "mcpServers": {
+    "llmcore-host": {
+      "command": "example-mcp-server.exe",
+      "args": []
+    },
+
+    "qtcreator": {
+      "url": "http://127.0.0.1:3001/sse",
+      "spec": "2024-11-05"
+    }
+  }
+}

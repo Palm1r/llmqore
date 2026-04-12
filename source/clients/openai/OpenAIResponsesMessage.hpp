@@ -4,6 +4,7 @@
 #pragma once
 
 #include <LLMCore/BaseMessage.hpp>
+#include <LLMCore/ToolResult.hpp>
 
 namespace LLMCore {
 
@@ -23,7 +24,7 @@ public:
     void handleStatus(const QString &status);
 
     QList<QJsonObject> toItemsFormat() const;
-    QJsonArray createToolResultItems(const QHash<QString, QString> &toolResults) const;
+    QJsonArray createToolResultItems(const QHash<QString, ToolResult> &toolResults) const;
 
     QString accumulatedText() const;
 

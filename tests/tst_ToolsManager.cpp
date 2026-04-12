@@ -10,6 +10,7 @@
 #include <QtConcurrent/QtConcurrent>
 
 #include <LLMCore/BaseTool.hpp>
+#include <LLMCore/ToolResult.hpp>
 #include <LLMCore/ToolsManager.hpp>
 
 using namespace LLMCore;
@@ -30,10 +31,10 @@ public:
 
     QJsonObject parametersSchema() const override { return QJsonObject{{"type", "object"}}; }
 
-    QFuture<QString> executeAsync(const QJsonObject &input) override
+    QFuture<ToolResult> executeAsync(const QJsonObject &input) override
     {
         Q_UNUSED(input)
-        return QtConcurrent::run([]() -> QString { return "fake result"; });
+        return QtConcurrent::run([]() -> ToolResult { return ToolResult::text("fake result"); });
     }
 
 private:
@@ -172,8 +173,9 @@ TEST_F(ToolsManagerTest, ExecuteToolCall_UnknownTool)
 
     // Signal fires synchronously for unknown tools
     EXPECT_EQ(completeSpy.count(), 1);
-    auto results = completeSpy[0][1].value<QHash<QString, QString>>();
-    EXPECT_TRUE(results["tool-1"].contains("Error"));
+    auto results = completeSpy[0][1].value<QHash<QString, ToolResult>>();
+    EXPECT_TRUE(results["tool-1"].isError);
+    EXPECT_TRUE(results["tool-1"].asText().contains("Error"));
 }
 
 TEST_F(ToolsManagerTest, ExecuteToolCall_Success)
@@ -191,8 +193,9 @@ TEST_F(ToolsManagerTest, ExecuteToolCall_Success)
     EXPECT_EQ(startSpy.count(), 1);
     EXPECT_EQ(resultSpy.count(), 1);
 
-    auto results = completeSpy[0][1].value<QHash<QString, QString>>();
-    EXPECT_EQ(results["tool-1"], "fake result");
+    auto results = completeSpy[0][1].value<QHash<QString, ToolResult>>();
+    EXPECT_EQ(results["tool-1"].asText(), "fake result");
+    EXPECT_FALSE(results["tool-1"].isError);
 }
 
 TEST_F(ToolsManagerTest, CleanupRequest)

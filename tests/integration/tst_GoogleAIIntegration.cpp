@@ -83,7 +83,9 @@ TEST_F(GoogleAIIntegrationTest, StreamingChunks)
     QJsonObject payload;
     payload["contents"] = QJsonArray{QJsonObject{
         {"role", "user"},
-        {"parts", QJsonArray{QJsonObject{{"text", "Count from 1 to 5, one number per line."}}}}}};
+        {"parts",
+         QJsonArray{QJsonObject{
+             {"text", "Count from 1 to 30, one number per line, no other text."}}}}}};
 
     client->sendMessage(payload, callbacks);
 
@@ -121,6 +123,47 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_EchoTool)
     EXPECT_FALSE(result.failed) << result.diagnostics();
     EXPECT_FALSE(result.toolCalls.isEmpty()) << "Model did not use any tools\n"
                                              << result.diagnostics();
+}
+
+TEST_F(GoogleAIIntegrationTest, ToolUse_ImageReturningTool)
+{
+    // Exercises the Gemini 3-series multimodal function-response path:
+    // a tool returns a ToolResult containing an image content block;
+    // GoogleMessage::createToolResultParts upgrades the wire shape to
+    // emit `functionResponse.parts[].inlineData` for the image.
+    //
+    // Requires a Gemini 3 model (default GOOGLE_MODEL already is).
+    auto client = createClient();
+    auto *imageTool = new ImageReturningTool(client.get());
+    client->tools()->addTool(imageTool);
+
+    TestResult result;
+    QEventLoop loop;
+    auto callbacks = makeLoggingCallbacks(result, loop);
+
+    QJsonObject payload;
+    payload["contents"] = QJsonArray{QJsonObject{
+        {"role", "user"},
+        {"parts",
+         QJsonArray{QJsonObject{
+             {"text",
+              "Call the get_sample_image tool (no arguments), then tell me what "
+              "colour the returned image is. Reply with a single lowercase colour "
+              "word like 'red' or 'blue'."}}}}}};
+    payload["tools"] = client->tools()->getToolsDefinitions();
+
+    client->sendMessage(payload, callbacks);
+
+    waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+
+    ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
+    EXPECT_TRUE(result.completed) << result.diagnostics();
+    EXPECT_FALSE(result.failed) << result.diagnostics();
+    EXPECT_FALSE(result.toolCalls.isEmpty())
+        << "Model did not invoke the image-returning tool\n" << result.diagnostics();
+    // The key invariant is that the multi-turn loop survived a non-text
+    // tool result. The exact colour detection is advisory only.
+    EXPECT_FALSE(result.fullText.isEmpty()) << result.diagnostics();
 }
 
 TEST_F(GoogleAIIntegrationTest, ToolUse_Calculator)

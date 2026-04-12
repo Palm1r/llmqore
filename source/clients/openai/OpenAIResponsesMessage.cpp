@@ -112,19 +112,78 @@ QList<QJsonObject> OpenAIResponsesMessage::toItemsFormat() const
     return items;
 }
 
+namespace {
+
+QJsonObject toResponsesInnerBlock(const ToolContent &block)
+{
+    switch (block.type) {
+    case ToolContent::Text:
+        return QJsonObject{{"type", "input_text"}, {"text", block.text}};
+    case ToolContent::Image: {
+        const QString mime = block.mimeType.isEmpty() ? QStringLiteral("image/png")
+                                                      : block.mimeType;
+        const QString dataUri = QStringLiteral("data:%1;base64,%2")
+                                    .arg(mime, QString::fromUtf8(block.data.toBase64()));
+        return QJsonObject{
+            {"type", "input_image"},
+            {"image_url", dataUri},
+            {"detail", "auto"},
+        };
+    }
+    case ToolContent::Audio:
+        return QJsonObject{
+            {"type", "input_text"},
+            {"text",
+             QString("[audio: %1]")
+                 .arg(block.mimeType.isEmpty() ? QStringLiteral("unknown") : block.mimeType)}};
+    case ToolContent::Resource:
+        if (!block.resourceText.isEmpty())
+            return QJsonObject{{"type", "input_text"}, {"text", block.resourceText}};
+        return QJsonObject{
+            {"type", "input_text"}, {"text", QString("[resource: %1]").arg(block.uri)}};
+    case ToolContent::ResourceLink:
+        return QJsonObject{
+            {"type", "input_text"}, {"text", QString("[resource link: %1]").arg(block.uri)}};
+    }
+    return QJsonObject{{"type", "input_text"}, {"text", QString()}};
+}
+
+bool hasOnlyText(const ToolResult &r)
+{
+    for (const ToolContent &b : r.content) {
+        if (b.type != ToolContent::Text)
+            return false;
+    }
+    return true;
+}
+
+} // namespace
+
 QJsonArray OpenAIResponsesMessage::createToolResultItems(
-    const QHash<QString, QString> &toolResults) const
+    const QHash<QString, ToolResult> &toolResults) const
 {
     QJsonArray items;
 
     for (const auto *toolContent : getCurrentToolUseContent()) {
-        if (toolResults.contains(toolContent->id())) {
-            QJsonObject toolResultItem;
-            toolResultItem["type"] = "function_call_output";
-            toolResultItem["call_id"] = toolContent->id();
-            toolResultItem["output"] = toolResults[toolContent->id()];
-            items.append(toolResultItem);
+        if (!toolResults.contains(toolContent->id()))
+            continue;
+
+        const ToolResult &r = toolResults[toolContent->id()];
+
+        QJsonObject toolResultItem;
+        toolResultItem["type"] = "function_call_output";
+        toolResultItem["call_id"] = toolContent->id();
+
+        if (hasOnlyText(r)) {
+            toolResultItem["output"] = r.asText();
+        } else {
+            QJsonArray blocks;
+            for (const ToolContent &block : r.content)
+                blocks.append(toResponsesInnerBlock(block));
+            toolResultItem["output"] = blocks;
         }
+
+        items.append(toolResultItem);
     }
 
     return items;

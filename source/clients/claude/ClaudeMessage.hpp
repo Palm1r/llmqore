@@ -4,6 +4,7 @@
 #pragma once
 
 #include <LLMCore/BaseMessage.hpp>
+#include <LLMCore/ToolResult.hpp>
 
 namespace LLMCore {
 
@@ -18,8 +19,10 @@ public:
     void handleContentBlockStop(int index);
     void handleStopReason(const QString &stopReason);
 
+    QString stopReason() const override { return m_stopReason; }
+
     QJsonObject toProviderFormat() const;
-    QJsonArray createToolResultsContent(const QHash<QString, QString> &toolResults) const;
+    QJsonArray createToolResultsContent(const QHash<QString, ToolResult> &toolResults) const;
 
     QList<RedactedThinkingContent *> getCurrentRedactedThinkingContent() const;
 

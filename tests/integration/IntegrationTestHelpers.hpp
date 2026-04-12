@@ -15,6 +15,7 @@
 
 #include <LLMCore/BaseClient.hpp>
 #include <LLMCore/BaseTool.hpp>
+#include <LLMCore/ToolResult.hpp>
 #include <LLMCore/ToolsManager.hpp>
 
 namespace LLMCore::IntegrationTest {
@@ -73,10 +74,55 @@ public:
             {"type", "object"}, {"properties", properties}, {"required", QJsonArray{"message"}}};
     }
 
-    QFuture<QString> executeAsync(const QJsonObject &input) override
+    QFuture<ToolResult> executeAsync(const QJsonObject &input) override
     {
-        return QtConcurrent::run(
-            [input]() -> QString { return input.value("message").toString("(no message)"); });
+        return QtConcurrent::run([input]() -> ToolResult {
+            return ToolResult::text(input.value("message").toString("(no message)"));
+        });
+    }
+};
+
+// --- A tool that returns a tiny PNG as a rich tool-result content block ---
+
+// Small, well-formed 10x10 PNG used as the canonical "image from a tool"
+// payload in integration tests. Kept in sync with the existing
+// ClaudeIntegrationTest.ImageMessage_Base64 asset so multi-provider tests
+// agree on what the model should describe.
+inline constexpr const char *kTinyPngBase64
+    = "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAEklEQVR4nGP4"
+      "z8CAB+GTG8HSALfKY52fTcuYAAAAAElFTkSuQmCC";
+
+class ImageReturningTool : public BaseTool
+{
+    Q_OBJECT
+public:
+    explicit ImageReturningTool(QObject *parent = nullptr)
+        : BaseTool(parent)
+    {}
+
+    QString id() const override { return "get_sample_image"; }
+    QString displayName() const override { return "Get Sample Image"; }
+    QString description() const override
+    {
+        return "Returns a small sample PNG image. Call this tool with no "
+               "arguments to receive a bitmap that you can then describe.";
+    }
+
+    QJsonObject parametersSchema() const override
+    {
+        return QJsonObject{
+            {"type", "object"}, {"properties", QJsonObject{}}, {"required", QJsonArray{}}};
+    }
+
+    QFuture<ToolResult> executeAsync(const QJsonObject & /*input*/) override
+    {
+        return QtConcurrent::run([]() -> ToolResult {
+            const QByteArray png = QByteArray::fromBase64(QByteArray(kTinyPngBase64));
+            ToolResult r;
+            r.content.append(ToolContent::makeText("Here is the sample image:"));
+            r.content.append(ToolContent::makeImage(png, "image/png"));
+            return r;
+        });
     }
 };
 
@@ -115,9 +161,9 @@ public:
             {"required", QJsonArray{"a", "b", "operation"}}};
     }
 
-    QFuture<QString> executeAsync(const QJsonObject &input) override
+    QFuture<ToolResult> executeAsync(const QJsonObject &input) override
     {
-        return QtConcurrent::run([input]() -> QString {
+        return QtConcurrent::run([input]() -> ToolResult {
             double a = input.value("a").toDouble();
             double b = input.value("b").toDouble();
             QString op = input.value("operation").toString();
@@ -131,13 +177,13 @@ public:
                 result = a * b;
             else if (op == "divide") {
                 if (b == 0)
-                    return "Error: division by zero";
+                    return ToolResult::error(QStringLiteral("division by zero"));
                 result = a / b;
             } else {
-                return "Error: unknown operation '" + op + "'";
+                return ToolResult::error("unknown operation '" + op + "'");
             }
 
-            return QString::number(result);
+            return ToolResult::text(QString::number(result));
         });
     }
 };

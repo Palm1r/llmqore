@@ -249,21 +249,23 @@ QJsonObject OllamaMessage::toProviderFormat() const
     return message;
 }
 
-QJsonArray OllamaMessage::createToolResultMessages(const QHash<QString, QString> &toolResults) const
+QJsonArray OllamaMessage::createToolResultMessages(
+    const QHash<QString, ToolResult> &toolResults) const
 {
     QJsonArray messages;
 
     for (const auto *toolContent : getCurrentToolUseContent()) {
         if (toolResults.contains(toolContent->id())) {
+            const QString text = toolResults[toolContent->id()].asText();
             QJsonObject toolMessage;
             toolMessage["role"] = "tool";
-            toolMessage["content"] = toolResults[toolContent->id()];
+            toolMessage["content"] = text;
             messages.append(toolMessage);
 
             qCDebug(llmOllamaLog).noquote()
                 << QString("Created tool result message for tool %1 (id=%2), content length=%3")
                        .arg(toolContent->name(), toolContent->id())
-                       .arg(toolResults[toolContent->id()].length());
+                       .arg(text.length());
         }
     }
 

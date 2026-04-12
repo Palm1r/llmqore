@@ -19,7 +19,8 @@ public:
     MessageState state() const { return m_state; }
     const QList<ContentBlock *> &getCurrentBlocks() const { return m_currentBlocks; }
 
-    // Bounds-checked accessor. Returns nullptr if index is out of range.
+    virtual QString stopReason() const { return {}; }
+
     ContentBlock *blockAt(int index) const
     {
         if (index < 0 || index >= m_currentBlocks.size())

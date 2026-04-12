@@ -9,6 +9,7 @@
 #include <QString>
 
 #include <LLMCore/LLMCore_global.h>
+#include <LLMCore/ToolResult.hpp>
 
 namespace LLMCore {
 
@@ -24,7 +25,7 @@ public:
     virtual QString description() const = 0;
     virtual QJsonObject parametersSchema() const = 0;
 
-    virtual QFuture<QString> executeAsync(const QJsonObject &input = QJsonObject()) = 0;
+    virtual QFuture<ToolResult> executeAsync(const QJsonObject &input = QJsonObject()) = 0;
 
     bool isEnabled() const;
     void setEnabled(bool enabled);

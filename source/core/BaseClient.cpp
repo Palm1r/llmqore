@@ -3,10 +3,13 @@
 
 #include <LLMCore/BaseClient.hpp>
 
-#include <QFutureWatcher>
+#include <QJsonDocument>
+#include <QPointer>
 #include <QUuid>
 
 #include <LLMCore/HttpClient.hpp>
+#include <LLMCore/HttpStream.hpp>
+#include <LLMCore/HttpTransportError.hpp>
 #include <LLMCore/Log.hpp>
 #include <LLMCore/ToolsManager.hpp>
 
@@ -28,9 +31,9 @@ BaseClient::BaseClient(
 BaseClient::~BaseClient()
 {
     for (auto it = m_requests.begin(); it != m_requests.end(); ++it) {
-        if (it->watcher) {
-            it->watcher->disconnect();
-            it->watcher->cancel();
+        if (it->stream) {
+            it->stream->disconnect();
+            it->stream->abort();
         }
     }
     m_requests.clear();
@@ -92,7 +95,7 @@ ToolsManager *BaseClient::tools()
     return m_toolsManager;
 }
 
-bool BaseClient::hasTools() const
+bool BaseClient::hasTools() const noexcept
 {
     return m_toolsManager != nullptr;
 }
@@ -114,6 +117,15 @@ void BaseClient::sendRequest(
     startHttpRequest(id, prepareNetworkRequest(url), payload, mode);
 }
 
+QString BaseClient::parseHttpError(const HttpResponse &response) const
+{
+    constexpr int kSnippetCap = 512;
+    if (response.body.isEmpty())
+        return QString("HTTP %1").arg(response.statusCode);
+    const QString snippet = QString::fromUtf8(response.body.left(kSnippetCap));
+    return QString("HTTP %1: %2").arg(response.statusCode).arg(snippet);
+}
+
 void BaseClient::startHttpRequest(
     const RequestID &id,
     const QNetworkRequest &request,
@@ -124,53 +136,112 @@ void BaseClient::startHttpRequest(
     if (it == m_requests.end())
         return;
 
-    auto *watcher = new QFutureWatcher<QByteArray>(this);
-    it->watcher = watcher;
+    const QByteArray body = QJsonDocument(payload).toJson(QJsonDocument::Compact);
 
-    connect(
-        watcher,
-        &QFutureWatcher<QByteArray>::resultReadyAt,
-        this,
-        [this, id, watcher, mode](int index) {
-            if (mode == RequestMode::Buffered)
-                processBufferedResponse(id, watcher->resultAt(index));
-            else
-                processData(id, watcher->resultAt(index));
-        });
+    if (mode == RequestMode::Buffered) {
+        m_httpClient->send(request, QByteArrayView("POST"), body)
+            .then(this, [this, id](const HttpResponse &response) {
+                if (!hasRequest(id))
+                    return;
+                if (!response.isSuccess()) {
+                    QString msg = parseHttpError(response);
+                    if (msg.isEmpty())
+                        msg = QString("HTTP %1").arg(response.statusCode);
+                    onStreamFinished(id, msg);
+                    return;
+                }
+                processBufferedResponse(id, response.body);
+                onStreamFinished(id, std::nullopt);
+            })
+            .onFailed(this, [this, id](const HttpTransportError &e) {
+                if (hasRequest(id))
+                    onStreamFinished(id, e.message());
+            })
+            .onFailed(this, [this, id](const std::exception &e) {
+                if (hasRequest(id))
+                    onStreamFinished(id, QString::fromUtf8(e.what()));
+            });
+        return;
+    }
 
-    connect(watcher, &QFutureWatcher<QByteArray>::finished, this, [this, id, watcher]() {
-        // NOTE: Do not use watcher->isCanceled() as a guard here.
-        // Qt's QPromise::setException() internally sets the Canceled flag,
-        // so isCanceled() returns true for HTTP errors (e.g. 500) too.
-        // Real user cancellations go through cancelRequest() which calls
-        // watcher->disconnect(), so this handler won't fire for those.
+    HttpStream *stream = m_httpClient->openStream(request, QByteArrayView("POST"), body);
+    it->stream = stream;
+    it->errorMode = false;
+    it->errorBody.clear();
 
-        std::optional<QString> error;
-        try {
-            if (watcher->future().resultCount() > 0)
-                watcher->future().resultAt(0);
-            else
-                watcher->future().result();
-        } catch (const std::exception &e) {
-            error = QString::fromStdString(e.what());
-        } catch (...) {
-            error = QStringLiteral("Unknown network error");
+    QPointer<HttpStream> guardedStream(stream);
+
+    connect(stream, &HttpStream::headersReceived, this, [this, id, guardedStream]() {
+        if (!guardedStream)
+            return;
+        auto it = m_requests.find(id);
+        if (it == m_requests.end() || it->stream != guardedStream)
+            return;
+        const int status = guardedStream->statusCode();
+        if (status < 200 || status >= 300)
+            it->errorMode = true;
+    });
+
+    connect(stream, &HttpStream::chunkReceived, this, [this, id, guardedStream](const QByteArray &chunk) {
+        if (!guardedStream)
+            return;
+        auto it = m_requests.find(id);
+        if (it == m_requests.end() || it->stream != guardedStream)
+            return;
+        if (it->errorMode) {
+            it->errorBody.append(chunk);
+            return;
+        }
+        processData(id, chunk);
+    });
+
+    connect(stream, &HttpStream::finished, this, [this, id, guardedStream]() {
+        if (!guardedStream) {
+            return;
+        }
+        auto it = m_requests.find(id);
+        if (it == m_requests.end() || it->stream != guardedStream) {
+            guardedStream->deleteLater();
+            return;
         }
 
-        // Clean up THIS watcher using the captured pointer, not it->watcher,
-        // because a tool continuation may have already called startHttpRequest
-        // and replaced it->watcher with a new one.
-        watcher->disconnect();
-        watcher->deleteLater();
+        std::optional<QString> error;
+        if (it->errorMode) {
+            HttpResponse r;
+            r.statusCode = guardedStream->statusCode();
+            r.rawHeaders = guardedStream->rawHeaders();
+            r.body = it->errorBody;
+            QString msg = parseHttpError(r);
+            if (msg.isEmpty())
+                msg = QString("HTTP %1").arg(r.statusCode);
+            error = msg;
+        }
 
-        auto it = m_requests.find(id);
-        if (it != m_requests.end() && it->watcher == watcher)
-            it->watcher = nullptr;
+        it->stream = nullptr;
+        it->errorMode = false;
+        it->errorBody.clear();
+        guardedStream->disconnect();
+        guardedStream->deleteLater();
 
         onStreamFinished(id, error);
     });
 
-    watcher->setFuture(m_httpClient->post(request, payload, mode));
+    connect(stream, &HttpStream::errorOccurred, this,
+            [this, id, guardedStream](const HttpTransportError &e) {
+        if (!guardedStream)
+            return;
+        auto it = m_requests.find(id);
+        if (it == m_requests.end() || it->stream != guardedStream) {
+            guardedStream->deleteLater();
+            return;
+        }
+        it->stream = nullptr;
+        it->errorMode = false;
+        it->errorBody.clear();
+        guardedStream->disconnect();
+        guardedStream->deleteLater();
+        onStreamFinished(id, e.message());
+    });
 }
 
 // cleanupFullRequest() intentionally does NOT touch m_requests.
@@ -187,6 +258,15 @@ void BaseClient::onStreamFinished(const RequestID &id, std::optional<QString> er
     auto *msg = messageForRequest(id);
     if (msg && msg->state() == MessageState::RequiresToolExecution)
         return;
+
+    // Capture finalisation metadata BEFORE cleanupFullRequest destroys the
+    // message via cleanupDerivedData(). This is what completeRequest() then
+    // reads to populate CompletionInfo::stopReason for onFinalized consumers.
+    if (msg) {
+        auto it = m_requests.find(id);
+        if (it != m_requests.end())
+            it->stopReason = msg->stopReason();
+    }
 
     cleanupFullRequest(id);
     completeRequest(id);
@@ -256,8 +336,22 @@ void BaseClient::completeRequest(const RequestID &id)
         return;
 
     QString fullText = it->buffers.responseContent;
+    QString stopReason = it->stopReason;
     auto onCompleted = std::move(it->callbacks.onCompleted);
+    auto onFinalized = std::move(it->callbacks.onFinalized);
     cleanupRequest(id);
+
+    // onFinalized fires in addition to onCompleted when both are set — they
+    // serve different consumers (simple text vs rich metadata). onFinalized
+    // goes first so that code using it to resolve a QPromise sees the
+    // resolution before any signal-connected slot on requestCompleted does.
+    if (onFinalized) {
+        CompletionInfo info;
+        info.fullText = fullText;
+        info.model = m_model;
+        info.stopReason = stopReason;
+        onFinalized(id, info);
+    }
 
     if (onCompleted)
         onCompleted(id, fullText);
@@ -286,9 +380,11 @@ void BaseClient::cancelRequest(const RequestID &requestId)
     if (it == m_requests.end())
         return;
 
-    if (it->watcher) {
-        it->watcher->disconnect();
-        it->watcher->cancel();
+    if (it->stream) {
+        it->stream->disconnect();
+        it->stream->abort();
+        it->stream->deleteLater();
+        it->stream = nullptr;
     }
 
     cleanupFullRequest(requestId);
@@ -314,7 +410,7 @@ void BaseClient::executeToolsFromMessage(const RequestID &id)
 }
 
 void BaseClient::handleToolContinuation(
-    const RequestID &id, const QHash<QString, QString> &toolResults)
+    const RequestID &id, const QHash<QString, ToolResult> &toolResults)
 {
     auto *message = messageForRequest(id);
     auto it = m_requests.find(id);
@@ -391,7 +487,8 @@ void BaseClient::storeRequestContext(const RequestID &id, const QUrl &url, const
 
     it->url = url;
     it->originalPayload = payload;
-    it->buffers.rawStreamBuffer.clear();
+    it->buffers.lineBuffer.clear();
+    it->buffers.sseParser.clear();
 }
 
 bool BaseClient::checkContinuationLimit(const RequestID &id)
@@ -403,16 +500,23 @@ bool BaseClient::checkContinuationLimit(const RequestID &id)
     return it->continuationCount <= kMaxToolContinuations;
 }
 
-bool BaseClient::hasRequest(const RequestID &id) const
+bool BaseClient::hasRequest(const RequestID &id) const noexcept
 {
     return m_requests.contains(id);
 }
 
-SSEBuffer &BaseClient::requestSSEBuffer(const RequestID &id)
+LineBuffer &BaseClient::requestLineBuffer(const RequestID &id)
 {
     auto it = m_requests.find(id);
     Q_ASSERT(it != m_requests.end());
-    return it->buffers.rawStreamBuffer;
+    return it->buffers.lineBuffer;
+}
+
+SSEParser &BaseClient::requestSSEParser(const RequestID &id)
+{
+    auto it = m_requests.find(id);
+    Q_ASSERT(it != m_requests.end());
+    return it->buffers.sseParser;
 }
 
 QString BaseClient::responseContent(const RequestID &id) const
@@ -436,9 +540,10 @@ void BaseClient::cleanupRequest(const RequestID &id)
     if (it == m_requests.end())
         return;
 
-    if (it->watcher) {
-        it->watcher->disconnect();
-        it->watcher->deleteLater();
+    if (it->stream) {
+        it->stream->disconnect();
+        it->stream->deleteLater();
+        it->stream = nullptr;
     }
 
     m_requests.erase(it);

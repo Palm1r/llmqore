@@ -229,6 +229,30 @@ ApplicationWindow {
             }
         }
 
+        Label {
+            Layout.leftMargin: 12
+            visible: controller.mcpServerNames.length > 0
+            text: qsTr("MCP servers:")
+            font { bold: true; pixelSize: 11 }
+            color: palette.placeholderText
+        }
+
+        Flow {
+            Layout.fillWidth: true
+            Layout.topMargin: 2
+            Layout.bottomMargin: 4
+            spacing: 4
+            visible: controller.mcpServerNames.length > 0
+
+            Repeater {
+                model: controller.mcpServerNames
+                delegate: ToolBadge {
+                    required property string modelData
+                    name: modelData
+                }
+            }
+        }
+
         Rectangle {
             Layout.fillWidth: true
             implicitHeight: 1

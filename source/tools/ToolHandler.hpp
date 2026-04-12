@@ -12,6 +12,7 @@
 #include <LLMCore/LLMCore_global.h>
 
 #include <LLMCore/BaseTool.hpp>
+#include <LLMCore/ToolResult.hpp>
 
 namespace LLMCore {
 
@@ -22,13 +23,14 @@ class LLMCORE_EXPORT ToolHandler : public QObject
 public:
     explicit ToolHandler(QObject *parent = nullptr);
 
-    QFuture<QString> executeToolAsync(
+    QFuture<ToolResult> executeToolAsync(
         const QString &requestId, const QString &toolId, BaseTool *tool, const QJsonObject &input);
 
     void cleanupRequest(const QString &requestId);
 
 signals:
-    void toolCompleted(const QString &requestId, const QString &toolId, const QString &result);
+    void toolCompleted(
+        const QString &requestId, const QString &toolId, const LLMCore::ToolResult &result);
     void toolFailed(const QString &requestId, const QString &toolId, const QString &error);
 
 private:
@@ -37,10 +39,10 @@ private:
         QString requestId;
         QString toolId;
         QString toolName;
-        QFutureWatcher<QString> *watcher;
+        QFutureWatcher<ToolResult> *watcher;
     };
 
-    QHash<QString, ToolExecution *> m_activeExecutions; // toolId -> execution
+    QHash<QString, ToolExecution *> m_activeExecutions;
 
     void onToolExecutionFinished(const QString &toolId);
 };

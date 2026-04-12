@@ -31,15 +31,33 @@ public:
         };
     }
 
-    QFuture<QString> executeAsync(const QJsonObject &input) override {
-        return QtConcurrent::run([input]() -> QString {
+    QFuture<LLMCore::ToolResult> executeAsync(const QJsonObject &input) override {
+        return QtConcurrent::run([input]() -> LLMCore::ToolResult {
             QString city = input["city"].toString();
             // ... fetch weather data ...
-            return QString("{\"temp\": 22, \"city\": \"%1\"}").arg(city);
+            return LLMCore::ToolResult::text(
+                QString("{\"temp\": 22, \"city\": \"%1\"}").arg(city));
         });
     }
 };
 ```
+
+`executeAsync()` returns a `LLMCore::ToolResult`, a rich envelope that matches
+the MCP tools/call result shape. Most tools just wrap a single string via
+`ToolResult::text("...")` or signal a failure via `ToolResult::error("...")`.
+If you need to return images, audio, or embedded/linked resources, build the
+content list directly:
+
+```cpp
+LLMCore::ToolResult r;
+r.content.append(LLMCore::ToolContent::makeText("Here is the chart:"));
+r.content.append(LLMCore::ToolContent::makeImage(pngBytes, "image/png"));
+return r;
+```
+
+Rich content is preserved end-to-end when exposing the tool via `McpServer`.
+The non-MCP LLM continuation path (Claude/OpenAI/…) currently flattens
+non-text blocks into placeholder strings via `ToolResult::asText()`.
 
 ## Registering and using tools
 

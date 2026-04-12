@@ -11,6 +11,7 @@
 #include "tools/ToolHandler.hpp"
 #include <LLMCore/BaseTool.hpp>
 #include <LLMCore/ToolExceptions.hpp>
+#include <LLMCore/ToolResult.hpp>
 
 using namespace LLMCore;
 
@@ -27,10 +28,11 @@ public:
     QString description() const override { return "Always succeeds"; }
     QJsonObject parametersSchema() const override { return {}; }
 
-    QFuture<QString> executeAsync(const QJsonObject &input) override
+    QFuture<ToolResult> executeAsync(const QJsonObject &input) override
     {
-        return QtConcurrent::run(
-            [input]() -> QString { return "result: " + input.value("key").toString("default"); });
+        return QtConcurrent::run([input]() -> ToolResult {
+            return ToolResult::text("result: " + input.value("key").toString("default"));
+        });
     }
 };
 
@@ -47,10 +49,10 @@ public:
     QString description() const override { return "Always fails"; }
     QJsonObject parametersSchema() const override { return {}; }
 
-    QFuture<QString> executeAsync(const QJsonObject &) override
+    QFuture<ToolResult> executeAsync(const QJsonObject &) override
     {
         return QtConcurrent::run(
-            []() -> QString { throw ToolRuntimeError("Tool execution failed"); });
+            []() -> ToolResult { throw ToolRuntimeError("Tool execution failed"); });
     }
 };
 
@@ -67,10 +69,10 @@ public:
     QString description() const override { return "Throws invalid argument"; }
     QJsonObject parametersSchema() const override { return {}; }
 
-    QFuture<QString> executeAsync(const QJsonObject &) override
+    QFuture<ToolResult> executeAsync(const QJsonObject &) override
     {
         return QtConcurrent::run(
-            []() -> QString { throw ToolInvalidArgument("Missing required field 'path'"); });
+            []() -> ToolResult { throw ToolInvalidArgument("Missing required field 'path'"); });
     }
 };
 
@@ -87,9 +89,10 @@ public:
     QString description() const override { return "Throws std::exception"; }
     QJsonObject parametersSchema() const override { return {}; }
 
-    QFuture<QString> executeAsync(const QJsonObject &) override
+    QFuture<ToolResult> executeAsync(const QJsonObject &) override
     {
-        return QtConcurrent::run([]() -> QString { throw std::runtime_error("std runtime error"); });
+        return QtConcurrent::run(
+            []() -> ToolResult { throw std::runtime_error("std runtime error"); });
     }
 };
 
@@ -106,11 +109,11 @@ public:
     QString description() const override { return "Takes time"; }
     QJsonObject parametersSchema() const override { return {}; }
 
-    QFuture<QString> executeAsync(const QJsonObject &) override
+    QFuture<ToolResult> executeAsync(const QJsonObject &) override
     {
-        return QtConcurrent::run([]() -> QString {
+        return QtConcurrent::run([]() -> ToolResult {
             QThread::msleep(500);
-            return "slow result";
+            return ToolResult::text("slow result");
         });
     }
 };
@@ -153,7 +156,8 @@ TEST_F(ToolHandlerTest, ExecuteSuccess)
 
     EXPECT_EQ(completedSpy[0][0].toString(), "req-1");
     EXPECT_EQ(completedSpy[0][1].toString(), "tool-1");
-    EXPECT_EQ(completedSpy[0][2].toString(), "result: hello");
+    const ToolResult result = completedSpy[0][2].value<ToolResult>();
+    EXPECT_EQ(result.asText(), "result: hello");
 }
 
 TEST_F(ToolHandlerTest, ExecuteSuccess_DefaultInput)
@@ -165,7 +169,8 @@ TEST_F(ToolHandlerTest, ExecuteSuccess_DefaultInput)
     handler.executeToolAsync("req-1", "tool-1", &tool, {});
 
     EXPECT_TRUE(completedSpy.wait(3000));
-    EXPECT_EQ(completedSpy[0][2].toString(), "result: default");
+    const ToolResult result = completedSpy[0][2].value<ToolResult>();
+    EXPECT_EQ(result.asText(), "result: default");
 }
 
 TEST_F(ToolHandlerTest, ExecuteFailure_ToolRuntimeError)
@@ -246,8 +251,8 @@ TEST_F(ToolHandlerTest, MultipleToolsInParallel)
     EXPECT_EQ(completedSpy.count(), 2);
 
     QStringList results;
-    results << completedSpy[0][2].toString();
-    results << completedSpy[1][2].toString();
+    results << completedSpy[0][2].value<ToolResult>().asText();
+    results << completedSpy[1][2].value<ToolResult>().asText();
     EXPECT_TRUE(results.contains("result: a"));
     EXPECT_TRUE(results.contains("result: b"));
 }

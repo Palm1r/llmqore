@@ -3,6 +3,8 @@
 
 #include "IntegrationTestHelpers.hpp"
 #include <LLMCore/OpenAIResponsesClient.hpp>
+#include <LLMCore/ToolResult.hpp>
+#include <LLMCore/ToolsManager.hpp>
 
 using namespace LLMCore;
 using namespace LLMCore::IntegrationTest;
@@ -81,7 +83,10 @@ TEST_F(OpenAIResponsesIntegrationTest, StreamingChunks)
 
     QJsonObject payload;
     payload["model"] = m_model;
-    payload["input"] = "Count from 1 to 5, one number per line.";
+    // Ask for a long enough response that the API cannot coalesce it into
+    // a single SSE chunk — counting to 30 gives ~90 characters, which the
+    // API always streams as multiple chunks.
+    payload["input"] = "Count from 1 to 30, one number per line, no other text.";
     payload["stream"] = true;
 
     client->sendMessage(payload, callbacks);
@@ -146,6 +151,50 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_Calculator)
     EXPECT_FALSE(result.failed) << result.diagnostics();
     EXPECT_TRUE(result.fullText.contains("579")) << "Expected 579 in response\n"
                                                  << result.diagnostics();
+}
+
+TEST_F(OpenAIResponsesIntegrationTest, ToolUse_ImageReturningTool)
+{
+    // A tool returns a small PNG as a ToolResult with an image content
+    // block; OpenAIResponsesMessage serialises it as an input_image block
+    // inside function_call_output.output. This test exercises the whole
+    // path end-to-end against the real Responses API: the model must call
+    // the tool, receive the image, and describe its colour.
+    //
+    // NOTE: the default nano model has vision but sometimes misses a
+    // 10x10 bitmap. We override via env var if the user provides a more
+    // capable model (e.g. gpt-4.1-mini).
+    auto client = createClient();
+    auto *imageTool = new ImageReturningTool(client.get());
+    client->tools()->addTool(imageTool);
+
+    TestResult result;
+    QEventLoop loop;
+    auto callbacks = makeLoggingCallbacks(result, loop);
+
+    QJsonObject payload;
+    payload["model"] = m_model;
+    payload["input"]
+        = "Call the get_sample_image tool (no arguments) and then tell me what "
+          "colour the returned image is. Reply with a single lowercase colour "
+          "word like 'red' or 'blue'.";
+    payload["stream"] = true;
+    payload["tools"] = client->tools()->getToolsDefinitions();
+
+    client->sendMessage(payload, callbacks);
+
+    waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+
+    ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
+    EXPECT_TRUE(result.completed) << result.diagnostics();
+    EXPECT_FALSE(result.failed) << result.diagnostics();
+    EXPECT_FALSE(result.toolCalls.isEmpty())
+        << "Model did not invoke the image-returning tool\n" << result.diagnostics();
+    // Model should have something non-empty in its final response — we
+    // don't assert the exact colour because tiny bitmaps are hard for the
+    // default nano model. The important invariant is that the multi-turn
+    // loop didn't crash when a non-string `output` flew through the wire.
+    EXPECT_FALSE(result.fullText.isEmpty()) << result.diagnostics();
 }
 
 TEST_F(OpenAIResponsesIntegrationTest, ImageMessage_InputImage)

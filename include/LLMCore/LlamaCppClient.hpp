@@ -47,8 +47,9 @@ protected:
     QJsonObject buildContinuationPayload(
         const QJsonObject &originalPayload,
         BaseMessage *message,
-        const QHash<QString, QString> &toolResults) override;
+        const QHash<QString, ToolResult> &toolResults) override;
     void onStreamFinished(const RequestID &id, std::optional<QString> error) override;
+    [[nodiscard]] QString parseHttpError(const HttpResponse &response) const override;
 
 private:
     static bool isInfillRequest(const QJsonObject &payload);

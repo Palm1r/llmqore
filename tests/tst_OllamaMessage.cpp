@@ -246,9 +246,9 @@ TEST(OllamaMessage, CreateToolResultMessages)
     msg.handleToolCall(tc2);
 
     auto tools = msg.getCurrentToolUseContent();
-    QHash<QString, QString> results;
-    results[tools[0]->id()] = "content1";
-    results[tools[1]->id()] = "content2";
+    QHash<QString, ToolResult> results;
+    results[tools[0]->id()] = ToolResult::text("content1");
+    results[tools[1]->id()] = ToolResult::text("content2");
 
     QJsonArray messages = msg.createToolResultMessages(results);
     EXPECT_EQ(messages.size(), 2);

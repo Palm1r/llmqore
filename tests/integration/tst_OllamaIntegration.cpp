@@ -94,8 +94,12 @@ TEST_F(OllamaIntegrationTest, StreamingChunks)
     QJsonObject payload;
     payload["model"] = m_model;
     payload["stream"] = true;
-    payload["messages"] = QJsonArray{
-        QJsonObject{{"role", "user"}, {"content", "Count from 1 to 5, one number per line."}}};
+    // Ask for a long enough response that the API cannot coalesce it into
+    // a single chunk — counting to 30 gives ~90 characters, which always
+    // streams as multiple chunks.
+    payload["messages"] = QJsonArray{QJsonObject{
+        {"role", "user"},
+        {"content", "Count from 1 to 30, one number per line, no other text."}}};
 
     client->sendMessage(payload, callbacks);
 

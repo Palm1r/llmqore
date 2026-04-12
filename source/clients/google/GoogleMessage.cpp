@@ -4,6 +4,7 @@
 #include "GoogleMessage.hpp"
 
 #include <QJsonDocument>
+#include <QStringList>
 #include <QUuid>
 
 #include <LLMCore/Log.hpp>
@@ -131,21 +132,110 @@ QJsonObject GoogleMessage::toProviderFormat() const
     return content;
 }
 
-QJsonArray GoogleMessage::createToolResultParts(const QHash<QString, QString> &toolResults) const
+namespace {
+
+QJsonObject toInlineDataPart(const ToolContent &block)
+{
+    QString mime;
+    QByteArray bytes;
+    switch (block.type) {
+    case ToolContent::Image:
+        mime = block.mimeType.isEmpty() ? QStringLiteral("image/png") : block.mimeType;
+        bytes = block.data;
+        break;
+    case ToolContent::Audio:
+        mime = block.mimeType.isEmpty() ? QStringLiteral("audio/wav") : block.mimeType;
+        bytes = block.data;
+        break;
+    case ToolContent::Resource:
+        if (!block.resourceBlob.isEmpty()) {
+            mime = block.mimeType.isEmpty() ? QStringLiteral("application/octet-stream")
+                                            : block.mimeType;
+            bytes = block.resourceBlob;
+        }
+        break;
+    default:
+        break;
+    }
+    if (bytes.isEmpty())
+        return QJsonObject{};
+
+    return QJsonObject{
+        {"inlineData",
+         QJsonObject{
+             {"mimeType", mime},
+             {"data", QString::fromUtf8(bytes.toBase64())},
+         }},
+    };
+}
+
+QString buildGeminiResponseText(const ToolResult &r)
+{
+    QStringList chunks;
+    for (const ToolContent &block : r.content) {
+        switch (block.type) {
+        case ToolContent::Text:
+            if (!block.text.isEmpty())
+                chunks.append(block.text);
+            break;
+        case ToolContent::Resource:
+            if (!block.resourceText.isEmpty())
+                chunks.append(block.resourceText);
+            break;
+        case ToolContent::ResourceLink:
+            chunks.append(QString("[resource link: %1]").arg(block.uri));
+            break;
+        case ToolContent::Image:
+        case ToolContent::Audio:
+            break;
+        }
+    }
+    return chunks.join('\n');
+}
+
+bool hasOnlyText(const ToolResult &r)
+{
+    for (const ToolContent &b : r.content) {
+        if (b.type != ToolContent::Text)
+            return false;
+    }
+    return true;
+}
+
+} // namespace
+
+QJsonArray GoogleMessage::createToolResultParts(
+    const QHash<QString, ToolResult> &toolResults) const
 {
     QJsonArray parts;
 
     for (const auto *toolContent : getCurrentToolUseContent()) {
-        if (toolResults.contains(toolContent->id())) {
-            QJsonObject functionResponse;
-            functionResponse["name"] = toolContent->name();
+        if (!toolResults.contains(toolContent->id()))
+            continue;
 
-            QJsonObject response;
-            response["result"] = toolResults[toolContent->id()];
-            functionResponse["response"] = response;
+        const ToolResult &r = toolResults[toolContent->id()];
+        QJsonObject functionResponse;
+        functionResponse["name"] = toolContent->name();
 
-            parts.append(QJsonObject{{"functionResponse", functionResponse}});
+        if (hasOnlyText(r)) {
+            functionResponse["response"] = QJsonObject{{"result", r.asText()}};
+        } else {
+            // Textual preamble (if any) + inline binary parts.
+            const QString textPart = buildGeminiResponseText(r);
+            functionResponse["response"]
+                = QJsonObject{{"result", textPart.isEmpty() ? QString() : textPart}};
+
+            QJsonArray innerParts;
+            for (const ToolContent &block : r.content) {
+                const QJsonObject inlinePart = toInlineDataPart(block);
+                if (!inlinePart.isEmpty())
+                    innerParts.append(inlinePart);
+            }
+            if (!innerParts.isEmpty())
+                functionResponse["parts"] = innerParts;
         }
+
+        parts.append(QJsonObject{{"functionResponse", functionResponse}});
     }
 
     return parts;

@@ -14,33 +14,31 @@ ToolHandler::ToolHandler(QObject *parent)
     : QObject(parent)
 {}
 
-QFuture<QString> ToolHandler::executeToolAsync(
+QFuture<ToolResult> ToolHandler::executeToolAsync(
     const QString &requestId, const QString &toolId, BaseTool *tool, const QJsonObject &input)
 {
     if (!tool) {
         QTimer::singleShot(0, this, [this, requestId, toolId]() {
             emit toolFailed(requestId, toolId, QStringLiteral("Tool is null"));
         });
-        return QFuture<QString>();
+        return QFuture<ToolResult>();
     }
 
     auto *execution = new ToolExecution();
     execution->requestId = requestId;
     execution->toolId = toolId;
     execution->toolName = tool->id();
-    execution->watcher = new QFutureWatcher<QString>(this);
+    execution->watcher = new QFutureWatcher<ToolResult>(this);
 
-    connect(execution->watcher, &QFutureWatcher<QString>::finished, this, [this, toolId]() {
+    connect(execution->watcher, &QFutureWatcher<ToolResult>::finished, this, [this, toolId]() {
         onToolExecutionFinished(toolId);
     });
 
     qCDebug(llmToolsLog).noquote()
         << QString("Starting tool execution: %1 (ID: %2)").arg(tool->id(), toolId);
 
-    // FIX: Insert into map BEFORE setting the future on the watcher.
-    // If the future is already completed (synchronous tool), the finished
-    // signal fires immediately inside setFuture(). Without prior insertion,
-    // onToolExecutionFinished would not find the execution in the map.
+    // FIX: Insert before setFuture() — if the future is already complete,
+    // finished fires synchronously and needs the map entry to exist.
     m_activeExecutions.insert(toolId, execution);
 
     auto future = tool->executeAsync(input);
@@ -80,9 +78,22 @@ void ToolHandler::onToolExecutionFinished(const QString &toolId)
     auto *execution = m_activeExecutions.take(toolId);
 
     try {
-        QString result = execution->watcher->result();
-        qCDebug(llmToolsLog).noquote() << QString("Tool %1 completed").arg(execution->toolName);
-        emit toolCompleted(execution->requestId, execution->toolId, result);
+        ToolResult result = execution->watcher->result();
+        if (result.isError) {
+            QString errorText = result.asText();
+            if (errorText.isEmpty())
+                errorText = QStringLiteral("Tool reported an error");
+            qCWarning(llmToolsLog).noquote()
+                << QString("Tool %1 reported isError: %2")
+                       .arg(execution->toolName, errorText);
+            emit toolFailed(execution->requestId, execution->toolId, errorText);
+        } else {
+            qCDebug(llmToolsLog).noquote()
+                << QString("Tool %1 completed (%2 content blocks)")
+                       .arg(execution->toolName)
+                       .arg(result.content.size());
+            emit toolCompleted(execution->requestId, execution->toolId, result);
+        }
     } catch (const ToolException &e) {
         QString error = e.message();
         if (error.isEmpty())
@@ -104,8 +115,6 @@ void ToolHandler::onToolExecutionFinished(const QString &toolId)
         emit toolFailed(execution->requestId, execution->toolId, error);
     }
 
-    // Watcher is a QObject child of this, schedule for deletion.
-    // Execution struct owns nothing else, safe to delete immediately.
     execution->watcher->deleteLater();
     execution->watcher = nullptr;
     delete execution;

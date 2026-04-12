@@ -43,7 +43,8 @@ protected:
     QJsonObject buildContinuationPayload(
         const QJsonObject &originalPayload,
         BaseMessage *message,
-        const QHash<QString, QString> &toolResults) override;
+        const QHash<QString, ToolResult> &toolResults) override;
+    [[nodiscard]] QString parseHttpError(const HttpResponse &response) const override;
 
 private:
     void processStreamEvent(const RequestID &id, const QString &eventType, const QJsonObject &data);
@@ -53,7 +54,6 @@ private:
 
     QHash<RequestID, OpenAIResponsesMessage *> m_messages;
     QHash<RequestID, QHash<QString, QString>> m_itemIdToCallId;
-    QHash<RequestID, QString> m_currentEventTypes;
 };
 
 } // namespace LLMCore

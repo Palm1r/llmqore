@@ -4,7 +4,7 @@
 #include <LLMCore/OpenAIResponsesClient.hpp>
 
 #include <LLMCore/HttpClient.hpp>
-#include <LLMCore/SSEBuffer.hpp>
+#include <LLMCore/SSEParser.hpp>
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -65,11 +65,16 @@ QFuture<QList<QString>> OpenAIResponsesClient::listModels()
     QNetworkRequest request = prepareNetworkRequest(url);
 
     return httpClient()
-        ->get(request)
-        .then([](const QByteArray &data) {
+        ->send(request, QByteArrayView("GET"))
+        .then(this, [](const HttpResponse &response) {
             QList<QString> models;
-            QJsonObject json = QJsonDocument::fromJson(data).object();
+            if (!response.isSuccess()) {
+                qCDebug(llmOpenAILog).noquote()
+                    << QString("Error fetching models: HTTP %1").arg(response.statusCode);
+                return models;
+            }
 
+            QJsonObject json = QJsonDocument::fromJson(response.body).object();
             if (json.contains("data")) {
                 QJsonArray modelArray = json["data"].toArray();
                 for (const QJsonValue &value : modelArray) {
@@ -80,10 +85,30 @@ QFuture<QList<QString>> OpenAIResponsesClient::listModels()
             }
             return models;
         })
-        .onFailed([](const std::exception &e) {
+        .onFailed(this, [](const std::exception &e) {
             qCDebug(llmOpenAILog).noquote() << QString("Error fetching models: %1").arg(e.what());
             return QList<QString>{};
         });
+}
+
+QString OpenAIResponsesClient::parseHttpError(const HttpResponse &response) const
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(response.body);
+    if (doc.isObject()) {
+        const QJsonObject error = doc.object().value("error").toObject();
+        const QString message = error.value("message").toString();
+        const QString type = error.value("type").toString();
+        const QString code = error.value("code").toString();
+        if (!message.isEmpty()) {
+            QString out = QString("HTTP %1: %2").arg(response.statusCode).arg(message);
+            if (!type.isEmpty())
+                out += QString(" (type: %1)").arg(type);
+            if (!code.isEmpty())
+                out += QString(" (code: %1)").arg(code);
+            return out;
+        }
+    }
+    return BaseClient::parseHttpError(response);
 }
 
 void OpenAIResponsesClient::processData(const RequestID &id, const QByteArray &data)
@@ -91,27 +116,14 @@ void OpenAIResponsesClient::processData(const RequestID &id, const QByteArray &d
     if (!hasRequest(id))
         return;
 
-    QStringList lines = requestSSEBuffer(id).processData(data);
-
-    QString &currentEventType = m_currentEventTypes[id];
-
-    for (const QString &line : lines) {
-        QString trimmedLine = line.trimmed();
-        if (trimmedLine.isEmpty() || line == "data: [DONE]")
+    const QList<SSEEvent> events = requestSSEParser(id).append(data);
+    for (const SSEEvent &ev : events) {
+        if (ev.data.isEmpty() || ev.data == "[DONE]")
             continue;
-
-        if (line.startsWith("event: ")) {
-            currentEventType = line.mid(7).trimmed();
+        const QJsonObject payload = QJsonDocument::fromJson(ev.data).object();
+        if (payload.isEmpty())
             continue;
-        }
-
-        QString dataLine = line;
-        if (line.startsWith("data: "))
-            dataLine = line.mid(6);
-
-        QJsonDocument doc = QJsonDocument::fromJson(dataLine.toUtf8());
-        if (doc.isObject())
-            processStreamEvent(id, currentEventType, doc.object());
+        processStreamEvent(id, ev.type, payload);
     }
 }
 
@@ -126,13 +138,12 @@ void OpenAIResponsesClient::cleanupDerivedData(const RequestID &id)
         msg->deleteLater();
 
     m_itemIdToCallId.remove(id);
-    m_currentEventTypes.remove(id);
 }
 
 QJsonObject OpenAIResponsesClient::buildContinuationPayload(
     const QJsonObject &originalPayload,
     BaseMessage *message,
-    const QHash<QString, QString> &toolResults)
+    const QHash<QString, ToolResult> &toolResults)
 {
     auto *responsesMsg = qobject_cast<OpenAIResponsesMessage *>(message);
     if (!responsesMsg)

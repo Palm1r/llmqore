@@ -3,6 +3,7 @@ find_package(Qt6 REQUIRED COMPONENTS Test Concurrent)
 add_executable(LLMCoreIntegrationTests
     IntegrationTestTools.cpp
     tst_ClaudeIntegration.cpp
+    tst_ClaudeMcpIntegration.cpp
     tst_OpenAIIntegration.cpp
     tst_OpenAIResponsesIntegration.cpp
     tst_OllamaIntegration.cpp

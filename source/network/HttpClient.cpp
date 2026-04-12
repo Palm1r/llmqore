@@ -3,141 +3,146 @@
 
 #include <LLMCore/HttpClient.hpp>
 
-#include <QJsonDocument>
+#include <memory>
+
+#include <QNetworkAccessManager>
 #include <QNetworkProxy>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QPointer>
+#include <QPromise>
+
+#include <LLMCore/HttpStream.hpp>
+#include <LLMCore/Log.hpp>
 
 namespace LLMCore {
 
+namespace {
+
+bool isTransportLevelError(QNetworkReply::NetworkError code) noexcept
+{
+    if (code == QNetworkReply::NoError)
+        return false;
+    return code < QNetworkReply::ContentAccessDenied;
+}
+
+QNetworkReply *dispatchVerb(
+    QNetworkAccessManager *manager,
+    const QNetworkRequest &request,
+    QByteArrayView verb,
+    const QByteArray &body)
+{
+    if (verb.compare(QByteArrayView("GET"), Qt::CaseInsensitive) == 0)
+        return manager->get(request);
+    if (verb.compare(QByteArrayView("POST"), Qt::CaseInsensitive) == 0)
+        return manager->post(request, body);
+    if (verb.compare(QByteArrayView("PUT"), Qt::CaseInsensitive) == 0)
+        return manager->put(request, body);
+    if (verb.compare(QByteArrayView("DELETE"), Qt::CaseInsensitive) == 0) {
+        if (body.isEmpty())
+            return manager->deleteResource(request);
+        return manager->sendCustomRequest(request, "DELETE", body);
+    }
+    if (verb.compare(QByteArrayView("HEAD"), Qt::CaseInsensitive) == 0)
+        return manager->head(request);
+    return manager->sendCustomRequest(request, verb.toByteArray(), body);
+}
+
+} // namespace
+
+struct HttpClient::Impl
+{
+    QNetworkAccessManager *manager = nullptr;
+    int transferTimeoutMs = 120000;
+};
+
 HttpClient::HttpClient(QObject *parent)
     : QObject(parent)
-    , m_manager(new QNetworkAccessManager(this))
-{}
-
-void HttpClient::setTransferTimeout(int ms)
+    , m_impl(std::make_unique<Impl>())
 {
-    m_transferTimeoutMs = ms;
+    m_impl->manager = new QNetworkAccessManager(this);
 }
 
-QFuture<QByteArray> HttpClient::get(const QNetworkRequest &request)
+HttpClient::~HttpClient() = default;
+
+QFuture<HttpResponse> HttpClient::send(
+    const QNetworkRequest &request, QByteArrayView verb, const QByteArray &body)
 {
-    auto promise = std::make_shared<QPromise<QByteArray>>();
+    auto promise = std::make_shared<QPromise<HttpResponse>>();
     promise->start();
 
     QNetworkRequest req(request);
-    req.setTransferTimeout(m_transferTimeoutMs);
-    QNetworkReply *reply = m_manager->get(req);
-    setupReply(reply, promise, RequestMode::Buffered);
+    req.setTransferTimeout(m_impl->transferTimeoutMs);
+
+    QNetworkReply *reply = dispatchVerb(m_impl->manager, req, verb, body);
+
+    connect(reply, &QNetworkReply::finished, this, [replyGuard = QPointer<QNetworkReply>(reply), promise]() {
+        if (!replyGuard) {
+            HttpTransportError err(
+                QStringLiteral("Network reply destroyed before completion"),
+                QNetworkReply::UnknownNetworkError);
+            promise->setException(std::make_exception_ptr(err));
+            promise->finish();
+            return;
+        }
+
+        const QNetworkReply::NetworkError code = replyGuard->error();
+        const QString errorString = replyGuard->errorString();
+        const QByteArray body = replyGuard->readAll();
+        const int statusCode
+            = replyGuard->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const auto rawHeaderPairs = replyGuard->rawHeaderPairs();
+
+        replyGuard->disconnect();
+        replyGuard->deleteLater();
+
+        if (isTransportLevelError(code)) {
+            HttpTransportError err(errorString, code);
+            qCDebug(llmNetworkLog).noquote() << "HttpClient transport error:" << err.message();
+            promise->setException(std::make_exception_ptr(err));
+            promise->finish();
+            return;
+        }
+
+        HttpResponse response;
+        response.statusCode = statusCode;
+        response.rawHeaders = rawHeaderPairs;
+        response.body = body;
+        promise->addResult(std::move(response));
+        promise->finish();
+    });
 
     return promise->future();
 }
 
-QFuture<QByteArray> HttpClient::post(
-    const QNetworkRequest &request, const QJsonObject &payload, RequestMode mode)
+HttpStream *HttpClient::openStream(
+    const QNetworkRequest &request, QByteArrayView verb, const QByteArray &body)
 {
-    QJsonDocument doc(payload);
-
-    auto promise = std::make_shared<QPromise<QByteArray>>();
-    promise->start();
-
     QNetworkRequest req(request);
-    req.setTransferTimeout(m_transferTimeoutMs);
-    QNetworkReply *reply = m_manager->post(req, doc.toJson(QJsonDocument::Compact));
-    setupReply(reply, promise, mode);
+    req.setTransferTimeout(m_impl->transferTimeoutMs);
 
-    return promise->future();
-}
-
-QFuture<QByteArray> HttpClient::del(
-    const QNetworkRequest &request, std::optional<QJsonObject> payload)
-{
-    auto promise = std::make_shared<QPromise<QByteArray>>();
-    promise->start();
-
-    QNetworkRequest req(request);
-    req.setTransferTimeout(m_transferTimeoutMs);
-    QNetworkReply *reply;
-    if (payload) {
-        QJsonDocument doc(*payload);
-        reply = m_manager->sendCustomRequest(req, "DELETE", doc.toJson(QJsonDocument::Compact));
-    } else {
-        reply = m_manager->deleteResource(req);
-    }
-
-    setupReply(reply, promise, RequestMode::Buffered);
-
-    return promise->future();
+    QNetworkReply *reply = dispatchVerb(m_impl->manager, req, verb, body);
+    return new HttpStream(reply);
 }
 
 void HttpClient::setProxy(const QNetworkProxy &proxy)
 {
-    m_manager->setProxy(proxy);
+    m_impl->manager->setProxy(proxy);
 }
 
-void HttpClient::setupReply(
-    QNetworkReply *reply, std::shared_ptr<QPromise<QByteArray>> promise, RequestMode mode)
+void HttpClient::setTransferTimeout(int milliseconds)
 {
-    if (mode == RequestMode::Streaming) {
-        connect(reply, &QNetworkReply::readyRead, this, [reply, promise]() {
-            QByteArray data = reply->readAll();
-            if (!data.isEmpty())
-                promise->addResult(data);
-        });
-    }
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply, promise]() {
-        handleFinished(reply, promise);
-    });
+    m_impl->transferTimeoutMs = milliseconds;
 }
 
-void HttpClient::handleFinished(QNetworkReply *reply, std::shared_ptr<QPromise<QByteArray>> promise)
+void HttpClient::setTransferTimeout(std::chrono::milliseconds timeout)
 {
-    QByteArray remaining = reply->readAll();
-    QNetworkReply::NetworkError networkError = reply->error();
-    int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    QString errorString = reply->errorString();
-
-    reply->disconnect();
-    reply->deleteLater();
-
-    if (networkError != QNetworkReply::NoError) {
-        QString errorMsg = parseErrorFromResponse(statusCode, remaining, errorString);
-        promise->setException(std::make_exception_ptr(std::runtime_error(errorMsg.toStdString())));
-    } else if (!remaining.isEmpty()) {
-        promise->addResult(remaining);
-    }
-
-    promise->finish();
+    m_impl->transferTimeoutMs = static_cast<int>(timeout.count());
 }
 
-QString HttpClient::parseErrorFromResponse(
-    int statusCode, const QByteArray &responseBody, const QString &networkErrorString)
+int HttpClient::transferTimeoutMs() const noexcept
 {
-    if (!responseBody.isEmpty()) {
-        QJsonDocument errorDoc = QJsonDocument::fromJson(responseBody);
-        if (!errorDoc.isNull() && errorDoc.isObject()) {
-            QJsonObject errorObj = errorDoc.object();
-            if (errorObj.contains("error")) {
-                QJsonValue errorValue = errorObj["error"];
-                if (errorValue.isString()) {
-                    return QString("HTTP %1: %2").arg(statusCode).arg(errorValue.toString());
-                }
-                QJsonObject error = errorValue.toObject();
-                QString message = error["message"].toString();
-                QString type = error["type"].toString();
-                QString code = error["code"].toString();
-
-                QString errorMsg = QString("HTTP %1: %2").arg(statusCode).arg(message);
-                if (!type.isEmpty())
-                    errorMsg += QString(" (type: %1)").arg(type);
-                if (!code.isEmpty())
-                    errorMsg += QString(" (code: %1)").arg(code);
-                return errorMsg;
-            }
-            return QString("HTTP %1: %2").arg(statusCode).arg(QString::fromUtf8(responseBody));
-        }
-        return QString("HTTP %1: %2").arg(statusCode).arg(QString::fromUtf8(responseBody));
-    }
-    return QString("HTTP %1: %2").arg(statusCode).arg(networkErrorString);
+    return m_impl->transferTimeoutMs;
 }
 
 } // namespace LLMCore

@@ -3,48 +3,52 @@
 
 #pragma once
 
-#include <optional>
+#include <chrono>
+#include <memory>
 
+#include <QByteArray>
+#include <QByteArrayView>
 #include <QFuture>
-#include <QJsonObject>
-#include <QNetworkAccessManager>
-#include <QNetworkReply>
 #include <QObject>
-#include <QPromise>
 
+#include <LLMCore/HttpResponse.hpp>
+#include <LLMCore/HttpTransportError.hpp>
 #include <LLMCore/LLMCore_global.h>
 
-#include <LLMCore/RequestMode.hpp>
+class QNetworkProxy;
+class QNetworkRequest;
 
 namespace LLMCore {
+
+class HttpStream;
 
 class LLMCORE_EXPORT HttpClient : public QObject
 {
     Q_OBJECT
-
 public:
     explicit HttpClient(QObject *parent = nullptr);
+    ~HttpClient() override;
 
-    QFuture<QByteArray> get(const QNetworkRequest &request);
-    QFuture<QByteArray> post(
+    [[nodiscard]] QFuture<HttpResponse> send(
         const QNetworkRequest &request,
-        const QJsonObject &payload,
-        RequestMode mode = RequestMode::Buffered);
-    QFuture<QByteArray> del(
-        const QNetworkRequest &request, std::optional<QJsonObject> payload = std::nullopt);
+        QByteArrayView verb,
+        const QByteArray &body = {});
+
+    [[nodiscard]] HttpStream *openStream(
+        const QNetworkRequest &request,
+        QByteArrayView verb,
+        const QByteArray &body = {});
 
     void setProxy(const QNetworkProxy &proxy);
-    void setTransferTimeout(int ms);
+
+    void setTransferTimeout(int milliseconds);
+    void setTransferTimeout(std::chrono::milliseconds timeout);
+
+    [[nodiscard]] int transferTimeoutMs() const noexcept;
 
 private:
-    void setupReply(
-        QNetworkReply *reply, std::shared_ptr<QPromise<QByteArray>> promise, RequestMode mode);
-    void handleFinished(QNetworkReply *reply, std::shared_ptr<QPromise<QByteArray>> promise);
-    QString parseErrorFromResponse(
-        int statusCode, const QByteArray &responseBody, const QString &networkErrorString);
-
-    QNetworkAccessManager *m_manager;
-    int m_transferTimeoutMs = 120000;
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
 };
 
 } // namespace LLMCore

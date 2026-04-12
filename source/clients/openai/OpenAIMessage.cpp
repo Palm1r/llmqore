@@ -107,7 +107,8 @@ QJsonObject OpenAIMessage::toProviderFormat() const
     return message;
 }
 
-QJsonArray OpenAIMessage::createToolResultMessages(const QHash<QString, QString> &toolResults) const
+QJsonArray OpenAIMessage::createToolResultMessages(
+    const QHash<QString, ToolResult> &toolResults) const
 {
     QJsonArray messages;
 
@@ -117,7 +118,7 @@ QJsonArray OpenAIMessage::createToolResultMessages(const QHash<QString, QString>
                 QJsonObject{
                     {"role", "tool"},
                     {"tool_call_id", toolContent->id()},
-                    {"content", toolResults[toolContent->id()]}});
+                    {"content", toolResults[toolContent->id()].asText()}});
         }
     }
 

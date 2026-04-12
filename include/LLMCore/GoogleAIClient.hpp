@@ -45,7 +45,8 @@ protected:
     QJsonObject buildContinuationPayload(
         const QJsonObject &originalPayload,
         BaseMessage *message,
-        const QHash<QString, QString> &toolResults) override;
+        const QHash<QString, ToolResult> &toolResults) override;
+    [[nodiscard]] QString parseHttpError(const HttpResponse &response) const override;
 
 private:
     void processStreamChunk(const RequestID &id, const QJsonObject &chunk);

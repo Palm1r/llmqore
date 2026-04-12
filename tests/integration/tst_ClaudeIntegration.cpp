@@ -84,10 +84,17 @@ TEST_F(ClaudeIntegrationTest, StreamingChunks)
 
     QJsonObject payload;
     payload["model"] = m_model;
-    payload["max_tokens"] = 250;
+    payload["max_tokens"] = 800;
     payload["stream"] = true;
-    payload["messages"] = QJsonArray{
-        QJsonObject{{"role", "user"}, {"content", "Count from 1 to 5, one number per line."}}};
+    // Ask for a response long enough to cross Claude's internal batching
+    // threshold — short bodies (a few hundred bytes) can be coalesced into
+    // a single content_block_delta event on fast paths, so we request an
+    // explicit 500-word essay to guarantee multiple text deltas.
+    payload["messages"] = QJsonArray{QJsonObject{
+        {"role", "user"},
+        {"content",
+         "Write a 500-word essay about the history of programming languages, "
+         "covering FORTRAN, C, and Python. Use complete sentences."}}};
 
     client->sendMessage(payload, callbacks);
 

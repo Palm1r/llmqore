@@ -158,9 +158,9 @@ TEST(ClaudeMessage, CreateToolResultsContent)
     msg.handleContentBlockStart(0, "tool_use", data1);
     msg.handleContentBlockStart(1, "tool_use", data2);
 
-    QHash<QString, QString> results;
-    results["t1"] = "file content";
-    results["t2"] = "write ok";
+    QHash<QString, ToolResult> results;
+    results["t1"] = ToolResult::text("file content");
+    results["t2"] = ToolResult::text("write ok");
 
     QJsonArray toolResults = msg.createToolResultsContent(results);
     EXPECT_EQ(toolResults.size(), 2);
@@ -169,6 +169,7 @@ TEST(ClaudeMessage, CreateToolResultsContent)
     for (const auto &val : toolResults) {
         QJsonObject obj = val.toObject();
         EXPECT_EQ(obj["type"].toString(), "tool_result");
+        // Single-text-block fast path: content is a bare string.
         if (obj["tool_use_id"].toString() == "t1") {
             EXPECT_EQ(obj["content"].toString(), "file content");
             foundT1 = true;
@@ -180,6 +181,64 @@ TEST(ClaudeMessage, CreateToolResultsContent)
     }
     EXPECT_TRUE(foundT1);
     EXPECT_TRUE(foundT2);
+}
+
+TEST(ClaudeMessage, CreateToolResultsContentWithImageBlock)
+{
+    ClaudeMessage msg;
+    QJsonObject data{{"id", "img"}, {"name", "read_image"}, {"input", QJsonObject{}}};
+    msg.handleContentBlockStart(0, "tool_use", data);
+
+    // A rich result: a description + an image block. Claude should emit a
+    // tool_result whose `content` is a JSON array (not a bare string),
+    // containing a text block and an image block with base64-encoded data.
+    ToolResult r;
+    r.content.append(ToolContent::makeText("here is the screenshot"));
+    const QByteArray pngBytes = QByteArray("\x89PNG\r\n\x1a\n" "fake", 12);
+    r.content.append(ToolContent::makeImage(pngBytes, "image/png"));
+
+    QHash<QString, ToolResult> results;
+    results["img"] = r;
+
+    QJsonArray toolResults = msg.createToolResultsContent(results);
+    ASSERT_EQ(toolResults.size(), 1);
+
+    const QJsonObject wrap = toolResults.first().toObject();
+    EXPECT_EQ(wrap["type"].toString(), "tool_result");
+    EXPECT_EQ(wrap["tool_use_id"].toString(), "img");
+    ASSERT_TRUE(wrap["content"].isArray());
+
+    const QJsonArray content = wrap["content"].toArray();
+    ASSERT_EQ(content.size(), 2);
+
+    // First block: text
+    EXPECT_EQ(content[0].toObject()["type"].toString(), "text");
+    EXPECT_EQ(content[0].toObject()["text"].toString(), "here is the screenshot");
+
+    // Second block: image with base64 source
+    const QJsonObject imgBlock = content[1].toObject();
+    EXPECT_EQ(imgBlock["type"].toString(), "image");
+    const QJsonObject source = imgBlock["source"].toObject();
+    EXPECT_EQ(source["type"].toString(), "base64");
+    EXPECT_EQ(source["media_type"].toString(), "image/png");
+    EXPECT_EQ(
+        QByteArray::fromBase64(source["data"].toString().toUtf8()), pngBytes);
+}
+
+TEST(ClaudeMessage, CreateToolResultsContentMarksErrors)
+{
+    ClaudeMessage msg;
+    QJsonObject data{{"id", "err"}, {"name", "broken"}, {"input", QJsonObject{}}};
+    msg.handleContentBlockStart(0, "tool_use", data);
+
+    QHash<QString, ToolResult> results;
+    results["err"] = ToolResult::error("nope");
+
+    QJsonArray toolResults = msg.createToolResultsContent(results);
+    ASSERT_EQ(toolResults.size(), 1);
+    const QJsonObject wrap = toolResults.first().toObject();
+    EXPECT_EQ(wrap["content"].toString(), "nope");
+    EXPECT_TRUE(wrap["is_error"].toBool());
 }
 
 TEST(ClaudeMessage, StartNewContinuation)

@@ -8,9 +8,8 @@
 
 #include "OllamaMessage.hpp"
 #include <LLMCore/HttpClient.hpp>
+#include <LLMCore/LineBuffer.hpp>
 #include <LLMCore/Log.hpp>
-#include <LLMCore/SSEBuffer.hpp>
-#include <LLMCore/SSEUtils.hpp>
 
 namespace LLMCore {
 
@@ -64,22 +63,38 @@ QFuture<QList<QString>> OllamaClient::listModels()
     QNetworkRequest request = prepareNetworkRequest(url);
 
     return httpClient()
-        ->get(request)
-        .then([](const QByteArray &data) {
+        ->send(request, QByteArrayView("GET"))
+        .then(this, [](const HttpResponse &response) {
             QList<QString> models;
-            QJsonObject json = QJsonDocument::fromJson(data).object();
-            QJsonArray modelArray = json["models"].toArray();
+            if (!response.isSuccess()) {
+                qCDebug(llmOllamaLog).noquote()
+                    << QString("Error fetching models: HTTP %1").arg(response.statusCode);
+                return models;
+            }
 
+            QJsonObject json = QJsonDocument::fromJson(response.body).object();
+            QJsonArray modelArray = json["models"].toArray();
             for (const QJsonValue &value : modelArray) {
                 QJsonObject modelObject = value.toObject();
                 models.append(modelObject["name"].toString());
             }
             return models;
         })
-        .onFailed([](const std::exception &e) {
+        .onFailed(this, [](const std::exception &e) {
             qCDebug(llmOllamaLog).noquote() << QString("Error fetching models: %1").arg(e.what());
             return QList<QString>{};
         });
+}
+
+QString OllamaClient::parseHttpError(const HttpResponse &response) const
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(response.body);
+    if (doc.isObject()) {
+        const QString message = doc.object().value("error").toString();
+        if (!message.isEmpty())
+            return QString("HTTP %1: %2").arg(response.statusCode).arg(message);
+    }
+    return BaseClient::parseHttpError(response);
 }
 
 void OllamaClient::processData(const RequestID &id, const QByteArray &data)
@@ -90,7 +105,7 @@ void OllamaClient::processData(const RequestID &id, const QByteArray &data)
     if (!hasRequest(id))
         return;
 
-    QStringList lines = requestSSEBuffer(id).processData(data);
+    QStringList lines = requestLineBuffer(id).processData(data);
 
     for (const QString &line : lines) {
         if (line.trimmed().isEmpty())
@@ -134,7 +149,7 @@ void OllamaClient::cleanupDerivedData(const RequestID &id)
 QJsonObject OllamaClient::buildContinuationPayload(
     const QJsonObject &originalPayload,
     BaseMessage *message,
-    const QHash<QString, QString> &toolResults)
+    const QHash<QString, ToolResult> &toolResults)
 {
     auto *ollamaMsg = qobject_cast<OllamaMessage *>(message);
     if (!ollamaMsg)
@@ -156,7 +171,7 @@ QJsonObject OllamaClient::buildContinuationPayload(
 void OllamaClient::onStreamFinished(const RequestID &id, std::optional<QString> error)
 {
     if (!error && hasRequest(id)) {
-        SSEBuffer &buffer = requestSSEBuffer(id);
+        LineBuffer &buffer = requestLineBuffer(id);
         if (buffer.hasIncompleteData()) {
             QString remaining = buffer.currentBuffer().trimmed();
             buffer.clear();

@@ -4,6 +4,7 @@
 #pragma once
 
 #include <LLMCore/BaseMessage.hpp>
+#include <LLMCore/ToolResult.hpp>
 
 namespace LLMCore {
 
@@ -22,9 +23,10 @@ public:
     void handleFinishReason(const QString &reason);
 
     QJsonObject toProviderFormat() const;
-    QJsonArray createToolResultParts(const QHash<QString, QString> &toolResults) const;
+    QJsonArray createToolResultParts(const QHash<QString, ToolResult> &toolResults) const;
 
     QString finishReason() const { return m_finishReason; }
+    QString stopReason() const override { return m_finishReason; }
     bool isErrorFinishReason() const;
     QString getErrorMessage() const;
     void startNewContinuation() override;

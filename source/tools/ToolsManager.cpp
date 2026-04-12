@@ -18,21 +18,8 @@ ToolsManager::ToolsManager(ToolSchemaFormat format, QObject *parent)
 
 void ToolsManager::initConnections()
 {
-    connect(
-        m_toolHandler,
-        &ToolHandler::toolCompleted,
-        this,
-        [this](const QString &requestId, const QString &toolId, const QString &result) {
-            onToolFinished(requestId, toolId, result, true);
-        });
-
-    connect(
-        m_toolHandler,
-        &ToolHandler::toolFailed,
-        this,
-        [this](const QString &requestId, const QString &toolId, const QString &error) {
-            onToolFinished(requestId, toolId, error, false);
-        });
+    connect(m_toolHandler, &ToolHandler::toolCompleted, this, &ToolsManager::onToolCompleted);
+    connect(m_toolHandler, &ToolHandler::toolFailed, this, &ToolsManager::onToolErrored);
 }
 
 void ToolsManager::addTool(BaseTool *tool)
@@ -108,7 +95,10 @@ void ToolsManager::executeToolCall(
         return;
     }
 
-    PendingTool pendingTool{toolId, toolName, input, "", false};
+    PendingTool pendingTool;
+    pendingTool.id = toolId;
+    pendingTool.name = toolName;
+    pendingTool.input = input;
     queue.queue.append(pendingTool);
 
     qCDebug(llmToolsLog).noquote()
@@ -127,21 +117,28 @@ void ToolsManager::executeNextTool(const QString &requestId)
 
     auto &queue = m_toolQueues[requestId];
 
-    // Skip over tools that are not registered (iterative instead of recursive
-    // to avoid stack overflow if many tools are missing)
     while (!queue.queue.isEmpty()) {
         PendingTool pendingTool = queue.queue.takeFirst();
         queue.isExecuting = true;
 
         BaseTool *toolInstance = m_tools.value(pendingTool.name);
         if (!toolInstance) {
-            qCWarning(llmToolsLog).noquote() << QString("Tool not found: %1").arg(pendingTool.name);
-            pendingTool.result = QString("Error: Tool not found: %1").arg(pendingTool.name);
+            qCWarning(llmToolsLog).noquote()
+                << QString("Tool not found: %1").arg(pendingTool.name);
+            const QString errText
+                = QString("Error: Tool not found: %1").arg(pendingTool.name);
+            pendingTool.result = ToolResult::error(errText);
+            pendingTool.resultText = errText;
             pendingTool.complete = true;
             queue.completed[pendingTool.id] = pendingTool;
             continue;
         }
 
+        // Insert into completed with complete=false; finalizePendingTool() will
+        // set complete=true once the async execution finishes.  The entry must
+        // exist before executeToolAsync() because a synchronously-resolved
+        // future triggers finalizePendingTool() immediately.
+        pendingTool.complete = false;
         queue.completed[pendingTool.id] = pendingTool;
 
         qCDebug(llmToolsLog).noquote()
@@ -159,7 +156,7 @@ void ToolsManager::executeNextTool(const QString &requestId)
 
     qCDebug(llmToolsLog).noquote()
         << QString("All tools complete for request %1, emitting results").arg(requestId);
-    QHash<QString, QString> results = getToolResults(requestId);
+    QHash<QString, ToolResult> results = getToolResults(requestId);
     emit toolExecutionComplete(requestId, results);
     queue.isExecuting = false;
 }
@@ -249,21 +246,33 @@ void ToolsManager::cleanupRequest(const QString &requestId)
     }
 }
 
-void ToolsManager::onToolFinished(
-    const QString &requestId, const QString &toolId, const QString &result, bool success)
+void ToolsManager::onToolCompleted(
+    const QString &requestId, const QString &toolId, const ToolResult &result)
 {
-    if (!m_toolQueues.contains(requestId)) {
+    finalizePendingTool(requestId, toolId, result, /*success*/ true);
+}
+
+void ToolsManager::onToolErrored(
+    const QString &requestId, const QString &toolId, const QString &errorText)
+{
+    finalizePendingTool(
+        requestId, toolId, ToolResult::error(errorText), /*success*/ false);
+}
+
+void ToolsManager::finalizePendingTool(
+    const QString &requestId, const QString &toolId, const ToolResult &rich, bool success)
+{
+    if (!m_toolQueues.contains(requestId))
         return;
-    }
 
     auto &queue = m_toolQueues[requestId];
-
-    if (!queue.completed.contains(toolId)) {
+    if (!queue.completed.contains(toolId))
         return;
-    }
 
     PendingTool &pendingTool = queue.completed[toolId];
-    pendingTool.result = success ? result : QString("Error: %1").arg(result);
+    pendingTool.result = rich;
+    pendingTool.resultText
+        = success ? rich.asText() : QString("Error: %1").arg(rich.asText());
     pendingTool.complete = true;
 
     qCDebug(llmToolsLog).noquote() << QString("Tool %1 %2 for request %3")
@@ -271,7 +280,7 @@ void ToolsManager::onToolFinished(
                                           .arg(success ? QString("completed") : QString("failed"))
                                           .arg(requestId);
 
-    emit toolExecutionResult(requestId, toolId, pendingTool.name, pendingTool.result);
+    emit toolExecutionResult(requestId, toolId, pendingTool.name, pendingTool.resultText);
 
     if (m_toolExecutionDelayMs > 0 && !queue.queue.isEmpty()) {
         QTimer::singleShot(m_toolExecutionDelayMs, this, [this, requestId]() {
@@ -282,16 +291,15 @@ void ToolsManager::onToolFinished(
     }
 }
 
-QHash<QString, QString> ToolsManager::getToolResults(const QString &requestId) const
+QHash<QString, ToolResult> ToolsManager::getToolResults(const QString &requestId) const
 {
-    QHash<QString, QString> results;
+    QHash<QString, ToolResult> results;
 
     if (m_toolQueues.contains(requestId)) {
         const auto &queue = m_toolQueues[requestId];
         for (auto it = queue.completed.begin(); it != queue.completed.end(); ++it) {
-            if (it.value().complete) {
+            if (it.value().complete)
                 results[it.key()] = it.value().result;
-            }
         }
     }
 

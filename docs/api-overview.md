@@ -1,38 +1,18 @@
 # API Overview
 
+LLMCore exposes two main abstractions to host applications: **`BaseClient`** for communicating with LLM providers, and **`BaseTool`** for extending model capabilities with custom tools.
+
 ## BaseClient
 
-| Method | Description |
-|---|---|
-| `sendMessage(payload, callbacks)` | Send a JSON payload, returns `RequestID` |
-| `ask(prompt, callbacks)` | Convenience: send a text prompt |
-| `cancelRequest(id)` | Cancel an in-flight request |
-| `tools()` | Access the `ToolsManager` for registering tools |
-| `hasTools()` | Check if any tools are registered |
+`BaseClient` is the abstract base class for every LLM provider. It handles sending messages to a provider, receiving streamed responses, and automatically executing tool calls when the model requests them. Host code interacts with a provider client (such as `ClaudeClient` or `OpenAIClient`) through two complementary notification mechanisms:
 
-## Signals
+- **Qt signals** -- broadcast to any number of listeners. Cover streamed text chunks, accumulated text, request completion/failure, thinking blocks, and tool execution events.
+- **RequestCallbacks** -- per-request callback struct passed to the send call. Delivers the same events but scoped to a single request, which is convenient when multiplexing several requests on one client.
 
-| Signal | When |
-|---|---|
-| `chunkReceived(id, chunk)` | Each streamed text chunk |
-| `accumulatedReceived(id, text)` | Full text accumulated so far |
-| `requestCompleted(id, fullText)` | Stream finished successfully |
-| `requestFailed(id, error)` | Request failed or was cancelled |
-| `thinkingBlockReceived(id, thinking, signature)` | Thinking block completed |
-| `toolStarted(id, toolId, toolName)` | Tool execution began |
-| `toolResultReady(id, toolId, toolName, result)` | Tool execution finished |
-
-## RequestCallbacks
-
-Same events as signals but scoped to a single request: `onChunk`, `onAccumulated`, `onCompleted`, `onFailed`, `onThinkingBlock`, `onToolStarted`, `onToolResult`.
+See `include/LLMCore/BaseClient.hpp` for the full API surface.
 
 ## BaseTool
 
-| Method | Description |
-|---|---|
-| `id()` | Unique tool identifier |
-| `displayName()` | Human-readable name |
-| `description()` | Description sent to the model |
-| `parametersSchema()` | JSON Schema for tool parameters |
-| `executeAsync(input)` | Async execution, returns `QFuture<QString>` |
-| `isEnabled()` / `setEnabled(bool)` | Enable or disable the tool |
+`BaseTool` is the interface for custom tools that models can invoke. Each tool declares an identifier, a human-readable name, a description (sent to the model), and a JSON Schema for its parameters. The single async entry point returns a `QFuture<ToolResult>` carrying rich content (text, images, audio, resources, or resource links). Tools can be enabled or disabled at runtime without removing them from the registry.
+
+See `include/LLMCore/BaseTool.hpp` for the full interface.

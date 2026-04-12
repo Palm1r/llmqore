@@ -403,9 +403,9 @@ TEST(GoogleMessage, CreateToolResultParts)
 
     auto tools = msg.getCurrentToolUseContent();
 
-    QHash<QString, QString> results;
-    results[tools[0]->id()] = "file content";
-    results[tools[1]->id()] = "write ok";
+    QHash<QString, ToolResult> results;
+    results[tools[0]->id()] = ToolResult::text("file content");
+    results[tools[1]->id()] = ToolResult::text("write ok");
 
     QJsonArray parts = msg.createToolResultParts(results);
     EXPECT_EQ(parts.size(), 2);
@@ -418,6 +418,90 @@ TEST(GoogleMessage, CreateToolResultParts)
         EXPECT_TRUE(funcResp.contains("response"));
         EXPECT_TRUE(funcResp["response"].toObject().contains("result"));
     }
+}
+
+TEST(GoogleMessage, CreateToolResultParts_ImageBecomesInlineDataPart)
+{
+    GoogleMessage msg;
+    msg.handleFunctionCallStart("get_sample_image");
+    msg.handleFunctionCallComplete();
+
+    auto tools = msg.getCurrentToolUseContent();
+    ASSERT_EQ(tools.size(), 1);
+
+    ToolResult r;
+    r.content.append(ToolContent::makeText("here is the screenshot"));
+    r.content.append(ToolContent::makeImage(QByteArray("PNGDATA"), "image/png"));
+
+    QHash<QString, ToolResult> results;
+    results[tools[0]->id()] = r;
+
+    const QJsonArray parts = msg.createToolResultParts(results);
+    ASSERT_EQ(parts.size(), 1);
+
+    const QJsonObject funcResp = parts[0].toObject()["functionResponse"].toObject();
+    EXPECT_EQ(funcResp["name"].toString(), "get_sample_image");
+
+    // Text preamble is still in response.result.
+    EXPECT_EQ(
+        funcResp["response"].toObject()["result"].toString(), "here is the screenshot");
+
+    // The rich image is an inlineData part inside the functionResponse.
+    ASSERT_TRUE(funcResp.contains("parts"));
+    const QJsonArray inner = funcResp["parts"].toArray();
+    ASSERT_EQ(inner.size(), 1);
+
+    const QJsonObject inlineData = inner[0].toObject()["inlineData"].toObject();
+    EXPECT_EQ(inlineData["mimeType"].toString(), "image/png");
+    EXPECT_EQ(
+        QByteArray::fromBase64(inlineData["data"].toString().toUtf8()), QByteArray("PNGDATA"));
+}
+
+TEST(GoogleMessage, CreateToolResultParts_TextOnlyKeepsFlatResponse)
+{
+    GoogleMessage msg;
+    msg.handleFunctionCallStart("read");
+    msg.handleFunctionCallComplete();
+
+    auto tools = msg.getCurrentToolUseContent();
+    QHash<QString, ToolResult> results;
+    results[tools[0]->id()] = ToolResult::text("plain text result");
+
+    const QJsonArray parts = msg.createToolResultParts(results);
+    ASSERT_EQ(parts.size(), 1);
+
+    const QJsonObject funcResp = parts[0].toObject()["functionResponse"].toObject();
+    EXPECT_EQ(funcResp["response"].toObject()["result"].toString(), "plain text result");
+    // Fast path: no inner parts array for plain text.
+    EXPECT_FALSE(funcResp.contains("parts"));
+}
+
+TEST(GoogleMessage, CreateToolResultParts_AudioAlsoBecomesInlineData)
+{
+    GoogleMessage msg;
+    msg.handleFunctionCallStart("record");
+    msg.handleFunctionCallComplete();
+
+    auto tools = msg.getCurrentToolUseContent();
+
+    ToolResult r;
+    r.content.append(ToolContent::makeAudio(QByteArray("WAVDATA"), "audio/wav"));
+
+    QHash<QString, ToolResult> results;
+    results[tools[0]->id()] = r;
+
+    const QJsonArray parts = msg.createToolResultParts(results);
+    ASSERT_EQ(parts.size(), 1);
+
+    const QJsonObject funcResp = parts[0].toObject()["functionResponse"].toObject();
+    ASSERT_TRUE(funcResp.contains("parts"));
+    const QJsonArray inner = funcResp["parts"].toArray();
+    ASSERT_EQ(inner.size(), 1);
+
+    const QJsonObject inlineData = inner[0].toObject()["inlineData"].toObject();
+    EXPECT_EQ(inlineData["mimeType"].toString(), "audio/wav");
+    EXPECT_EQ(
+        QByteArray::fromBase64(inlineData["data"].toString().toUtf8()), QByteArray("WAVDATA"));
 }
 
 TEST(GoogleMessage, StartNewContinuation)

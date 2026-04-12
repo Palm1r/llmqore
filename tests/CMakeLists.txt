@@ -14,8 +14,8 @@ enable_testing()
 add_executable(LLMCoreUnitTests
     main.cpp
     tst_ContentBlocks.cpp
-    tst_SSEBuffer.cpp
-    tst_SSEUtils.cpp
+    tst_LineBuffer.cpp
+    tst_SSEParser.cpp
     tst_ToolsManager.cpp
     tst_ToolHandler.cpp
     tst_ClaudeMessage.cpp
@@ -24,6 +24,13 @@ add_executable(LLMCoreUnitTests
     tst_GoogleMessage.cpp
     tst_OllamaMessage.cpp
     tst_ClientConstructors.cpp
+    tst_McpLineFramer.cpp
+    tst_McpTypes.cpp
+    tst_McpLoopback.cpp
+    tst_McpHttpServer.cpp
+    tst_ToolResult.cpp
+    tst_HttpClient.cpp
+    tst_HttpRequestParser.cpp
 )
 
 set_target_properties(LLMCoreUnitTests PROPERTIES

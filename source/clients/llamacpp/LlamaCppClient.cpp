@@ -9,8 +9,7 @@
 #include "clients/openai/OpenAIMessage.hpp"
 #include <LLMCore/HttpClient.hpp>
 #include <LLMCore/Log.hpp>
-#include <LLMCore/SSEBuffer.hpp>
-#include <LLMCore/SSEUtils.hpp>
+#include <LLMCore/SSEParser.hpp>
 
 namespace LLMCore {
 
@@ -72,11 +71,16 @@ QFuture<QList<QString>> LlamaCppClient::listModels()
     QNetworkRequest request = prepareNetworkRequest(url);
 
     return httpClient()
-        ->get(request)
-        .then([](const QByteArray &data) {
+        ->send(request, QByteArrayView("GET"))
+        .then(this, [](const HttpResponse &response) {
             QList<QString> models;
-            QJsonObject json = QJsonDocument::fromJson(data).object();
+            if (!response.isSuccess()) {
+                qCDebug(llmLlamaCppLog).noquote()
+                    << QString("Error fetching models: HTTP %1").arg(response.statusCode);
+                return models;
+            }
 
+            QJsonObject json = QJsonDocument::fromJson(response.body).object();
             if (json.contains("data")) {
                 QJsonArray modelArray = json["data"].toArray();
                 for (const QJsonValue &value : modelArray) {
@@ -87,7 +91,7 @@ QFuture<QList<QString>> LlamaCppClient::listModels()
             }
             return models;
         })
-        .onFailed([](const std::exception &e) {
+        .onFailed(this, [](const std::exception &e) {
             qCDebug(llmLlamaCppLog).noquote() << QString("Error fetching models: %1").arg(e.what());
             return QList<QString>{};
         });
@@ -99,12 +103,14 @@ QFuture<bool> LlamaCppClient::isServerReady()
     QNetworkRequest request = prepareNetworkRequest(url);
 
     return httpClient()
-        ->get(request)
-        .then([](const QByteArray &data) {
-            QJsonObject json = QJsonDocument::fromJson(data).object();
+        ->send(request, QByteArrayView("GET"))
+        .then(this, [](const HttpResponse &response) {
+            if (!response.isSuccess())
+                return false;
+            QJsonObject json = QJsonDocument::fromJson(response.body).object();
             return json["status"].toString() == "ok";
         })
-        .onFailed([](const std::exception &) { return false; });
+        .onFailed(this, [](const std::exception &) { return false; });
 }
 
 QFuture<QJsonObject> LlamaCppClient::serverProps()
@@ -113,9 +119,32 @@ QFuture<QJsonObject> LlamaCppClient::serverProps()
     QNetworkRequest request = prepareNetworkRequest(url);
 
     return httpClient()
-        ->get(request)
-        .then([](const QByteArray &data) { return QJsonDocument::fromJson(data).object(); })
-        .onFailed([](const std::exception &) { return QJsonObject{}; });
+        ->send(request, QByteArrayView("GET"))
+        .then(this, [](const HttpResponse &response) -> QJsonObject {
+            if (!response.isSuccess())
+                return {};
+            return QJsonDocument::fromJson(response.body).object();
+        })
+        .onFailed(this, [](const std::exception &) { return QJsonObject{}; });
+}
+
+QString LlamaCppClient::parseHttpError(const HttpResponse &response) const
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(response.body);
+    if (doc.isObject()) {
+        const QJsonObject error = doc.object().value("error").toObject();
+        const QString message = error.value("message").toString();
+        const QString type = error.value("type").toString();
+        if (!message.isEmpty()) {
+            if (!type.isEmpty())
+                return QString("HTTP %1: %2 (%3)")
+                    .arg(response.statusCode)
+                    .arg(message)
+                    .arg(type);
+            return QString("HTTP %1: %2").arg(response.statusCode).arg(message);
+        }
+    }
+    return BaseClient::parseHttpError(response);
 }
 
 void LlamaCppClient::processData(const RequestID &id, const QByteArray &data)
@@ -123,13 +152,11 @@ void LlamaCppClient::processData(const RequestID &id, const QByteArray &data)
     if (!hasRequest(id))
         return;
 
-    QStringList lines = requestSSEBuffer(id).processData(data);
-
-    for (const QString &line : lines) {
-        if (line.trimmed().isEmpty() || line == "data: [DONE]")
+    const QList<SSEEvent> events = requestSSEParser(id).append(data);
+    for (const SSEEvent &ev : events) {
+        if (ev.data.isEmpty() || ev.data == "[DONE]")
             continue;
-
-        QJsonObject chunk = SSEUtils::parseEventLine(line);
+        const QJsonObject chunk = QJsonDocument::fromJson(ev.data).object();
         if (chunk.isEmpty())
             continue;
 
@@ -166,7 +193,7 @@ void LlamaCppClient::cleanupDerivedData(const RequestID &id)
 QJsonObject LlamaCppClient::buildContinuationPayload(
     const QJsonObject &originalPayload,
     BaseMessage *message,
-    const QHash<QString, QString> &toolResults)
+    const QHash<QString, ToolResult> &toolResults)
 {
     auto *openaiMsg = qobject_cast<OpenAIMessage *>(message);
     if (!openaiMsg)
@@ -188,22 +215,22 @@ QJsonObject LlamaCppClient::buildContinuationPayload(
 void LlamaCppClient::onStreamFinished(const RequestID &id, std::optional<QString> error)
 {
     if (!error && hasRequest(id)) {
-        SSEBuffer &buffer = requestSSEBuffer(id);
-        if (buffer.hasIncompleteData()) {
-            QString remaining = buffer.currentBuffer().trimmed();
-            buffer.clear();
+        // Some llama.cpp builds close the stream without a trailing
+        // blank line, leaving the final event un-dispatched. Force it.
+        const QList<SSEEvent> trailing = requestSSEParser(id).flush();
+        for (const SSEEvent &ev : trailing) {
+            if (ev.data.isEmpty() || ev.data == "[DONE]")
+                continue;
+            const QJsonObject chunk = QJsonDocument::fromJson(ev.data).object();
+            if (chunk.isEmpty())
+                continue;
 
-            if (!remaining.isEmpty()) {
-                QJsonObject chunk = SSEUtils::parseEventLine(remaining);
-                if (!chunk.isEmpty()) {
-                    if (chunk.contains("content") && !chunk.contains("choices")) {
-                        QString content = chunk["content"].toString();
-                        if (!content.isEmpty())
-                            addChunk(id, content);
-                    } else if (chunk.contains("choices")) {
-                        processStreamChunk(id, chunk);
-                    }
-                }
+            if (chunk.contains("content") && !chunk.contains("choices")) {
+                const QString content = chunk["content"].toString();
+                if (!content.isEmpty())
+                    addChunk(id, content);
+            } else if (chunk.contains("choices")) {
+                processStreamChunk(id, chunk);
             }
         }
     }

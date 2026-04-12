@@ -5,4 +5,5 @@
 
 #include <LLMCore/BaseTool.hpp>
 #include <LLMCore/ToolExceptions.hpp>
+#include <LLMCore/ToolResult.hpp>
 #include <LLMCore/ToolsManager.hpp>

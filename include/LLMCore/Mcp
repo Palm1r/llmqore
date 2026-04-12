@@ -1,0 +1,22 @@
+// Copyright (C) 2026 Petr Mironychev
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include <LLMCore/BaseElicitationProvider.hpp>
+#include <LLMCore/BasePromptProvider.hpp>
+#include <LLMCore/BaseResourceProvider.hpp>
+#include <LLMCore/BaseRootsProvider.hpp>
+#include <LLMCore/McpClient.hpp>
+#include <LLMCore/McpExceptions.hpp>
+#include <LLMCore/McpPipeTransport.hpp>
+#include <LLMCore/McpRemoteTool.hpp>
+#include <LLMCore/McpServer.hpp>
+#include <LLMCore/McpToolBinder.hpp>
+#include <LLMCore/McpSession.hpp>
+#include <LLMCore/McpHttpServerTransport.hpp>
+#include <LLMCore/McpHttpTransport.hpp>
+#include <LLMCore/McpStdioServerTransport.hpp>
+#include <LLMCore/McpStdioTransport.hpp>
+#include <LLMCore/McpTransport.hpp>
+#include <LLMCore/McpTypes.hpp>

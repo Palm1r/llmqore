@@ -10,16 +10,17 @@
 
 namespace LLMCore {
 
-class LLMCORE_EXPORT SSEBuffer
+class LLMCORE_EXPORT LineBuffer
 {
 public:
-    SSEBuffer() = default;
+    LineBuffer() = default;
 
     QStringList processData(const QByteArray &data);
 
     void clear();
-    QString currentBuffer() const;
-    bool hasIncompleteData() const;
+
+    [[nodiscard]] QString currentBuffer() const;
+    [[nodiscard]] bool hasIncompleteData() const;
 
 private:
     QString m_buffer;

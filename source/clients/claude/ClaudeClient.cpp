@@ -10,8 +10,7 @@
 #include "ClaudeMessage.hpp"
 #include <LLMCore/HttpClient.hpp>
 #include <LLMCore/Log.hpp>
-#include <LLMCore/SSEBuffer.hpp>
-#include <LLMCore/SSEUtils.hpp>
+#include <LLMCore/SSEParser.hpp>
 
 namespace LLMCore {
 
@@ -71,11 +70,16 @@ QFuture<QList<QString>> ClaudeClient::listModels()
     QNetworkRequest request = prepareNetworkRequest(url);
 
     return httpClient()
-        ->get(request)
-        .then([](const QByteArray &data) {
+        ->send(request, QByteArrayView("GET"))
+        .then(this, [](const HttpResponse &response) {
             QList<QString> models;
-            QJsonObject json = QJsonDocument::fromJson(data).object();
+            if (!response.isSuccess()) {
+                qCDebug(llmClaudeLog).noquote()
+                    << QString("Error fetching models: HTTP %1").arg(response.statusCode);
+                return models;
+            }
 
+            QJsonObject json = QJsonDocument::fromJson(response.body).object();
             if (json.contains("data")) {
                 QJsonArray modelArray = json["data"].toArray();
                 for (const QJsonValue &value : modelArray) {
@@ -86,10 +90,30 @@ QFuture<QList<QString>> ClaudeClient::listModels()
             }
             return models;
         })
-        .onFailed([](const std::exception &e) {
+        .onFailed(this, [](const std::exception &e) {
             qCDebug(llmClaudeLog).noquote() << QString("Error fetching models: %1").arg(e.what());
             return QList<QString>{};
         });
+}
+
+QString ClaudeClient::parseHttpError(const HttpResponse &response) const
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(response.body);
+    if (doc.isObject()) {
+        const QJsonObject root = doc.object();
+        const QJsonObject error = root.value("error").toObject();
+        const QString message = error.value("message").toString();
+        const QString type = error.value("type").toString();
+        if (!message.isEmpty()) {
+            if (!type.isEmpty())
+                return QString("HTTP %1: %2 (%3)")
+                    .arg(response.statusCode)
+                    .arg(message)
+                    .arg(type);
+            return QString("HTTP %1: %2").arg(response.statusCode).arg(message);
+        }
+    }
+    return BaseClient::parseHttpError(response);
 }
 
 void ClaudeClient::processData(const RequestID &id, const QByteArray &data)
@@ -97,12 +121,13 @@ void ClaudeClient::processData(const RequestID &id, const QByteArray &data)
     if (!hasRequest(id))
         return;
 
-    QStringList lines = requestSSEBuffer(id).processData(data);
-
-    for (const QString &line : lines) {
-        QJsonObject event = SSEUtils::parseEventLine(line);
-        if (!event.isEmpty())
-            processStreamEvent(id, event);
+    const QList<SSEEvent> events = requestSSEParser(id).append(data);
+    for (const SSEEvent &ev : events) {
+        if (ev.data.isEmpty() || ev.data == "[DONE]")
+            continue;
+        const QJsonObject json = QJsonDocument::fromJson(ev.data).object();
+        if (!json.isEmpty())
+            processStreamEvent(id, json);
     }
 }
 
@@ -120,7 +145,7 @@ void ClaudeClient::cleanupDerivedData(const RequestID &id)
 QJsonObject ClaudeClient::buildContinuationPayload(
     const QJsonObject &originalPayload,
     BaseMessage *message,
-    const QHash<QString, QString> &toolResults)
+    const QHash<QString, ToolResult> &toolResults)
 {
     auto *claudeMsg = qobject_cast<ClaudeMessage *>(message);
     if (!claudeMsg)
@@ -155,6 +180,10 @@ void ClaudeClient::processStreamEvent(const RequestID &id, const QJsonObject &ev
             qCDebug(llmClaudeLog).noquote()
                 << QString("Created ClaudeMessage for request %1").arg(id);
         } else {
+            qCWarning(llmClaudeLog).noquote()
+                << QString("Dropping event '%1' for request %2: no active message (missing "
+                           "message_start?)")
+                       .arg(eventType, id);
             return;
         }
     }

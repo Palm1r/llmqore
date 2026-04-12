@@ -83,10 +83,14 @@ TEST_F(OpenAIIntegrationTest, StreamingChunks)
 
     QJsonObject payload;
     payload["model"] = m_model;
-    payload["max_tokens"] = 100;
+    payload["max_tokens"] = 500;
     payload["stream"] = true;
-    payload["messages"] = QJsonArray{
-        QJsonObject{{"role", "user"}, {"content", "Count from 1 to 5, one number per line."}}};
+    // Ask for a long enough response that the API cannot coalesce it into
+    // a single SSE chunk — counting to 30 gives ~90 characters, which the
+    // API always streams as multiple chunks.
+    payload["messages"] = QJsonArray{QJsonObject{
+        {"role", "user"},
+        {"content", "Count from 1 to 30, one number per line, no other text."}}};
 
     client->sendMessage(payload, callbacks);
 

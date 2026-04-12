@@ -197,18 +197,75 @@ QJsonObject ClaudeMessage::toProviderFormat() const
     return message;
 }
 
-QJsonArray ClaudeMessage::createToolResultsContent(const QHash<QString, QString> &toolResults) const
+namespace {
+
+QJsonObject toClaudeInnerBlock(const ToolContent &block)
+{
+    switch (block.type) {
+    case ToolContent::Text:
+        return QJsonObject{{"type", "text"}, {"text", block.text}};
+    case ToolContent::Image: {
+        const QString mime = block.mimeType.isEmpty() ? QStringLiteral("image/png")
+                                                      : block.mimeType;
+        return QJsonObject{
+            {"type", "image"},
+            {"source",
+             QJsonObject{
+                 {"type", "base64"},
+                 {"media_type", mime},
+                 {"data", QString::fromUtf8(block.data.toBase64())}}}};
+    }
+    case ToolContent::Audio:
+        return QJsonObject{
+            {"type", "text"},
+            {"text",
+             QString("[audio: %1]")
+                 .arg(block.mimeType.isEmpty() ? QStringLiteral("unknown") : block.mimeType)}};
+    case ToolContent::Resource:
+        if (!block.resourceText.isEmpty())
+            return QJsonObject{{"type", "text"}, {"text", block.resourceText}};
+        return QJsonObject{
+            {"type", "text"}, {"text", QString("[resource: %1]").arg(block.uri)}};
+    case ToolContent::ResourceLink:
+        return QJsonObject{
+            {"type", "text"}, {"text", QString("[resource link: %1]").arg(block.uri)}};
+    }
+    return QJsonObject{{"type", "text"}, {"text", QString()}};
+}
+
+QJsonValue buildClaudeToolResultContent(const ToolResult &r)
+{
+    if (r.content.isEmpty())
+        return QString();
+    if (r.content.size() == 1 && r.content.first().type == ToolContent::Text)
+        return r.content.first().text;
+
+    QJsonArray arr;
+    for (const ToolContent &block : r.content)
+        arr.append(toClaudeInnerBlock(block));
+    return arr;
+}
+
+} // namespace
+
+QJsonArray ClaudeMessage::createToolResultsContent(
+    const QHash<QString, ToolResult> &toolResults) const
 {
     QJsonArray results;
 
     for (const auto *toolContent : getCurrentToolUseContent()) {
-        if (toolResults.contains(toolContent->id())) {
-            results.append(
-                QJsonObject{
-                    {"type", "tool_result"},
-                    {"tool_use_id", toolContent->id()},
-                    {"content", toolResults[toolContent->id()]}});
-        }
+        if (!toolResults.contains(toolContent->id()))
+            continue;
+
+        const ToolResult &r = toolResults[toolContent->id()];
+        QJsonObject block{
+            {"type", "tool_result"},
+            {"tool_use_id", toolContent->id()},
+            {"content", buildClaudeToolResultContent(r)},
+        };
+        if (r.isError)
+            block.insert("is_error", true);
+        results.append(block);
     }
 
     return results;

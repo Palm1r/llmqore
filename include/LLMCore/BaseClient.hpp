@@ -5,30 +5,40 @@
 
 #include <optional>
 
+#include <memory>
+
 #include <QFuture>
 #include <QHash>
 #include <QJsonObject>
+#include <QNetworkRequest>
 #include <QObject>
 #include <QString>
 #include <QUrl>
 
+#include <LLMCore/HttpResponse.hpp>
 #include <LLMCore/LLMCore_global.h>
 
 #include <LLMCore/BaseMessage.hpp>
+#include <LLMCore/LineBuffer.hpp>
 #include <LLMCore/RequestMode.hpp>
-#include <LLMCore/SSEBuffer.hpp>
+#include <LLMCore/SSEParser.hpp>
+#include <LLMCore/ToolResult.hpp>
 #include <LLMCore/ToolSchemaFormat.hpp>
-
-template<typename T>
-class QFutureWatcher;
-class QNetworkRequest;
 
 namespace LLMCore {
 
 class HttpClient;
+class HttpStream;
 class ToolsManager;
 
 using RequestID = QString;
+
+struct LLMCORE_EXPORT CompletionInfo
+{
+    QString fullText;
+    QString model;
+    QString stopReason;
+};
 
 struct RequestCallbacks
 {
@@ -42,24 +52,31 @@ struct RequestCallbacks
         const RequestID &id, const QString &toolId, const QString &toolName, const QString &result)>
         onToolResult;
     std::function<void(const RequestID &id, const QString &fullText)> onCompleted;
+    std::function<void(const RequestID &id, const CompletionInfo &info)> onFinalized;
     std::function<void(const RequestID &id, const QString &error)> onFailed;
 };
 
 struct DataBuffers
 {
-    SSEBuffer rawStreamBuffer;
+    LineBuffer lineBuffer;
+    SSEParser sseParser;
     QString responseContent;
 
     void clear()
     {
-        rawStreamBuffer.clear();
+        lineBuffer.clear();
+        sseParser.clear();
         responseContent.clear();
     }
 };
 
 struct ActiveRequest
 {
-    QFutureWatcher<QByteArray> *watcher = nullptr;
+    HttpStream *stream = nullptr;
+
+    bool errorMode = false;
+    QByteArray errorBody;
+
     DataBuffers buffers;
     RequestCallbacks callbacks;
 
@@ -68,6 +85,7 @@ struct ActiveRequest
     int continuationCount = 0;
     int emittedThinkingBlocksCount = 0;
     RequestMode mode = RequestMode::Streaming;
+    QString stopReason;
 };
 
 class LLMCORE_EXPORT BaseClient : public QObject
@@ -102,7 +120,7 @@ public:
     void setModel(const QString &model);
 
     ToolsManager *tools();
-    bool hasTools() const;
+    bool hasTools() const noexcept;
 
 signals:
     void chunkReceived(const LLMCore::RequestID &id, const QString &chunk);
@@ -129,8 +147,10 @@ protected:
     virtual QJsonObject buildContinuationPayload(
         const QJsonObject &originalPayload,
         BaseMessage *message,
-        const QHash<QString, QString> &toolResults)
+        const QHash<QString, ToolResult> &toolResults)
         = 0;
+
+    [[nodiscard]] virtual QString parseHttpError(const HttpResponse &response) const;
 
     virtual void onStreamFinished(const RequestID &id, std::optional<QString> error);
 
@@ -157,8 +177,9 @@ protected:
     void storeRequestContext(const RequestID &id, const QUrl &url, const QJsonObject &payload);
     bool checkContinuationLimit(const RequestID &id);
 
-    bool hasRequest(const RequestID &id) const;
-    SSEBuffer &requestSSEBuffer(const RequestID &id);
+    bool hasRequest(const RequestID &id) const noexcept;
+    LineBuffer &requestLineBuffer(const RequestID &id);
+    SSEParser &requestSSEParser(const RequestID &id);
     QString responseContent(const RequestID &id) const;
     void setResponseContent(const RequestID &id, const QString &content);
 
@@ -169,7 +190,7 @@ protected:
     static constexpr int kMaxToolContinuations = 10;
 
 private:
-    void handleToolContinuation(const RequestID &id, const QHash<QString, QString> &toolResults);
+    void handleToolContinuation(const RequestID &id, const QHash<QString, ToolResult> &toolResults);
     void cleanupRequest(const RequestID &id);
     void startHttpRequest(
         const RequestID &id,
