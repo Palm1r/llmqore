@@ -32,7 +32,12 @@ qt_add_qml_module(example-chat
     URI example.LLMCoreChat
     VERSION 1.0
     QML_FILES
-    Main.qml
+        Main.qml
+        qml/ChatBubble.qml
+        qml/ChatInput.qml
+        qml/ProviderBar.qml
+        qml/ToolBadge.qml
+        qml/ToolsDrawer.qml
 )
 
 target_link_libraries(example-chat

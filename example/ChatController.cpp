@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcessEnvironment>
 #include <QUrl>
 #include <QtDebug>
 
@@ -93,15 +94,40 @@ void ChatController::stopGeneration()
     m_currentRequest.clear();
 }
 
+QString ChatController::envApiKey(const QString &provider) const
+{
+    static const QHash<QString, QString> envMap = {
+        {"Claude",    "CLAUDE_API_KEY"},
+        {"OpenAI",    "OPENAI_API_KEY"},
+        {"Google AI", "GOOGLE_API_KEY"},
+    };
+    const QString var = envMap.value(provider);
+    if (var.isEmpty())
+        return {};
+    return QProcessEnvironment::systemEnvironment().value(var);
+}
+
 void ChatController::clearChat()
 {
     m_messages.clear();
     m_history = QJsonArray();
 }
 
+void ChatController::cancelPendingFetch()
+{
+    if (m_modelWatcher) {
+        m_modelWatcher->disconnect(this);
+        m_modelWatcher->cancel();
+        m_modelWatcher->deleteLater();
+        m_modelWatcher = nullptr;
+    }
+    setLoadingModels(false);
+}
+
 void ChatController::createClient(const QString &provider, const QString &url, const QString &apiKey)
 {
     m_currentProvider = provider;
+    cancelPendingFetch();
     if (m_client) {
         m_client->deleteLater();
         m_client = nullptr;
@@ -132,13 +158,21 @@ void ChatController::fetchModels()
     if (!m_client)
         return;
 
+    cancelPendingFetch();
+
     m_modelList.clear();
     emit modelListChanged();
     setLoadingModels(true);
     setStatus("Fetching models...");
 
     auto *watcher = new QFutureWatcher<QList<QString>>(this);
+    m_modelWatcher = watcher;
+
     connect(watcher, &QFutureWatcher<QList<QString>>::finished, this, [this, watcher]() {
+        if (m_modelWatcher != watcher)
+            return;
+        m_modelWatcher = nullptr;
+
         m_modelList = QStringList(watcher->result().cbegin(), watcher->result().cend());
         emit modelListChanged();
         setLoadingModels(false);

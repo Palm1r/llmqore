@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include <QFutureWatcher>
 #include <QList>
 #include <QObject>
+#include <QPointer>
 #include <QQmlEngine>
 #include <QString>
 
@@ -40,6 +42,7 @@ public:
     Q_INVOKABLE void send(const QString &text, const QString &model);
     Q_INVOKABLE void stopGeneration();
     Q_INVOKABLE void clearChat();
+    Q_INVOKABLE QString envApiKey(const QString &provider) const;
 
 signals:
     void modelListChanged();
@@ -59,8 +62,11 @@ private:
 
     void loadMcpConfig(const QString &path);
 
+    void cancelPendingFetch();
+
     MessageModel m_messages;
     LLMCore::BaseClient *m_client = nullptr;
+    QPointer<QFutureWatcher<QList<QString>>> m_modelWatcher;
     QJsonArray m_history;
     QStringList m_modelList;
     bool m_busy = false;

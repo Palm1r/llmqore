@@ -6,6 +6,8 @@ import QtQuick.Controls.Fusion
 import QtQuick.Layouts
 import example.LLMCoreChat
 
+import "qml"
+
 ApplicationWindow {
     id: root
 
@@ -14,118 +16,8 @@ ApplicationWindow {
         { name: "OpenAI",    url: "https://api.openai.com",                          needsKey: true  },
         { name: "Ollama",    url: "http://localhost:11434",                          needsKey: false },
         { name: "Google AI", url: "https://generativelanguage.googleapis.com",       needsKey: true  },
-        { name: "LlamaCpp", url: "http://localhost:8080",                          needsKey: false },
+        { name: "LlamaCpp",  url: "http://localhost:8080",                           needsKey: false },
     ]
-
-    component ChatBubble : Rectangle {
-        id: bubble
-
-        required property string role
-        required property string messageText
-        required property bool isToolInGroup
-
-        implicitHeight: contentCol.implicitHeight + 16
-        radius: 6
-
-        color: role === "user"  ? "#5e81ac"
-             : role === "error" ? "#bf616a"
-             : palette.base
-
-        ColumnLayout {
-            id: contentCol
-
-            anchors {
-                fill: parent
-                margins: 8
-            }
-            spacing: 4
-
-            Label {
-                visible: !bubble.isToolInGroup
-                text: bubble.role === "user"      ? qsTr("You")
-                    : bubble.role === "assistant"  ? qsTr("Assistant")
-                    : bubble.role === "error"      ? qsTr("Error")
-                    : bubble.role
-                font {
-                    bold: true
-                    pixelSize: 11
-                }
-                color: Qt.rgba(1, 1, 1, 0.5)
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-
-                visible: bubble.role === "tool"
-                implicitHeight: toolCol.implicitHeight + 12
-                radius: 4
-                color: Qt.rgba(235, 203, 139, 0.12)    // nord13 tint
-                border {
-                    width: 1
-                    color: Qt.rgba(235, 203, 139, 0.25)
-                }
-
-                ColumnLayout {
-                    id: toolCol
-
-                    anchors {
-                        fill: parent
-                        margins: 6
-                    }
-                    spacing: 2
-
-                    Label {
-                        text: {
-                            const m = bubble.messageText.match(/^\[(.+?)\]:/)
-                            return m ? "Tool: " + m[1] : "Tool"
-                        }
-                        font { bold: true; pixelSize: 10 }
-                        color: "#ebcb8b"
-                    }
-
-                    Label {
-                        Layout.fillWidth: true
-                        text: {
-                            const idx = bubble.messageText.indexOf("]: ")
-                            return idx >= 0 ? bubble.messageText.substring(idx + 3)
-                                            : bubble.messageText
-                        }
-                        wrapMode: Text.WordWrap
-                        textFormat: Text.PlainText
-                        font.pixelSize: 13
-                        color: Qt.rgba(1, 1, 1, 0.8)
-                    }
-                }
-            }
-
-            Label {
-                visible: bubble.role !== "tool"
-                Layout.fillWidth: true
-                text: bubble.messageText
-                wrapMode: Text.WordWrap
-                textFormat: Text.PlainText
-                font.pixelSize: 14
-                color: palette.text
-            }
-        }
-    }
-
-    component ToolBadge : Label {
-
-        required property string name
-
-        text: name
-        font.pixelSize: 11
-        color: "#d8dee9"
-        leftPadding: 6
-        rightPadding: 6
-        topPadding: 3
-        bottomPadding: 3
-        background: Rectangle {
-            radius: 3
-            color: palette.alternateBase
-        }
-    }
 
     width: 800
     height: 600
@@ -154,6 +46,11 @@ ApplicationWindow {
 
     ChatController { id: controller }
 
+    ToolsDrawer {
+        id: toolsDrawer
+        toolNames: controller.toolNames
+    }
+
     ColumnLayout {
         anchors {
             fill: parent
@@ -162,6 +59,8 @@ ApplicationWindow {
             topMargin: 6
         }
         spacing: 0
+
+        // -- Chat messages ------------------------------------------------
 
         ListView {
             id: chatView
@@ -200,134 +99,96 @@ ApplicationWindow {
                 }
             }
 
-            onCountChanged: Qt.callLater(() => positionViewAtEnd())
-        }
+            // Robust auto-scroll: keep at bottom during streaming
+            onCountChanged: scrollToBottom()
+            onContentHeightChanged: {
+                if (atYEnd || controller.busy)
+                    scrollToBottom()
+            }
 
-        Label {
-            Layout.leftMargin: 12
-            text: qsTr("Tools:")
-            font { bold: true; pixelSize: 11 }
-            color: palette.placeholderText
-        }
-
-        Flow {
-            Layout.fillWidth: true
-            Layout.topMargin: 4
-            Layout.bottomMargin: 4
-            spacing: 4
-            visible: controller.toolNames.length > 0
-
-            Repeater {
-                id: toolBadge
-
-                model: controller.toolNames
-
-                delegate: ToolBadge {
-                    required property string modelData
-                    name: modelData
-                }
+            function scrollToBottom() {
+                Qt.callLater(() => positionViewAtEnd())
             }
         }
 
-
-
+        // -- Separator ----------------------------------------------------
 
         Rectangle {
             Layout.fillWidth: true
+            Layout.topMargin: 4
             implicitHeight: 1
             color: palette.alternateBase
         }
 
-        ColumnLayout {
+        // -- Provider bar -------------------------------------------------
+
+        ProviderBar {
+            id: providerBar
+
             Layout.fillWidth: true
-            spacing: 6
+            Layout.topMargin: 6
+            providers: root.providers
+            controller: controller
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 6
+            onReconnectRequested: root.reconnect()
+        }
 
-                ComboBox {
-                    id: providerCombo
+        // -- Input bar ----------------------------------------------------
 
-                    Layout.preferredWidth: 120
-                    model: root.providers.map(p => p.name)
-                    onCurrentIndexChanged: {
-                        urlField.text = root.providers[currentIndex].url
-                        apiKeyField.text = ""
-                        root.reconnect()
-                    }
-                }
+        ChatInput {
+            Layout.fillWidth: true
+            Layout.topMargin: 6
+            busy: controller.busy
+            toolCount: controller.toolNames.length
 
-                TextField {
-                    id: urlField
-
-                    Layout.fillWidth: true
-                    text: root.providers[0].url
-                    placeholderText: qsTr("API URL")
-                    onEditingFinished: root.reconnect()
-                }
-
-                TextField {
-                    id: apiKeyField
-
-                    Layout.fillWidth: true
-                    visible: root.providers[providerCombo.currentIndex].needsKey
-                    echoMode: TextInput.Password
-                    placeholderText: qsTr("API Key")
-                    onEditingFinished: root.reconnect()
-                }
-
-                ComboBox {
-                    id: modelCombo
-
-                    Layout.preferredWidth: 200
-                    model: controller.modelList
-                    editable: true
-                    enabled: !controller.loadingModels
-                    displayText: controller.loadingModels ? qsTr("Loading…") : currentText
-                }
+            onSendRequested: text => {
+                if (!controller.modelList.length && providerBar.currentModel.length === 0)
+                    return
+                controller.send(text, providerBar.currentModel)
             }
+            onStopRequested: controller.stopGeneration()
+            onClearRequested: controller.clearChat()
+            onToolsToggled: toolsDrawer.open()
+        }
 
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 6
+        // -- Status (shown when not busy) ---------------------------------
 
-                ScrollView {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 56
+        Label {
+            Layout.topMargin: 4
+            Layout.leftMargin: 4
+            Layout.bottomMargin: 4
+            Layout.preferredHeight: 12
+            visible: !controller.busy
+            text: controller.status
+            font.pixelSize: 11
+            color: palette.placeholderText
+        }
 
-                    TextArea {
-                        id: inputField
+        // -- Typing indicator ---------------------------------------------
 
-                        placeholderText: qsTr("Type a message… (Enter to send, Shift+Enter for newline)")
-                        wrapMode: Text.WordWrap
-                        enabled: !controller.busy
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.topMargin: 4
+            Layout.leftMargin: 4
+            Layout.bottomMargin: 4
+            Layout.preferredHeight: 12
+            visible: controller.busy
+            spacing: 4
 
-                        Keys.onReturnPressed: event => {
-                            if (event.modifiers & Qt.ShiftModifier) {
-                                event.accepted = false
-                            } else {
-                                root.sendAction()
-                                event.accepted = true
-                            }
-                        }
+            Repeater {
+                model: 3
+                delegate: Rectangle {
+                    required property int index
+                    width: 6; height: 6; radius: 3
+                    color: "#88c0d0"
+
+                    SequentialAnimation on opacity {
+                        loops: Animation.Infinite
+                        running: controller.busy
+                        PauseAnimation { duration: index * 200 }
+                        NumberAnimation { from: 0.3; to: 1.0; duration: 400 }
+                        NumberAnimation { from: 1.0; to: 0.3; duration: 400 }
                     }
-                }
-
-                Button {
-                    text: controller.busy ? qsTr("Stop") : qsTr("Send")
-                    enabled: controller.busy || modelCombo.currentText.length > 0
-                    Layout.preferredHeight: 56
-                    Layout.preferredWidth: 72
-                    onClicked: controller.busy ? controller.stopGeneration() : root.sendAction()
-                }
-
-                Button {
-                    text: qsTr("Clear")
-                    enabled: !controller.busy
-                    Layout.preferredHeight: 56
-                    Layout.preferredWidth: 72
-                    onClicked: controller.clearChat()
                 }
             }
 
@@ -339,20 +200,11 @@ ApplicationWindow {
         }
     }
 
-    function sendAction() {
-        const text = inputField.text.trim()
-        if (text.length === 0) return
-        if (!controller.modelList.length && modelCombo.currentText.length === 0) return
-
-        controller.send(inputField.text, modelCombo.currentText)
-        inputField.text = ""
-    }
-
     function reconnect() {
         controller.setupProvider(
-            providerCombo.currentText,
-            urlField.text.trim(),
-            apiKeyField.text.trim()
+            providerBar.providerName(),
+            providerBar.providerUrl(),
+            providerBar.providerKey()
         )
     }
 
