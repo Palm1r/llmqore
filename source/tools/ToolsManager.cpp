@@ -54,6 +54,35 @@ void ToolsManager::removeTool(const QString &name)
     }
 }
 
+void ToolsManager::removeAllTools()
+{
+    if (m_tools.isEmpty())
+        return;
+    for (auto *t : std::as_const(m_tools))
+        t->deleteLater();
+    m_tools.clear();
+    m_mcpClientTools.clear();
+    qCDebug(llmToolsLog).noquote() << "Removed all tools";
+    emit toolsChanged();
+}
+
+void ToolsManager::removeToolsIf(std::function<bool(const BaseTool *)> predicate)
+{
+    bool changed = false;
+    for (auto it = m_tools.begin(); it != m_tools.end();) {
+        if (predicate(it.value())) {
+            qCDebug(llmToolsLog).noquote() << QString("Removed tool '%1'").arg(it.key());
+            it.value()->deleteLater();
+            it = m_tools.erase(it);
+            changed = true;
+        } else {
+            ++it;
+        }
+    }
+    if (changed)
+        emit toolsChanged();
+}
+
 void ToolsManager::addMcpServer(const McpServerEntry &entry)
 {
     Mcp::McpTransport *transport = nullptr;

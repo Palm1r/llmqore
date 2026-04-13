@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <functional>
+
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -77,6 +79,8 @@ public:
     void addMcpClient(Mcp::McpClient *client);
     void removeMcpClient(Mcp::McpClient *client);
     void removeTool(const QString &name);
+    void removeAllTools();
+    void removeToolsIf(std::function<bool(const BaseTool *)> predicate);
     BaseTool *tool(const QString &name) const;
     QList<BaseTool *> registeredTools() const;
 
