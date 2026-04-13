@@ -8,15 +8,13 @@
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
-#include <QMap>
-#include <QObject>
 #include <QProcessEnvironment>
 #include <QString>
 #include <QStringList>
 #include <QUrl>
 
-#include <LLMCore/BaseTool.hpp>
 #include <LLMCore/LLMCore_global.h>
+#include <LLMCore/ToolRegistry.hpp>
 #include <LLMCore/ToolResult.hpp>
 #include <LLMCore/ToolSchemaFormat.hpp>
 
@@ -66,23 +64,18 @@ struct ToolQueue
     bool isExecuting = false;
 };
 
-class LLMCORE_EXPORT ToolsManager : public QObject
+class LLMCORE_EXPORT ToolsManager : public ToolRegistry
 {
     Q_OBJECT
 
 public:
     explicit ToolsManager(ToolSchemaFormat format, QObject *parent = nullptr);
 
-    void addTool(BaseTool *tool);
     void addMcpServer(const McpServerEntry &entry);
     void loadMcpServers(const QJsonObject &config);
     void addMcpClient(Mcp::McpClient *client);
     void removeMcpClient(Mcp::McpClient *client);
-    void removeTool(const QString &name);
     void removeAllTools();
-    void removeToolsIf(std::function<bool(const BaseTool *)> predicate);
-    BaseTool *tool(const QString &name) const;
-    QList<BaseTool *> registeredTools() const;
 
     QJsonArray getToolsDefinitions() const;
     QString displayName(const QString &toolName) const;
@@ -98,7 +91,6 @@ public:
     int toolExecutionDelay() const;
 
 signals:
-    void toolsChanged();
     void toolExecutionStarted(
         const QString &requestId, const QString &toolId, const QString &toolName);
     void toolExecutionResult(
@@ -131,9 +123,6 @@ private:
 
     void registerMcpTools(Mcp::McpClient *client);
 
-    // QMap for deterministic alphabetical iteration order — important for
-    // reproducible test output and stable round-trips on the wire.
-    QMap<QString, BaseTool *> m_tools;
     QHash<Mcp::McpClient *, QStringList> m_mcpClientTools;
 };
 

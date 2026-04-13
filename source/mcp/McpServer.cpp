@@ -11,7 +11,7 @@
 #include <LLMCore/McpSession.hpp>
 #include <LLMCore/McpTransport.hpp>
 #include <LLMCore/ToolResult.hpp>
-#include <LLMCore/ToolsManager.hpp>
+#include <LLMCore/ToolRegistry.hpp>
 
 #include <QFuture>
 #include <QJsonArray>
@@ -426,12 +426,12 @@ void McpServer::installHandlers()
         [](const QJsonObject &) -> QFuture<QJsonValue> { return makeReadyFuture(QJsonObject{}); });
 }
 
-void McpServer::setToolsManager(LLMCore::ToolsManager *manager)
+void McpServer::setToolRegistry(LLMCore::ToolRegistry *registry)
 {
-    if (m_toolsManager) {
-        disconnect(m_toolsManager, nullptr, this, nullptr);
+    if (m_toolRegistry) {
+        disconnect(m_toolRegistry, nullptr, this, nullptr);
     }
-    m_toolsManager = manager;
+    m_toolRegistry = registry;
 }
 
 void McpServer::addTool(LLMCore::BaseTool *tool)
@@ -584,8 +584,8 @@ void McpServer::stop()
 QList<LLMCore::BaseTool *> McpServer::collectTools() const
 {
     QList<LLMCore::BaseTool *> tools;
-    if (m_toolsManager)
-        tools = m_toolsManager->registeredTools();
+    if (m_toolRegistry)
+        tools = m_toolRegistry->registeredTools();
     for (const auto &t : m_standaloneTools) {
         if (t)
             tools.append(t.data());
@@ -595,8 +595,8 @@ QList<LLMCore::BaseTool *> McpServer::collectTools() const
 
 LLMCore::BaseTool *McpServer::findTool(const QString &name) const
 {
-    if (m_toolsManager) {
-        if (auto *t = m_toolsManager->tool(name))
+    if (m_toolRegistry) {
+        if (auto *t = m_toolRegistry->tool(name))
             return t;
     }
     auto it = m_standaloneTools.constFind(name);

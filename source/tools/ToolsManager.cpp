@@ -13,7 +13,7 @@
 namespace LLMCore {
 
 ToolsManager::ToolsManager(ToolSchemaFormat format, QObject *parent)
-    : QObject(parent)
+    : ToolRegistry(parent)
     , m_toolHandler(new ToolHandler(this))
     , m_format(format)
 {
@@ -26,61 +26,10 @@ void ToolsManager::initConnections()
     connect(m_toolHandler, &ToolHandler::toolFailed, this, &ToolsManager::onToolErrored);
 }
 
-void ToolsManager::addTool(BaseTool *tool)
-{
-    if (!tool) {
-        qCWarning(llmToolsLog).noquote() << "Attempted to add null tool";
-        return;
-    }
-
-    const QString toolName = tool->id();
-    if (m_tools.contains(toolName)) {
-        qCDebug(llmToolsLog).noquote()
-            << QString("Tool '%1' already registered, replacing").arg(toolName);
-    }
-
-    tool->setParent(this);
-    m_tools.insert(toolName, tool);
-    qCDebug(llmToolsLog).noquote() << QString("Added tool '%1'").arg(toolName);
-    emit toolsChanged();
-}
-
-void ToolsManager::removeTool(const QString &name)
-{
-    if (auto *t = m_tools.take(name)) {
-        t->deleteLater();
-        qCDebug(llmToolsLog).noquote() << QString("Removed tool '%1'").arg(name);
-        emit toolsChanged();
-    }
-}
-
 void ToolsManager::removeAllTools()
 {
-    if (m_tools.isEmpty())
-        return;
-    for (auto *t : std::as_const(m_tools))
-        t->deleteLater();
-    m_tools.clear();
+    ToolRegistry::removeAllTools();
     m_mcpClientTools.clear();
-    qCDebug(llmToolsLog).noquote() << "Removed all tools";
-    emit toolsChanged();
-}
-
-void ToolsManager::removeToolsIf(std::function<bool(const BaseTool *)> predicate)
-{
-    bool changed = false;
-    for (auto it = m_tools.begin(); it != m_tools.end();) {
-        if (predicate(it.value())) {
-            qCDebug(llmToolsLog).noquote() << QString("Removed tool '%1'").arg(it.key());
-            it.value()->deleteLater();
-            it = m_tools.erase(it);
-            changed = true;
-        } else {
-            ++it;
-        }
-    }
-    if (changed)
-        emit toolsChanged();
 }
 
 void ToolsManager::addMcpServer(const McpServerEntry &entry)
@@ -199,16 +148,6 @@ void ToolsManager::registerMcpTools(Mcp::McpClient *client)
         }
         m_mcpClientTools[client] = std::move(registered);
     });
-}
-
-BaseTool *ToolsManager::tool(const QString &name) const
-{
-    return m_tools.value(name, nullptr);
-}
-
-QList<BaseTool *> ToolsManager::registeredTools() const
-{
-    return m_tools.values();
 }
 
 QString ToolsManager::displayName(const QString &toolName) const

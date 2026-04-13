@@ -1,6 +1,6 @@
 # LLMCore architecture
 
-Two parallel stacks that meet in `ToolsManager`:
+Two parallel stacks that meet in `ToolRegistry` / `ToolsManager`:
 
 1. **LLM provider stack** — `BaseClient` subclass per provider
    (Claude, OpenAI, OpenAI Responses, Google Gemini, Ollama, llama.cpp),
@@ -52,7 +52,7 @@ flowchart TD
 | [`architecture/clients/base-client.md`](architecture/clients/base-client.md) | Adding a provider. Protected virtual contract, `ActiveRequest`, error handling. |
 | [`architecture/clients/providers.md`](architecture/clients/providers.md) | Per-provider parser / payload shape cheatsheet. |
 | [`architecture/messages-and-content.md`](architecture/messages-and-content.md) | `BaseMessage`, `MessageState`, `ContentBlock` hierarchy. |
-| [`architecture/tools.md`](architecture/tools.md) | `BaseTool` / `ToolsManager` / `ToolResult`, execution queue, rich content in continuations. |
+| [`architecture/tools.md`](architecture/tools.md) | `BaseTool` / `ToolRegistry` / `ToolsManager` / `ToolResult`, execution queue, rich content in continuations. |
 | [`architecture/networking.md`](architecture/networking.md) | `HttpClient`, `HttpStream`, `SSEParser`, `LineBuffer`, error taxonomy. |
 
 ### MCP stack

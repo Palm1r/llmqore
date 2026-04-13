@@ -57,6 +57,8 @@ target_sources(LLMCore PRIVATE
     ${PROJECT_SOURCE_DIR}/include/LLMCore/ToolExceptions.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tools/ToolHandler.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tools/ToolHandler.cpp
+    ${PROJECT_SOURCE_DIR}/include/LLMCore/ToolRegistry.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/tools/ToolRegistry.cpp
     ${PROJECT_SOURCE_DIR}/include/LLMCore/ToolsManager.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tools/ToolsManager.cpp
     ${PROJECT_SOURCE_DIR}/include/LLMCore/ToolSchemaFormat.hpp

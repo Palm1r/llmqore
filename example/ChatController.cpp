@@ -123,7 +123,7 @@ void ChatController::createClient(const QString &provider, const QString &url, c
 
     registerTools();
 
-    connect(m_client->tools(), &LLMCore::ToolsManager::toolsChanged,
+    connect(m_client->tools(), &LLMCore::ToolRegistry::toolsChanged,
             this, &ChatController::refreshToolListUi);
 }
 

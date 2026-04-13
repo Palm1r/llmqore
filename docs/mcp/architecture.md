@@ -1,11 +1,11 @@
 # MCP architecture
 
-Two parallel stacks meeting in `ToolsManager`:
+Two parallel stacks meeting in `ToolRegistry` / `ToolsManager`:
 
 1. **LLM provider stack** — `BaseClient` + per-provider subclass, `BaseMessage` parser, `HttpClient`/SSE, `ToolsManager`.
 2. **MCP stack** — `McpTransport` + `McpSession` + `McpClient`/`McpServer`, provider abstractions (`BasePromptProvider`, `BaseResourceProvider`, `BaseRootsProvider`, `BaseElicitationProvider`), bridge classes (`McpRemoteTool`, `McpToolBinder`). Sampling uses `BaseClient` directly via `setSamplingClient()` — no separate provider abstraction.
 
-Stacks are independent: use as LLM client without MCP, or run `McpServer` without `BaseClient`. `McpToolBinder` is the glue registering remote tools into `ToolsManager`.
+Stacks are independent: use as LLM client without MCP, or run `McpServer` without `BaseClient`. `McpServer` depends only on `ToolRegistry` (the lightweight base class), not on `ToolsManager`. `McpToolBinder` is the glue registering remote tools into `ToolsManager`.
 
 | Topic | Doc |
 |---|---|
@@ -101,7 +101,8 @@ flowchart TD
 
 ## Invariants
 
-- **Provider clients never talk to `McpSession` directly.** MCP tools are `McpRemoteTool` instances in `ToolsManager`.
+- **Provider clients never talk to `McpSession` directly.** MCP tools are `McpRemoteTool` instances in `ToolRegistry`/`ToolsManager`.
 - **`McpTransport` is the only byte-level boundary.** Rest works on `QJsonObject`.
 - **`BaseClient` owns HTTP side; `McpSession` owns JSON-RPC side.** No shared code/types.
+- **`McpServer` depends on `ToolRegistry`, not `ToolsManager`** — no `ToolSchemaFormat` needed for MCP servers.
 - **One `ToolsManager` holds tools from multiple sources** — indistinguishable to `buildContinuationPayload`.

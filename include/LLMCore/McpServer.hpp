@@ -17,7 +17,7 @@
 
 namespace LLMCore {
 class BaseTool;
-class ToolsManager;
+class ToolRegistry;
 } // namespace LLMCore
 
 namespace LLMCore::Mcp {
@@ -42,7 +42,7 @@ public:
         McpTransport *transport, McpServerConfig config, QObject *parent = nullptr);
     ~McpServer() override;
 
-    void setToolsManager(LLMCore::ToolsManager *manager);
+    void setToolRegistry(LLMCore::ToolRegistry *registry);
     void addTool(LLMCore::BaseTool *tool);
     void removeTool(const QString &name);
 
@@ -91,7 +91,7 @@ private:
     McpSession *m_session = nullptr;
     McpServerConfig m_config;
 
-    QPointer<LLMCore::ToolsManager> m_toolsManager;
+    QPointer<LLMCore::ToolRegistry> m_toolRegistry;
     // QMap for stable alphabetical ordering in tools/list.
     QMap<QString, QPointer<LLMCore::BaseTool>> m_standaloneTools;
     QList<QPointer<BaseResourceProvider>> m_resourceProviders;
