@@ -14,8 +14,6 @@
 #include <LLMCore/ClaudeClient.hpp>
 #include <LLMCore/McpClient.hpp>
 #include <LLMCore/McpPipeTransport.hpp>
-#include <LLMCore/McpRemoteTool.hpp>
-#include <LLMCore/McpToolBinder.hpp>
 #include <LLMCore/McpServer.hpp>
 #include <LLMCore/McpTypes.hpp>
 #include <LLMCore/ToolsManager.hpp>
@@ -26,13 +24,14 @@ using namespace LLMCore::IntegrationTest;
 
 namespace {
 
-void waitForVoidFuture(const QFuture<void> &future, int timeoutMs = 5000)
+template<typename T>
+void waitForFuture(const QFuture<T> &future, int timeoutMs = 5000)
 {
     if (future.isFinished())
         return;
     QEventLoop loop;
-    QFutureWatcher<void> watcher;
-    QObject::connect(&watcher, &QFutureWatcher<void>::finished, &loop, &QEventLoop::quit);
+    QFutureWatcher<T> watcher;
+    QObject::connect(&watcher, &QFutureWatcher<T>::finished, &loop, &QEventLoop::quit);
     watcher.setFuture(future);
     QTimer::singleShot(timeoutMs, &loop, &QEventLoop::quit);
     loop.exec();
@@ -52,17 +51,10 @@ protected:
         m_model = getEnvOrDefault("CLAUDE_MODEL", "claude-sonnet-4-6");
     }
 
-    // Starts an McpServer on one end of a pipe pair and returns the
-    // client-side transport plus a ready-to-use McpClient already wired into
-    // the given ToolsManager via McpToolBinder.
-    //
-    // The server keeps ownership of its own transport + tools via the parent
-    // pointer. The returned McpClient is the caller's responsibility.
     struct McpFixture
     {
         std::unique_ptr<McpServer> server;
         std::unique_ptr<McpClient> client;
-        std::unique_ptr<McpToolBinder> binder;
     };
 
     McpFixture startMcpServerWithTools(ToolsManager *manager)
@@ -72,19 +64,23 @@ protected:
         McpServerConfig cfg;
         cfg.serverInfo = {"llmcore-integration-server", "0.0.1"};
         auto server = std::make_unique<McpServer>(serverTransport, cfg);
-        // Tools are parented to the server so they disappear together.
         server->addTool(new EchoTool(server.get()));
         server->addTool(new CalculatorTool(server.get()));
 
         auto client = std::make_unique<McpClient>(
             clientTransport, Implementation{"llmcore-integration-client", "0.0.1"});
 
-        auto binder = std::make_unique<McpToolBinder>(client.get(), manager);
-
         server->start();
-        waitForVoidFuture(binder->bind(), 5000);
+        waitForFuture(client->connectAndInitialize());
 
-        return McpFixture{std::move(server), std::move(client), std::move(binder)};
+        manager->addMcpClient(client.get());
+
+        // Allow the async listTools to complete.
+        QEventLoop loop;
+        QTimer::singleShot(1000, &loop, &QEventLoop::quit);
+        loop.exec();
+
+        return McpFixture{std::move(server), std::move(client)};
     }
 
     std::unique_ptr<ClaudeClient> createClient()
@@ -102,7 +98,7 @@ TEST_F(ClaudeMcpIntegrationTest, ListsToolsFromMcpServerIntoToolsManager)
     auto claude = createClient();
     auto fixture = startMcpServerWithTools(claude->tools());
 
-    // McpToolBinder should have populated the ToolsManager with both tools.
+    // The ToolsManager should have both tools registered.
     EXPECT_EQ(claude->tools()->registeredTools().size(), 2);
     EXPECT_NE(claude->tools()->tool("echo"), nullptr);
     EXPECT_NE(claude->tools()->tool("calculator"), nullptr);

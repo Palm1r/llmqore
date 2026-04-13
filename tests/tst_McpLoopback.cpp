@@ -24,8 +24,6 @@
 #include <LLMCore/McpClient.hpp>
 #include <LLMCore/McpExceptions.hpp>
 #include <LLMCore/McpPipeTransport.hpp>
-#include <LLMCore/McpRemoteTool.hpp>
-#include <LLMCore/McpToolBinder.hpp>
 #include <LLMCore/McpServer.hpp>
 #include <LLMCore/McpSession.hpp>
 #include <LLMCore/ToolSchemaFormat.hpp>
@@ -569,7 +567,7 @@ TEST_F(McpLoopbackTest, FullHandshakeListAndCallTool)
     delete clientTransport;
 }
 
-TEST_F(McpLoopbackTest, McpToolBinderRegistersTools)
+TEST_F(McpLoopbackTest, AddMcpClientRegistersToolsInToolsManager)
 {
     auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
 
@@ -579,11 +577,15 @@ TEST_F(McpLoopbackTest, McpToolBinderRegistersTools)
     McpClient client(clientTransport);
     ToolsManager manager(ToolSchemaFormat::Claude);
 
-    McpToolBinder binder(&client, &manager);
-
     server.start();
+    waitForFuture(client.connectAndInitialize());
 
-    waitForVoidFuture(binder.bind());
+    manager.addMcpClient(&client);
+
+    // Allow the async listTools to complete.
+    QEventLoop loop;
+    QTimer::singleShot(500, &loop, &QEventLoop::quit);
+    loop.exec();
 
     EXPECT_EQ(manager.registeredTools().size(), 1);
     BaseTool *tool = manager.tool("echo");
@@ -592,16 +594,16 @@ TEST_F(McpLoopbackTest, McpToolBinderRegistersTools)
 
     // Execute through the BaseTool interface — proves the adapter works end-to-end.
     QFuture<LLMCore::ToolResult> exec
-        = tool->executeAsync(QJsonObject{{"text", "via-binder"}});
+        = tool->executeAsync(QJsonObject{{"text", "via-manager"}});
     const LLMCore::ToolResult result = waitForFuture(exec);
     EXPECT_FALSE(result.isError);
-    EXPECT_EQ(result.asText(), "echo: via-binder");
+    EXPECT_EQ(result.asText(), "echo: via-manager");
 
     delete serverTransport;
     delete clientTransport;
 }
 
-TEST_F(McpLoopbackTest, ToolsChangedNotificationRefreshesBinding)
+TEST_F(McpLoopbackTest, ToolsChangedNotificationRefreshesTools)
 {
     auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
 
@@ -610,10 +612,19 @@ TEST_F(McpLoopbackTest, ToolsChangedNotificationRefreshesBinding)
 
     McpClient client(clientTransport);
     ToolsManager manager(ToolSchemaFormat::Claude);
-    McpToolBinder binder(&client, &manager);
 
     server.start();
-    waitForVoidFuture(binder.bind());
+    waitForFuture(client.connectAndInitialize());
+
+    manager.addMcpClient(&client);
+
+    // Allow the async listTools to complete.
+    {
+        QEventLoop loop;
+        QTimer::singleShot(500, &loop, &QEventLoop::quit);
+        loop.exec();
+    }
+
     EXPECT_EQ(manager.registeredTools().size(), 1);
 
     QSignalSpy changedSpy(&client, &McpClient::toolsChanged);

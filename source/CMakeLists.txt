@@ -70,7 +70,6 @@ target_sources(LLMCore PRIVATE
     ${PROJECT_SOURCE_DIR}/include/LLMCore/McpClient.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMCore/McpServer.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMCore/McpRemoteTool.hpp
-    ${PROJECT_SOURCE_DIR}/include/LLMCore/McpToolBinder.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMCore/McpPipeTransport.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMCore/McpStdioTransport.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMCore/McpStdioServerTransport.hpp
@@ -86,7 +85,6 @@ target_sources(LLMCore PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpClient.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpServer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpRemoteTool.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpToolBinder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpPipeTransport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpLineFramer.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpStdioClientTransport.cpp

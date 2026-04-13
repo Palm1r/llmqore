@@ -12,7 +12,6 @@
 #include <LLMCore/McpPipeTransport.hpp>
 #include <LLMCore/McpRemoteTool.hpp>
 #include <LLMCore/McpServer.hpp>
-#include <LLMCore/McpToolBinder.hpp>
 #include <LLMCore/McpSession.hpp>
 #include <LLMCore/McpHttpServerTransport.hpp>
 #include <LLMCore/McpHttpTransport.hpp>

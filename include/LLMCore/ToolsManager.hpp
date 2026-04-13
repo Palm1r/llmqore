@@ -8,10 +8,39 @@
 #include <QJsonObject>
 #include <QMap>
 #include <QObject>
+#include <QProcessEnvironment>
+#include <QString>
+#include <QStringList>
+#include <QUrl>
 
 #include <LLMCore/BaseTool.hpp>
+#include <LLMCore/LLMCore_global.h>
 #include <LLMCore/ToolResult.hpp>
 #include <LLMCore/ToolSchemaFormat.hpp>
+
+namespace LLMCore::Mcp {
+class McpClient;
+struct ToolInfo;
+}
+
+namespace LLMCore {
+
+struct LLMCORE_EXPORT McpServerEntry
+{
+    QString name;
+
+    // stdio
+    QString command;
+    QStringList arguments;
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    QString workingDirectory;
+
+    // http (if set, stdio fields are ignored)
+    QUrl url;
+    QHash<QString, QString> headers;
+};
+
+}
 
 namespace LLMCore {
 
@@ -42,6 +71,10 @@ public:
     explicit ToolsManager(ToolSchemaFormat format, QObject *parent = nullptr);
 
     void addTool(BaseTool *tool);
+    void addMcpServer(const McpServerEntry &entry);
+    void loadMcpServers(const QJsonObject &config);
+    void addMcpClient(Mcp::McpClient *client);
+    void removeMcpClient(Mcp::McpClient *client);
     void removeTool(const QString &name);
     BaseTool *tool(const QString &name) const;
     QList<BaseTool *> registeredTools() const;
@@ -90,9 +123,12 @@ private:
     QHash<QString, ToolQueue> m_toolQueues;
     int m_toolExecutionDelayMs = 0;
 
+    void registerMcpTools(Mcp::McpClient *client);
+
     // QMap for deterministic alphabetical iteration order — important for
     // reproducible test output and stable round-trips on the wire.
     QMap<QString, BaseTool *> m_tools;
+    QHash<Mcp::McpClient *, QStringList> m_mcpClientTools;
 };
 
 } // namespace LLMCore
