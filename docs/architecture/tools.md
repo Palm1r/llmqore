@@ -1,7 +1,8 @@
 # Tools, execution, and results
 
 - **`BaseTool`** -- abstract tool interface.
-- **`ToolsManager`** -- per-client registry, schema builder, execution queue.
+- **`ToolRegistry`** -- lightweight tool storage (add, remove, lookup, `toolsChanged` signal).
+- **`ToolsManager`** -- extends `ToolRegistry` with per-client schema builder and execution queue.
 - **`ToolResult`** + **`ToolContent`** -- rich return envelope matching MCP `tools/call` wire format.
 
 ```mermaid
@@ -44,17 +45,19 @@ flowchart TD
 
 Throwing from the async entry point is allowed -- exceptions are caught by the execution handler and converted to error results that the model can see and self-correct from.
 
-Tools can be enabled or disabled at runtime. Disabled tools remain in the registry but are excluded from the schema definitions sent to providers. When a tool is registered with `ToolsManager`, it is reparented for ownership (exception: `McpServer` tool registration does not reparent).
+Tools can be enabled or disabled at runtime. Disabled tools remain in the registry but are excluded from the schema definitions sent to providers. When a tool is registered with `ToolRegistry` (or its subclass `ToolsManager`), it is reparented for ownership.
 
 ---
 
+## ToolRegistry
+
+`ToolRegistry` is the base class providing tool storage and lookup. Tools are stored in alphabetical order by ID. This ordering is deterministic and leaks to the wire (schema arrays, tool listings), which aids test reproducibility and cache stability. Tools can be added and removed at runtime; removal uses deferred deletion to stay safe for in-flight tools.
+
+`McpServer` depends on `ToolRegistry` directly -- it only needs to enumerate and find tools, not build provider-specific schemas or execute tool queues.
+
 ## ToolsManager
 
-One `ToolsManager` exists per `BaseClient`, lazily created on first access.
-
-### Registry
-
-Tools are stored in alphabetical order by ID. This ordering is deterministic and leaks to the wire (schema arrays, tool listings), which aids test reproducibility and cache stability. Tools can be added and removed at runtime; removal uses deferred deletion to stay safe for in-flight tools.
+`ToolsManager` extends `ToolRegistry` with provider-specific schema serialization and an execution queue. One `ToolsManager` exists per `BaseClient`, lazily created on first access.
 
 ### Schema serialization
 

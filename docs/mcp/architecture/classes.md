@@ -46,7 +46,7 @@ classDiagram
     McpClient --> BaseElicitationProvider : optional
     McpServer --> BasePromptProvider : 0..*
     McpServer --> BaseResourceProvider : 0..*
-    McpServer --> ToolsManager : optional
+    McpServer --> ToolRegistry : optional
 
     class BaseTool {
         <<abstract>>
@@ -98,6 +98,5 @@ classDiagram
 
 - **`McpSession`** — owned by `McpClient` or `McpServer`. Never outlives owner.
 - **`McpTransport`** — passed via constructor, NOT reparented. Caller owns lifetime.
-- **`McpRemoteTool`** — parented to `ToolsManager` (via `addTool`). Dies with manager or on `McpToolBinder` refresh.
+- **`McpRemoteTool`** — parented to `ToolRegistry` (via `addTool`). Dies with registry or on `McpToolBinder` refresh.
 - **Providers** (`BasePromptProvider`, `BaseResourceProvider`, `BaseRootsProvider`, `BaseElicitationProvider`) and sampling `BaseClient` — held as `QPointer`. Caller owns, must outlive server/client.
-- **`BaseTool` via `McpServer::addTool()`** — NOT reparented (unlike `ToolsManager::addTool`).
