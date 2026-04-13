@@ -6,9 +6,15 @@ on:
       - main
     tags:
       - 'v*'
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
 
 env:
   CMAKE_VERSION: "3.29.6"
