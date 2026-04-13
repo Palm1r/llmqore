@@ -49,6 +49,7 @@ client->tools()->loadMcpServers(QJsonDocument::fromJson(configData).object());
   }
 }
 ```
+<img width="912" height="740" alt="Screenshot 2026-04-13 at 18 48 18" src="https://github.com/user-attachments/assets/2fb1ea83-1d2d-4016-9c87-56180dbf3301" />
 
 See [Quick Start](docs/quick-start.md) for complete examples.
 
