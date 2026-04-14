@@ -285,6 +285,7 @@ jobs:
             "-DCMAKE_EXE_LINKER_FLAGS=${linker_flags}"
             -DLLMCORE_BUILD_TESTS=ON
             -DLLMCORE_BUILD_EXAMPLES=OFF
+            -DLLMCORE_BUILD_MCP_BRIDGE=ON
           RESULT_VARIABLE result
         )
         if (NOT result EQUAL 0)
@@ -306,6 +307,64 @@ jobs:
         export LD_LIBRARY_PATH=${{ steps.qt.outputs.qt_dir }}/lib:$LD_LIBRARY_PATH
         xvfb-run ./build/tests/LLMCoreUnitTests
 
+    # Package mcp-bridge + bundled Qt runtime on tag pushes, one per platform
+    # (Qt 6.10.2 matrix entries only to avoid duplicate release artifacts).
+    - name: Package mcp-bridge
+      if: startsWith(github.ref, 'refs/tags/v') && matrix.qt_version == '6.10.2'
+      shell: bash
+      env:
+        QT_DIR: ${{ steps.qt.outputs.qt_dir }}
+      run: |
+        set -e
+        case "${{ runner.os }}" in
+          Linux) platform="linux-x86_64"; ext="tar.gz" ;;
+          macOS) platform="macos-universal"; ext="tar.gz" ;;
+          Windows) platform="windows-x86_64"; ext="zip" ;;
+        esac
+
+        dist="$GITHUB_WORKSPACE/dist/mcp-bridge-${platform}"
+        mkdir -p "$dist"
+        cp mcp-bridge/mcp-bridge.json "$dist/"
+
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          cp build/mcp-bridge/mcp-bridge.exe "$dist/"
+          "$QT_DIR/bin/windeployqt.exe" \
+            --no-translations --no-system-d3d-compiler --no-opengl-sw \
+            --no-quick-import "$dist/mcp-bridge.exe"
+          cd "$GITHUB_WORKSPACE/dist"
+          7z a "../mcp-bridge-${platform}.zip" "mcp-bridge-${platform}"
+        elif [ "${{ runner.os }}" = "macOS" ]; then
+          cp build/mcp-bridge/mcp-bridge "$dist/"
+          strip "$dist/mcp-bridge"
+          # Copy minimal Qt frameworks and fix install names to @rpath.
+          for fw in QtCore QtNetwork QtConcurrent; do
+            cp -R "$QT_DIR/lib/${fw}.framework" "$dist/"
+          done
+          cd "$GITHUB_WORKSPACE/dist"
+          tar czf "../mcp-bridge-${platform}.tar.gz" "mcp-bridge-${platform}"
+        else
+          cp build/mcp-bridge/mcp-bridge "$dist/"
+          strip "$dist/mcp-bridge"
+          mkdir -p "$dist/lib"
+          for lib in libQt6Core libQt6Network libQt6Concurrent; do
+            cp "$QT_DIR/lib/${lib}.so."* "$dist/lib/" || true
+          done
+          # ICU is a Qt runtime dep on Linux.
+          for lib in libicui18n libicuuc libicudata; do
+            cp "$QT_DIR/lib/${lib}.so."* "$dist/lib/" 2>/dev/null || true
+          done
+          cd "$GITHUB_WORKSPACE/dist"
+          tar czf "../mcp-bridge-${platform}.tar.gz" "mcp-bridge-${platform}"
+        fi
+
+    - name: Upload mcp-bridge artifact
+      if: startsWith(github.ref, 'refs/tags/v') && matrix.qt_version == '6.10.2'
+      uses: actions/upload-artifact@v4
+      with:
+        name: mcp-bridge-${{ runner.os }}
+        path: dist/mcp-bridge-*.tar.gz dist/mcp-bridge-*.zip
+        if-no-files-found: ignore
+
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
@@ -314,6 +373,12 @@ jobs:
     permissions:
       contents: write
     steps:
+    - uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        merge-multiple: true
+
     - uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631
       with:
         draft: true
+        files: artifacts/*

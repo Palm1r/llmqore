@@ -1,0 +1,16 @@
+{
+    "port": 8808,
+    "host": "127.0.0.1",
+    "mcpServers": {
+        "filesystem": {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+            "env": {}
+        },
+        "qtcreator": {
+            "enable": false,
+            "type": "sse",
+            "url": "http://127.0.0.1:3001/sse"
+        }
+    }
+}

@@ -53,6 +53,31 @@ client->tools()->loadMcpServers(QJsonDocument::fromJson(configData).object());
 
 See [Quick Start](docs/quick-start.md) for complete examples.
 
+## MCP Bridge
+
+A standalone CLI tool built on llmcore that aggregates multiple MCP servers (stdio or SSE) and re-exposes them either behind a single HTTP/SSE endpoint or as one stdio server — useful when the upstreams and the client disagree on transport.
+
+```bash
+mcp-bridge bridge.json              # HTTP endpoint
+mcp-bridge --stdio bridge.json      # stdio (for Claude Desktop and friends)
+```
+
+Config uses the familiar `mcpServers` schema:
+
+```json
+{
+  "port": 8808,
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
+    }
+  }
+}
+```
+
+Prebuilt binaries for Linux/macOS/Windows (with Qt runtime bundled) are published to [GitHub Releases](https://github.com/Palm1r/llmcore/releases). See [MCP Bridge docs](docs/mcp-bridge.md) for full usage, config reference, and build instructions.
+
 ## Supported Providers
 
 | Provider | Client class | Streaming | Tools | Thinking |
@@ -84,6 +109,7 @@ See [MCP Protocol Coverage](docs/mcp/mcp_protocol_coverage.md) for the full spec
 
 - [Quick Start](docs/quick-start.md) — examples for LLM clients, tools, MCP server and client
 - [Integration](docs/integration.md) — FetchContent and installed setup
+- [MCP Bridge](docs/mcp-bridge.md) — aggregate stdio MCP servers behind one HTTP/SSE endpoint
 - [MCP Protocol Coverage](docs/mcp/mcp_protocol_coverage.md) — spec-conformance matrix
 - [Architecture](docs/architecture.md) — internals, for contributors
 

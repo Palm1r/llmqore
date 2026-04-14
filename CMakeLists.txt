@@ -116,3 +116,8 @@ option(LLMCORE_BUILD_EXAMPLES "Build LLMCore examples" ${PROJECT_IS_TOP_LEVEL})
 if(LLMCORE_BUILD_EXAMPLES)
     add_subdirectory(example)
 endif()
+
+option(LLMCORE_BUILD_MCP_BRIDGE "Build MCP Bridge" ${PROJECT_IS_TOP_LEVEL})
+if(LLMCORE_BUILD_MCP_BRIDGE)
+    add_subdirectory(mcp-bridge)
+endif()
