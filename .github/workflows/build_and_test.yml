@@ -15,6 +15,12 @@ on:
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Build and upload mcp-bridge artifacts"
+        type: boolean
+        default: true
 
 env:
   CMAKE_VERSION: "3.29.6"
@@ -307,58 +313,38 @@ jobs:
         export LD_LIBRARY_PATH=${{ steps.qt.outputs.qt_dir }}/lib:$LD_LIBRARY_PATH
         xvfb-run ./build/tests/LLMQoreUnitTests
 
-    # Package mcp-bridge + bundled Qt runtime on tag pushes, one per platform
-    # (Qt 6.10.2 matrix entries only to avoid duplicate release artifacts).
+    # Package mcp-bridge + bundled Qt runtime on tag pushes and on manual
+    # workflow_dispatch runs, one per platform — Qt 6.10.2 matrix entries
+    # only, to avoid duplicate release artifacts.
     - name: Package mcp-bridge
-      if: startsWith(github.ref, 'refs/tags/v') && matrix.qt_version == '6.10.2'
+      if: >
+        matrix.qt_version == '6.10.2' &&
+        (startsWith(github.ref, 'refs/tags/v') ||
+         (github.event_name == 'workflow_dispatch' && inputs.package))
       shell: bash
-      env:
-        QT_DIR: ${{ steps.qt.outputs.qt_dir }}
       run: |
         set -e
         case "${{ runner.os }}" in
-          Linux) platform="linux-x86_64"; ext="tar.gz" ;;
-          macOS) platform="macos-universal"; ext="tar.gz" ;;
+          Linux)   platform="linux-x86_64";   ext="tar.gz" ;;
+          macOS)   platform="macos-universal"; ext="tar.gz" ;;
           Windows) platform="windows-x86_64"; ext="zip" ;;
         esac
 
         dist="$GITHUB_WORKSPACE/dist/mcp-bridge-${platform}"
-        mkdir -p "$dist"
-        cp mcp-bridge/mcp-bridge.json "$dist/"
+        cmake --install build --prefix "$dist" --component mcp-bridge --strip
 
-        if [ "${{ runner.os }}" = "Windows" ]; then
-          cp build/mcp-bridge/mcp-bridge.exe "$dist/"
-          "$QT_DIR/bin/windeployqt.exe" \
-            --no-translations --no-system-d3d-compiler --no-opengl-sw \
-            --no-quick-import "$dist/mcp-bridge.exe"
-          cd "$GITHUB_WORKSPACE/dist"
+        cd "$GITHUB_WORKSPACE/dist"
+        if [ "$ext" = "zip" ]; then
           7z a "mcp-bridge-${platform}.zip" "mcp-bridge-${platform}"
-        elif [ "${{ runner.os }}" = "macOS" ]; then
-          cp build/mcp-bridge/mcp-bridge "$dist/"
-          strip "$dist/mcp-bridge"
-          # Copy minimal Qt frameworks and fix install names to @rpath.
-          for fw in QtCore QtNetwork QtConcurrent; do
-            cp -R "$QT_DIR/lib/${fw}.framework" "$dist/"
-          done
-          cd "$GITHUB_WORKSPACE/dist"
-          tar czf "mcp-bridge-${platform}.tar.gz" "mcp-bridge-${platform}"
         else
-          cp build/mcp-bridge/mcp-bridge "$dist/"
-          strip "$dist/mcp-bridge"
-          mkdir -p "$dist/lib"
-          for lib in libQt6Core libQt6Network libQt6Concurrent; do
-            cp "$QT_DIR/lib/${lib}.so."* "$dist/lib/" || true
-          done
-          # ICU is a Qt runtime dep on Linux.
-          for lib in libicui18n libicuuc libicudata; do
-            cp "$QT_DIR/lib/${lib}.so."* "$dist/lib/" 2>/dev/null || true
-          done
-          cd "$GITHUB_WORKSPACE/dist"
           tar czf "mcp-bridge-${platform}.tar.gz" "mcp-bridge-${platform}"
         fi
 
     - name: Upload mcp-bridge artifact
-      if: startsWith(github.ref, 'refs/tags/v') && matrix.qt_version == '6.10.2'
+      if: >
+        matrix.qt_version == '6.10.2' &&
+        (startsWith(github.ref, 'refs/tags/v') ||
+         (github.event_name == 'workflow_dispatch' && inputs.package))
       uses: actions/upload-artifact@v4
       with:
         name: mcp-bridge-${{ runner.os }}
