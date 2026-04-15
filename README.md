@@ -3,7 +3,7 @@
 [![Build and Test](https://github.com/Palm1r/llmqore/actions/workflows/build_and_test.yml/badge.svg?branch=main)](https://github.com/Palm1r/llmqore/actions/workflows/build_and_test.yml)
 ![GitHub Tag](https://img.shields.io/github/v/tag/Palm1r/llmqore)
 
-Qt/C++ library for working with LLM providers and MCP servers. Streaming chat, tool calling, and a full MCP 2025-11-25 client/server — all in one library.
+Qt/C++ library for working with cloud and local LLM providers, create MCP servers and clients, download and using library MCP Bridge.
 
 **LLM clients** — unified streaming API across six providers:
 
