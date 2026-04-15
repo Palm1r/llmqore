@@ -332,7 +332,7 @@ jobs:
             --no-translations --no-system-d3d-compiler --no-opengl-sw \
             --no-quick-import "$dist/mcp-bridge.exe"
           cd "$GITHUB_WORKSPACE/dist"
-          7z a "../mcp-bridge-${platform}.zip" "mcp-bridge-${platform}"
+          7z a "mcp-bridge-${platform}.zip" "mcp-bridge-${platform}"
         elif [ "${{ runner.os }}" = "macOS" ]; then
           cp build/mcp-bridge/mcp-bridge "$dist/"
           strip "$dist/mcp-bridge"
@@ -341,7 +341,7 @@ jobs:
             cp -R "$QT_DIR/lib/${fw}.framework" "$dist/"
           done
           cd "$GITHUB_WORKSPACE/dist"
-          tar czf "../mcp-bridge-${platform}.tar.gz" "mcp-bridge-${platform}"
+          tar czf "mcp-bridge-${platform}.tar.gz" "mcp-bridge-${platform}"
         else
           cp build/mcp-bridge/mcp-bridge "$dist/"
           strip "$dist/mcp-bridge"
@@ -354,7 +354,7 @@ jobs:
             cp "$QT_DIR/lib/${lib}.so."* "$dist/lib/" 2>/dev/null || true
           done
           cd "$GITHUB_WORKSPACE/dist"
-          tar czf "../mcp-bridge-${platform}.tar.gz" "mcp-bridge-${platform}"
+          tar czf "mcp-bridge-${platform}.tar.gz" "mcp-bridge-${platform}"
         fi
 
     - name: Upload mcp-bridge artifact
@@ -362,7 +362,9 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: mcp-bridge-${{ runner.os }}
-        path: dist/mcp-bridge-*.tar.gz dist/mcp-bridge-*.zip
+        path: |
+          dist/mcp-bridge-*.tar.gz
+          dist/mcp-bridge-*.zip
         if-no-files-found: ignore
 
   release:
