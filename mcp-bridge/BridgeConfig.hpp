@@ -33,6 +33,7 @@ struct UpstreamEntry
     // sse / http
     QUrl url;
     QHash<QString, QString> headers;
+    QString httpSpec; // e.g. "2024-11-05", "2025-03-26", "2025-11-25". Empty = latest.
 };
 
 struct BridgeConfig

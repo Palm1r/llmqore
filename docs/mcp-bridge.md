@@ -116,9 +116,94 @@ The config file uses the same `mcpServers` schema as Claude Desktop and other MC
 |---|---|---|
 | `url` | string | Upstream endpoint URL (required) |
 | `headers` | object | Additional HTTP headers sent with every request |
+| `httpSpec` | string | MCP HTTP spec revision the upstream speaks. One of `"2024-11-05"`, `"2025-03-26"`, `"2025-06-18"`, `"2025-11-25"`, or `"latest"`. Empty / omitted = latest. |
 
-`"sse"` speaks the MCP 2024-11-05 SSE transport (separate `/sse` + `POST` endpoints).
-`"http"` / `"streamable-http"` use the MCP 2025-03-26 Streamable HTTP transport.
+The `type` field selects HTTP vs stdio. `httpSpec` selects the wire-protocol revision:
+
+- `"2024-11-05"` — legacy SSE transport (separate `/sse` + `POST` endpoints). Pair with `type: "sse"`.
+- `"2025-03-26"`, `"2025-06-18"`, `"2025-11-25"` (and `"latest"`) — Streamable HTTP transport (single `/mcp` endpoint). Pair with `type: "http"` or `"streamable-http"`.
+
+If you don't set `httpSpec`, the bridge speaks the latest known revision. Match it to whatever the upstream MCP server expects — mismatched revisions show up as immediate `Transport closed` after the initial HTTP request.
+
+## Common configurations
+
+### Claude Desktop → stdio upstreams
+
+Aggregate several stdio MCP servers behind one stdio endpoint that Claude Desktop talks to:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"]
+    },
+    "git": {
+      "command": "uvx",
+      "args": ["mcp-server-git"]
+    }
+  }
+}
+```
+
+Run with `mcp-bridge --stdio bridge.json`, then in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "bridge": {
+      "command": "/path/to/mcp-bridge",
+      "args": ["--stdio", "/path/to/bridge.json"]
+    }
+  }
+}
+```
+
+### Claude Desktop → HTTP upstream (e.g. MCP server embedded in a desktop app)
+
+Claude Desktop only speaks stdio, but your MCP server lives inside a Qt/Electron/whatever app and exposes Streamable HTTP. Bridge translates:
+
+```json
+{
+  "mcpServers": {
+    "myapp": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:29180/mcp",
+      "httpSpec": "2025-11-25"
+    }
+  }
+}
+```
+
+Same `claude_desktop_config.json` snippet as above. The host app must be running for the bridge to reach the upstream.
+
+### HTTP host → mixed upstreams
+
+Run the bridge as an HTTP endpoint and put any combination of stdio and HTTP upstreams behind it:
+
+```json
+{
+  "port": 8808,
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    },
+    "qtcreator": {
+      "type": "sse",
+      "url": "http://127.0.0.1:3001/sse",
+      "httpSpec": "2024-11-05"
+    },
+    "myapp": {
+      "type": "streamable-http",
+      "url": "http://127.0.0.1:29180/mcp",
+      "httpSpec": "2025-11-25"
+    }
+  }
+}
+```
+
+Run with `mcp-bridge bridge.json`. Clients connect to `http://127.0.0.1:8808/mcp` (Streamable HTTP).
 
 ## Connecting clients
 

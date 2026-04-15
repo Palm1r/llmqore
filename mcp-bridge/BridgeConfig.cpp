@@ -63,6 +63,8 @@ BridgeConfig loadConfig(const QString &path)
                 for (auto it = hdrs.begin(); it != hdrs.end(); ++it)
                     upstream.headers.insert(it.key(), it.value().toString());
             }
+            if (entry.contains("httpSpec"))
+                upstream.httpSpec = entry["httpSpec"].toString();
         } else {
             // Default: stdio. Accept explicit "stdio" too.
             upstream.type = UpstreamType::Stdio;

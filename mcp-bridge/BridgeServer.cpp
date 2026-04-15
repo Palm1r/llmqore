@@ -11,6 +11,19 @@ using namespace LLMQore::Mcp;
 namespace {
 constexpr int kInitialBackoffMs = 1000;
 constexpr int kMaxBackoffMs = 30000;
+
+McpHttpSpec parseHttpSpec(const QString &spec)
+{
+    if (spec.isEmpty())
+        return McpHttpSpec::Latest;
+    if (spec == QLatin1String("2024-11-05"))
+        return McpHttpSpec::V2024_11_05;
+    if (spec == QLatin1String("2025-03-26") || spec == QLatin1String("2025-06-18")
+        || spec == QLatin1String("2025-11-25") || spec == QLatin1String("latest"))
+        return McpHttpSpec::V2025_03_26;
+    qWarning().noquote() << "Unknown httpSpec" << spec << "— falling back to latest.";
+    return McpHttpSpec::Latest;
+}
 } // namespace
 
 namespace McpBridge {
@@ -45,7 +58,7 @@ void BridgeServer::start()
         if (entry.type == UpstreamType::Sse) {
             HttpTransportConfig httpCfg;
             httpCfg.endpoint = entry.url;
-            httpCfg.spec = McpHttpSpec::V2024_11_05;
+            httpCfg.spec = parseHttpSpec(entry.httpSpec);
             httpCfg.headers = entry.headers;
             transport = new McpHttpTransport(httpCfg, nullptr, this);
         } else {
