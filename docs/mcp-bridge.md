@@ -66,9 +66,17 @@ In `--stdio` mode the `port` / `host` options and top-level config fields are ig
 
 ## Configuration
 
-The config file uses the same `mcpServers` schema as Claude Desktop and other MCP hosts, plus top-level `port` and `host` for the HTTP endpoint:
+Two different files are involved — don't mix them up:
+
+1. **Bridge config** (`mcp-bridge.json` or whatever path you pass to `mcp-bridge`) — lists upstream MCP servers the bridge will aggregate.
+2. **Client config** (e.g. `claude_desktop_config.json`) — lists MCP servers the *client* connects to. When using the bridge in stdio mode, this is where you register `mcp-bridge` itself.
+
+Every JSON snippet below is labelled with which file it belongs to.
+
+The bridge config uses the same `mcpServers` schema as Claude Desktop and other MCP hosts, plus top-level `port` and `host` for the HTTP endpoint:
 
 ```json
+// mcp-bridge.json
 {
   "port": 8808,
   "host": "127.0.0.1",
@@ -97,12 +105,16 @@ The config file uses the same `mcpServers` schema as Claude Desktop and other MC
 
 **Per-server entry**
 
+Each entry describes one upstream MCP server. The shape of the entry depends on *how the bridge talks to that upstream*: as a child process (stdio) or over the network (HTTP/SSE). Pick one transport per entry — fields from the other transport are ignored.
+
+Common fields for every entry:
+
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `type` | string | `"stdio"` | Upstream transport: `"stdio"`, `"sse"`, `"http"` / `"streamable-http"` |
 | `enable` | bool | `true` | Set to `false` to skip this entry without removing it |
 
-**stdio entries** (`type: "stdio"`, the default)
+**stdio entries** (`type: "stdio"`, the default) — bridge launches the upstream as a child process and talks over stdin/stdout:
 
 | Field | Type | Description |
 |---|---|---|
@@ -110,13 +122,45 @@ The config file uses the same `mcpServers` schema as Claude Desktop and other MC
 | `args` | array | Command-line arguments |
 | `env` | object | Environment variables (merged with host env) |
 
-**HTTP/SSE entries** (`type: "sse"` / `"http"` / `"streamable-http"`)
+Minimal template:
+
+```json
+"my-stdio-server": {
+  "command": "npx",
+  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+}
+```
+
+`type` is omitted — it defaults to `"stdio"`. `url` / `httpSpec` / `headers` don't apply here.
+
+**HTTP/SSE entries** (`type: "sse"` / `"http"` / `"streamable-http"`) — upstream is already running on the network; bridge connects to its URL:
 
 | Field | Type | Description |
 |---|---|---|
 | `url` | string | Upstream endpoint URL (required) |
 | `headers` | object | Additional HTTP headers sent with every request |
 | `httpSpec` | string | MCP HTTP spec revision the upstream speaks. One of `"2024-11-05"`, `"2025-03-26"`, `"2025-06-18"`, `"2025-11-25"`, or `"latest"`. Empty / omitted = latest. |
+
+Minimal template:
+
+```json
+"my-http-server": {
+  "type": "streamable-http",
+  "url": "http://127.0.0.1:29180/mcp",
+  "httpSpec": "2025-11-25"
+}
+```
+
+`type` is required (otherwise the entry is treated as stdio and `command` will be missing). `command` / `args` / `env` don't apply here.
+
+**Quick rule of thumb**
+
+| Upstream is… | Required fields | Notes |
+|---|---|---|
+| a command you want the bridge to launch | `command` (+ `args`, `env`) | Don't set `type` — stdio is the default. `httpSpec` doesn't apply. |
+| a server already running on a URL | `type` + `url` | `httpSpec` optional (defaults to latest); set it if the upstream speaks an older revision. |
+
+---
 
 The `type` field selects HTTP vs stdio. `httpSpec` selects the wire-protocol revision:
 
@@ -129,9 +173,12 @@ If you don't set `httpSpec`, the bridge speaks the latest known revision. Match 
 
 ### Claude Desktop → stdio upstreams
 
-Aggregate several stdio MCP servers behind one stdio endpoint that Claude Desktop talks to:
+Aggregate several stdio MCP servers behind one stdio endpoint that Claude Desktop talks to.
+
+**Bridge config** — e.g. `bridge.json`, lists the upstreams:
 
 ```json
+// bridge.json  (bridge config)
 {
   "mcpServers": {
     "filesystem": {
@@ -146,9 +193,10 @@ Aggregate several stdio MCP servers behind one stdio endpoint that Claude Deskto
 }
 ```
 
-Run with `mcp-bridge --stdio bridge.json`, then in `claude_desktop_config.json`:
+**Client config** — `claude_desktop_config.json`, tells Claude Desktop to launch the bridge (no need to run `mcp-bridge` manually — the client starts it):
 
 ```json
+// claude_desktop_config.json  (client config)
 {
   "mcpServers": {
     "bridge": {
@@ -161,9 +209,12 @@ Run with `mcp-bridge --stdio bridge.json`, then in `claude_desktop_config.json`:
 
 ### Claude Desktop → HTTP upstream (e.g. MCP server embedded in a desktop app)
 
-Claude Desktop only speaks stdio, but your MCP server lives inside a Qt/Electron/whatever app and exposes Streamable HTTP. Bridge translates:
+Claude Desktop only speaks stdio, but your MCP server lives inside a Qt/Electron/whatever app and exposes Streamable HTTP. Bridge translates.
+
+**Bridge config:**
 
 ```json
+// bridge.json  (bridge config)
 {
   "mcpServers": {
     "myapp": {
@@ -175,13 +226,16 @@ Claude Desktop only speaks stdio, but your MCP server lives inside a Qt/Electron
 }
 ```
 
-Same `claude_desktop_config.json` snippet as above. The host app must be running for the bridge to reach the upstream.
+**Client config** — same `claude_desktop_config.json` snippet as in the previous section. The host app must be running for the bridge to reach the upstream.
 
 ### HTTP host → mixed upstreams
 
-Run the bridge as an HTTP endpoint and put any combination of stdio and HTTP upstreams behind it:
+Run the bridge as an HTTP endpoint and put any combination of stdio and HTTP upstreams behind it.
+
+**Bridge config:**
 
 ```json
+// bridge.json  (bridge config)
 {
   "port": 8808,
   "mcpServers": {
@@ -203,7 +257,7 @@ Run the bridge as an HTTP endpoint and put any combination of stdio and HTTP ups
 }
 ```
 
-Run with `mcp-bridge bridge.json`. Clients connect to `http://127.0.0.1:8808/mcp` (Streamable HTTP).
+Run the bridge yourself: `mcp-bridge bridge.json`. Clients then connect to `http://127.0.0.1:8808/mcp` (Streamable HTTP) — no client-side config file needed here, just point the client at that URL.
 
 ## Connecting clients
 
@@ -219,9 +273,10 @@ Any MCP client that supports the HTTP transport can connect.
 
 ### Stdio mode
 
-Launched with `--stdio`, the bridge speaks MCP over stdin/stdout. Plug it into a stdio-only host (e.g. Claude Desktop) by pointing the host at the bridge binary:
+Launched with `--stdio`, the bridge speaks MCP over stdin/stdout. Plug it into a stdio-only host (e.g. Claude Desktop) by pointing the host at the bridge binary — this goes into the **client config** (e.g. `claude_desktop_config.json`), not the bridge config:
 
 ```json
+// claude_desktop_config.json  (client config)
 {
   "mcpServers": {
     "bridge": {
