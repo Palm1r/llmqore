@@ -33,13 +33,12 @@ QNetworkRequest OllamaClient::prepareNetworkRequest(const QUrl &url) const
     return request;
 }
 
-RequestID OllamaClient::sendMessage(
-    const QJsonObject &payload, RequestCallbacks callbacks, RequestMode mode)
+RequestID OllamaClient::sendMessage(const QJsonObject &payload, RequestMode mode)
 {
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
-    RequestID id = createRequest(std::move(callbacks));
+    RequestID id = createRequest();
     QString endpoint = payload.contains("prompt") ? "/api/generate" : "/api/chat";
 
     qCDebug(llmOllamaLog).noquote() << QString("Sending request %1").arg(id);
@@ -48,13 +47,13 @@ RequestID OllamaClient::sendMessage(
     return id;
 }
 
-RequestID OllamaClient::ask(const QString &prompt, RequestCallbacks callbacks, RequestMode mode)
+RequestID OllamaClient::ask(const QString &prompt, RequestMode mode)
 {
     QJsonObject payload;
     payload["model"] = m_model;
     payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
 
-    return sendMessage(payload, std::move(callbacks), mode);
+    return sendMessage(payload, mode);
 }
 
 QFuture<QList<QString>> OllamaClient::listModels()
@@ -271,7 +270,8 @@ void OllamaClient::notifyThinkingBlocks(const RequestID &id, OllamaMessage *mess
 
     for (auto *thinkingContent : thinkingBlocks) {
         if (!thinkingContent->thinking().trimmed().isEmpty()) {
-            notifyThinkingBlock(id, thinkingContent->thinking(), thinkingContent->signature());
+            emit thinkingBlockReceived(
+                id, thinkingContent->thinking(), thinkingContent->signature());
         }
     }
 

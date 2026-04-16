@@ -1,5 +1,21 @@
 # Quick Start
 
+## Thread contract (read this first)
+
+All LLMQore client objects (`BaseClient` and subclasses, `ToolsManager`,
+`ToolRegistry`, `ToolHandler`, `McpClient`) live on the thread of the
+`QObject` parent passed to their constructor. All public methods must be
+called from that thread; all signals are emitted on that thread.
+
+Cross-thread consumers should connect to signals with `Qt::AutoConnection`
+(the default) — Qt will queue delivery and copy arguments safely. Do not
+hold `BaseTool *` pointers returned from `ToolRegistry::registeredTools()`
+across event-loop iterations; use `toolsSnapshot()` instead if you need
+to pass tool metadata to another thread or widget.
+
+Debug builds enforce the contract with `Q_ASSERT_X` on every mutating or
+raw-pointer-returning method.
+
 ## LLM Clients
 
 ### Minimal example
@@ -10,18 +26,20 @@
 auto *client = new LLMQore::ClaudeClient(
     "https://api.anthropic.com", "sk-...", "claude-sonnet-4-20250514", this);
 
-LLMQore::RequestCallbacks cb;
-cb.onChunk = [](const LLMQore::RequestID &, const QString &chunk) {
+connect(client, &LLMQore::BaseClient::chunkReceived,
+        this, [](const LLMQore::RequestID &, const QString &chunk) {
     qDebug() << chunk;
-};
-cb.onCompleted = [](const LLMQore::RequestID &, const QString &full) {
+});
+connect(client, &LLMQore::BaseClient::requestCompleted,
+        this, [](const LLMQore::RequestID &, const QString &full) {
     qDebug() << "Done:" << full;
-};
-cb.onFailed = [](const LLMQore::RequestID &, const QString &err) {
+});
+connect(client, &LLMQore::BaseClient::requestFailed,
+        this, [](const LLMQore::RequestID &, const QString &err) {
     qWarning() << "Error:" << err;
-};
+});
 
-client->ask("What is Qt?", cb);
+client->ask("What is Qt?");
 ```
 
 ### Full payload control
@@ -35,42 +53,39 @@ payload["messages"] = QJsonArray{
     QJsonObject{{"role", "user"}, {"content", "Explain RAII in C++"}}
 };
 
-client->sendMessage(payload, cb);
+client->sendMessage(payload);
 ```
 
-### Using signals instead of callbacks
+### Rich completion metadata
+
+`requestFinalized` fires alongside `requestCompleted` with a
+`CompletionInfo` struct containing `fullText`, `model` and `stopReason`:
 
 ```cpp
-auto *client = new LLMQore::OpenAIClient(url, apiKey, model, this);
-
-connect(client, &LLMQore::BaseClient::chunkReceived,
-        this, [](const LLMQore::RequestID &, const QString &chunk) {
-    qDebug() << chunk;
+connect(client, &LLMQore::BaseClient::requestFinalized,
+        this, [](const LLMQore::RequestID &, const LLMQore::CompletionInfo &info) {
+    qDebug() << "model:" << info.model << "stopReason:" << info.stopReason;
 });
-
-connect(client, &LLMQore::BaseClient::requestCompleted,
-        this, [](const LLMQore::RequestID &, const QString &full) {
-    qDebug() << "Done:" << full;
-});
-
-client->ask("Hello!");
 ```
+
+`requestFinalized` is emitted BEFORE `requestCompleted` so consumers
+resolving a `QPromise` on finalization run before any simple-text handler.
 
 ### Thinking / reasoning blocks
 
 ```cpp
-LLMQore::RequestCallbacks cb;
-cb.onThinkingBlock = [](const LLMQore::RequestID &,
-                         const QString &thinking,
-                         const QString &signature) {
+connect(client, &LLMQore::BaseClient::thinkingBlockReceived,
+        this, [](const LLMQore::RequestID &,
+                 const QString &thinking,
+                 const QString &signature) {
     qDebug() << "Thinking:" << thinking.left(200) << "...";
-};
+});
 ```
 
 ### Cancel a request
 
 ```cpp
-LLMQore::RequestID id = client->ask("Write a long essay...", cb);
+LLMQore::RequestID id = client->ask("Write a long essay...");
 // ...later:
 client->cancelRequest(id);
 ```
@@ -121,7 +136,20 @@ public:
 
 ```cpp
 client->tools()->addTool(new GetWeatherTool(client));
-client->ask("What's the weather in Berlin?", cb);
+client->ask("What's the weather in Berlin?");
+```
+
+### Inspect the registered tool list for UI
+
+Use `toolsSnapshot()` for anything that outlives a single function call
+(e.g. displaying the tool list in a UI). It returns a detached copy that
+cannot dangle if a tool is later removed. Do NOT hold `BaseTool *`
+pointers from `registeredTools()` beyond the immediate call.
+
+```cpp
+for (const auto &snap : client->tools()->toolsSnapshot()) {
+    ui->addRow(snap.displayName, snap.description);
+}
 ```
 
 The tool works the same way whether registered directly or exposed through an MCP server.

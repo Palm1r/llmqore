@@ -227,41 +227,49 @@ struct TestResult
     }
 };
 
-// --- Helper to wire all callbacks to TestResult with logging ---
-
-inline RequestCallbacks makeLoggingCallbacks(TestResult &result, QEventLoop &loop)
+// --- Helper to wire all BaseClient signals to TestResult with logging ---
+//
+// Call this BEFORE sendMessage() — connections established afterwards may
+// miss synchronous failure signals. Connections live until `client` is
+// destroyed, so same-client reuse across tests is fine; tests that create
+// a fresh client per case don't need to disconnect manually.
+inline void wireLoggingSignals(BaseClient *client, TestResult &result, QEventLoop &loop)
 {
-    RequestCallbacks callbacks;
-    callbacks.onChunk = [&result](const RequestID &, const QString &chunk) {
-        result.chunks.append(chunk);
-    };
-    callbacks.onAccumulated = [&result](const RequestID &, const QString &acc) {
-        result.fullText = acc;
-    };
-    callbacks.onThinkingBlock =
+    QObject::connect(client, &BaseClient::chunkReceived, &loop,
+                     [&result](const RequestID &, const QString &chunk) {
+                         result.chunks.append(chunk);
+                     });
+    QObject::connect(client, &BaseClient::accumulatedReceived, &loop,
+                     [&result](const RequestID &, const QString &acc) {
+                         result.fullText = acc;
+                     });
+    QObject::connect(
+        client, &BaseClient::thinkingBlockReceived, &loop,
         [&result](const RequestID &, const QString &thinking, const QString &signature) {
             result.thinkingBlocks.append({thinking, signature});
-        };
-    callbacks.onToolStarted =
-        [&result](const RequestID &, const QString &toolId, const QString &name) {
-            result.toolCalls.append({name, QString("started:%1").arg(toolId)});
-        };
-    callbacks.onToolResult =
+        });
+    QObject::connect(client, &BaseClient::toolStarted, &loop,
+                     [&result](const RequestID &, const QString &toolId, const QString &name) {
+                         result.toolCalls.append({name, QString("started:%1").arg(toolId)});
+                     });
+    QObject::connect(
+        client, &BaseClient::toolResultReady, &loop,
         [&result](const RequestID &, const QString &toolId, const QString &name, const QString &res) {
             result.toolCalls.append({name + "_result", res});
             Q_UNUSED(toolId);
-        };
-    callbacks.onCompleted = [&result, &loop](const RequestID &, const QString &fullText) {
-        result.completed = true;
-        result.fullText = fullText;
-        loop.quit();
-    };
-    callbacks.onFailed = [&result, &loop](const RequestID &, const QString &error) {
-        result.failed = true;
-        result.errorMessage = error;
-        loop.quit();
-    };
-    return callbacks;
+        });
+    QObject::connect(client, &BaseClient::requestCompleted, &loop,
+                     [&result, &loop](const RequestID &, const QString &fullText) {
+                         result.completed = true;
+                         result.fullText = fullText;
+                         loop.quit();
+                     });
+    QObject::connect(client, &BaseClient::requestFailed, &loop,
+                     [&result, &loop](const RequestID &, const QString &error) {
+                         result.failed = true;
+                         result.errorMessage = error;
+                         loop.quit();
+                     });
 }
 
 // --- Helper to run event loop with timeout and mark result ---

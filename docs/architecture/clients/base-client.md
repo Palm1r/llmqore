@@ -1,6 +1,6 @@
 # BaseClient contract
 
-Abstract base for every LLM provider client. Owns HTTP transport, request bookkeeping, the tool-call loop, and callback/signal dispatch. Subclasses supply the wire format, message model, and continuation shape.
+Abstract base for every LLM provider client. Owns HTTP transport, request bookkeeping, the tool-call loop, and signal dispatch. Subclasses supply the wire format, message model, and continuation shape.
 
 ---
 
@@ -8,11 +8,11 @@ Abstract base for every LLM provider client. Owns HTTP transport, request bookke
 
 **HTTP transport.** `BaseClient` wraps `HttpClient` to issue both buffered and streaming HTTP requests. It manages the lifecycle of each streaming reply, wiring chunk and completion signals into internal handlers.
 
-**Request bookkeeping.** Every in-flight request is tracked in a central map keyed by a unique request ID. Each entry holds the stream handle, response buffers, the caller's callbacks, the original URL and payload (needed for tool continuations), a continuation counter, and the captured stop reason. This map is the single source of truth for request state.
+**Request bookkeeping.** Every in-flight request is tracked in a central map keyed by a unique request ID. Each entry holds the stream handle, response buffers, the original URL and payload (needed for tool continuations), a continuation counter, and the captured stop reason. This map is the single source of truth for request state.
 
 **Tool-call loop.** When a streamed response ends with pending tool calls, `BaseClient` walks the tool-use blocks from the message, dispatches them through `ToolsManager`, collects results, and asks the provider subclass to build a continuation payload. The new payload is re-posted under the same request ID. This loop is bounded to a fixed maximum number of continuations to prevent runaways.
 
-**Callback and signal dispatch.** Text deltas, thinking blocks, tool start/result events, final completion, and errors are delivered both as Qt signals (broadcast) and through the per-request callback struct. Signals and callbacks carry the same information; signals are useful for multi-listener UIs, callbacks for request-scoped handling.
+**Signal dispatch.** Text deltas, thinking blocks, tool start/result events, final completion, and errors are delivered as Qt signals (`chunkReceived`, `accumulatedReceived`, `thinkingBlockReceived`, `toolStarted`, `toolResultReady`, `requestCompleted`, `requestFinalized`, `requestFailed`). All signals are emitted on the `BaseClient`'s owning thread; Qt's default `AutoConnection` queues cross-thread delivery safely.
 
 ---
 
@@ -29,15 +29,20 @@ Each provider must supply implementations for several categories of functionalit
 ### Typical sendMessage pattern
 
 ```cpp
-RequestID FooClient::sendMessage(
-    const QJsonObject &payload, RequestCallbacks cb, RequestMode mode)
+RequestID FooClient::sendMessage(const QJsonObject &payload, RequestMode mode)
 {
-    const RequestID id = createRequest(std::move(cb));
+    const RequestID id = createRequest();
     m_messages.insert(id, new FooMessage(/*...*/));
     sendRequest(id, QUrl(m_url + "/chat"), payload, mode);
     return id;
 }
 ```
+
+Consumers subscribe to `BaseClient` signals (`chunkReceived`,
+`requestCompleted`, `requestFinalized`, `requestFailed`, `toolStarted`,
+`toolResultReady`, `thinkingBlockReceived`) to observe request progress.
+All signals are emitted on the `BaseClient`'s owning thread; Qt's
+`AutoConnection` handles cross-thread queued delivery.
 
 ---
 

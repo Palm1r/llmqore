@@ -12,8 +12,8 @@ sequenceDiagram
     participant TM as ToolsManager
     participant BT as BaseTool<br/>(local or McpRemoteTool)
 
-    App->>CC: sendMessage(payload, callbacks)
-    CC->>BC: createRequest(callbacks)<br/>→ RequestID
+    App->>CC: sendMessage(payload)
+    CC->>BC: createRequest()<br/>→ RequestID
     CC->>BC: sendRequest(id, url, payload, Streaming)
     BC->>BC: storeRequestContext(id, url, payload)
     BC->>HC: openStream(request, "POST", body)
@@ -39,7 +39,7 @@ sequenceDiagram
                 CC->>MSG: handleEvent (provider-specific)
                 alt text_delta
                     CC->>BC: addChunk(id, text)
-                    BC-->>App: onChunk(id, text)
+                    BC-->>App: emit chunkReceived(id, text)
                 else tool_use delta
                     MSG->>MSG: accumulate ToolUseContent
                 else thinking_delta
@@ -56,7 +56,7 @@ sequenceDiagram
         BC->>BC: parseHttpError(response)
         BC->>BC: cleanupFullRequest
         BC->>BC: failRequest(id, error)
-        BC-->>App: onFailed(id, error)
+        BC-->>App: emit requestFailed(id, error)
     else message requires tool execution
         BC->>BC: executeToolsFromMessage(id)
         loop each ToolUseContent
@@ -75,8 +75,7 @@ sequenceDiagram
         BC->>MSG: stopReason() → captured in ActiveRequest
         BC->>CC: cleanupDerivedData(id)
         BC->>BC: completeRequest(id)
-        BC-->>App: onFinalized(id, CompletionInfo{fullText, model, stopReason})
-        BC-->>App: onCompleted(id, fullText)
+        BC-->>App: emit requestFinalized(id, CompletionInfo{fullText, model, stopReason})
         BC-->>App: emit requestCompleted(id, fullText)
     end
 ```
@@ -85,13 +84,13 @@ sequenceDiagram
 
 ## Phases
 
-1. **Setup.** The provider subclass constructs its message object, registers it, and hands off to `BaseClient` which allocates a unique request ID, stores the caller's callbacks, and initiates the HTTP request.
+1. **Setup.** The provider subclass constructs its message object, registers it, and hands off to `BaseClient`, which allocates a unique request ID and initiates the HTTP request. Callers observe progress by connecting to `BaseClient`'s signals before (or immediately after) invoking `sendMessage`.
 
 2. **HTTP kickoff.** The base client chooses between a buffered one-shot request or a streaming connection depending on the requested mode. In streaming mode, the stream handle's signals are wired to internal handlers that look up the request context by ID.
 
 3. **Header inspection.** A 2xx status means normal streaming proceeds. A 4xx or 5xx status switches the request into error mode, where incoming bytes are accumulated as an error body rather than being parsed as model output.
 
-4. **Chunk loop.** In normal mode, each chunk of bytes is forwarded to the provider's stream parser, which pushes them through the appropriate framer (SSE or JSON-lines) to produce discrete events. Text deltas are forwarded to callbacks and signals immediately. Tool-use and thinking deltas accumulate silently inside the message object.
+4. **Chunk loop.** In normal mode, each chunk of bytes is forwarded to the provider's stream parser, which pushes them through the appropriate framer (SSE or JSON-lines) to produce discrete events. Text deltas are re-emitted as `chunkReceived` / `accumulatedReceived` signals immediately. Tool-use and thinking deltas accumulate silently inside the message object.
 
 5. **Stream end.** Three outcomes are possible: an error (transport or HTTP) triggers failure notification and cleanup; pending tool-use blocks trigger the tool execution phase; otherwise the request completes normally with the stop reason captured from the message.
 
@@ -99,6 +98,6 @@ sequenceDiagram
 
 7. **Continuation.** After tool execution, the continuation counter is checked against the maximum (10). The provider builds a new payload incorporating the assistant's response and the tool results, and the request re-enters the HTTP phase under the same request ID.
 
-8. **Final completion.** On clean completion, three notifications fire in order: a rich finalization callback (carrying full text, model name, and stop reason), a simple text completion callback, and the Qt completion signal.
+8. **Final completion.** On clean completion, two signals fire in order: `requestFinalized` (carrying `CompletionInfo{fullText, model, stopReason}`), then `requestCompleted` (just `fullText`). The finalized-first order lets consumers resolving a `QPromise` on finalization run before any simple-text handler.
 
-9. **Cancellation.** Aborting a request tears down the stream, cleans up derived data, and delivers a failure notification. The destructor does the same for all pending requests.
+9. **Cancellation.** Aborting a request tears down the stream, cleans up derived data, and emits `requestFailed`. The destructor does the same for all pending requests.

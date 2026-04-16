@@ -37,14 +37,14 @@ TEST_F(GoogleAIIntegrationTest, SimpleTextResponse)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["contents"] = QJsonArray{QJsonObject{
         {"role", "user"},
         {"parts", QJsonArray{QJsonObject{{"text", "Reply with exactly: Hello Integration Test"}}}}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -61,9 +61,9 @@ TEST_F(GoogleAIIntegrationTest, SimpleStringPrompt)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
-    client->ask("Reply with exactly one word: Pong", callbacks);
+    client->ask("Reply with exactly one word: Pong");
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -78,7 +78,7 @@ TEST_F(GoogleAIIntegrationTest, StreamingChunks)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["contents"] = QJsonArray{QJsonObject{
@@ -87,7 +87,7 @@ TEST_F(GoogleAIIntegrationTest, StreamingChunks)
          QJsonArray{QJsonObject{
              {"text", "Count from 1 to 30, one number per line, no other text."}}}}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -104,7 +104,7 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_EchoTool)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["contents"] = QJsonArray{QJsonObject{
@@ -114,7 +114,7 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_EchoTool)
              {"text", "Use the echo tool to echo 'google test works'. Then tell me the result."}}}}}};
     payload["tools"] = client->tools()->getToolsDefinitions();
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -139,7 +139,7 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_ImageReturningTool)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["contents"] = QJsonArray{QJsonObject{
@@ -152,7 +152,7 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_ImageReturningTool)
               "word like 'red' or 'blue'."}}}}}};
     payload["tools"] = client->tools()->getToolsDefinitions();
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -174,7 +174,7 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_Calculator)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["contents"] = QJsonArray{QJsonObject{
@@ -184,7 +184,7 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_Calculator)
              {"text", "Use the calculator to divide 100 by 4. Tell me the result."}}}}}};
     payload["tools"] = client->tools()->getToolsDefinitions();
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -201,7 +201,7 @@ TEST_F(GoogleAIIntegrationTest, ThinkingBlocks)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject thinkingConfig;
     thinkingConfig["thinkingBudget"] = 5000;
@@ -214,7 +214,7 @@ TEST_F(GoogleAIIntegrationTest, ThinkingBlocks)
         {"role", "user"}, {"parts", QJsonArray{QJsonObject{{"text", "What is 15 factorial?"}}}}}};
     payload["generationConfig"] = generationConfig;
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -233,7 +233,7 @@ TEST_F(GoogleAIIntegrationTest, ImageMessage_InlineData)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     const QString base64Png = "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAEklEQVR4nGP4"
                               "z8CAB+GTG8HSALfKY52fTcuYAAAAAElFTkSuQmCC";
@@ -247,7 +247,7 @@ TEST_F(GoogleAIIntegrationTest, ImageMessage_InlineData)
     payload["model"] = m_model;
     payload["contents"] = QJsonArray{QJsonObject{{"role", "user"}, {"parts", parts}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -265,14 +265,14 @@ TEST_F(GoogleAIIntegrationTest, BufferedTextResponse)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["contents"] = QJsonArray{QJsonObject{
         {"role", "user"},
         {"parts", QJsonArray{QJsonObject{{"text", "Reply with exactly: Buffered OK"}}}}}};
 
-    client->sendMessage(payload, callbacks, RequestMode::Buffered);
+    client->sendMessage(payload, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -289,9 +289,9 @@ TEST_F(GoogleAIIntegrationTest, BufferedStringPrompt)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
-    client->ask("Reply with exactly one word: Pong", callbacks, RequestMode::Buffered);
+    client->ask("Reply with exactly one word: Pong", RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 

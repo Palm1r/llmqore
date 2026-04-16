@@ -36,13 +36,12 @@ QNetworkRequest ClaudeClient::prepareNetworkRequest(const QUrl &url) const
     return request;
 }
 
-RequestID ClaudeClient::sendMessage(
-    const QJsonObject &payload, RequestCallbacks callbacks, RequestMode mode)
+RequestID ClaudeClient::sendMessage(const QJsonObject &payload, RequestMode mode)
 {
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
-    RequestID id = createRequest(std::move(callbacks));
+    RequestID id = createRequest();
 
     qCDebug(llmClaudeLog).noquote() << QString("Sending request %1").arg(id);
 
@@ -50,14 +49,14 @@ RequestID ClaudeClient::sendMessage(
     return id;
 }
 
-RequestID ClaudeClient::ask(const QString &prompt, RequestCallbacks callbacks, RequestMode mode)
+RequestID ClaudeClient::ask(const QString &prompt, RequestMode mode)
 {
     QJsonObject payload;
     payload["model"] = m_model;
     payload["max_tokens"] = 4096;
     payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
 
-    return sendMessage(payload, std::move(callbacks), mode);
+    return sendMessage(payload, mode);
 }
 
 QFuture<QList<QString>> ClaudeClient::listModels()
@@ -215,9 +214,9 @@ void ClaudeClient::processStreamEvent(const RequestID &id, const QJsonObject &ev
         int index = event["index"].toInt();
 
         if (auto *tc = dynamic_cast<ThinkingContent *>(message->blockAt(index))) {
-            notifyThinkingBlock(id, tc->thinking(), tc->signature());
+            emit thinkingBlockReceived(id, tc->thinking(), tc->signature());
         } else if (auto *rc = dynamic_cast<RedactedThinkingContent *>(message->blockAt(index))) {
-            notifyThinkingBlock(id, QString(), rc->signature());
+            emit thinkingBlockReceived(id, QString(), rc->signature());
         }
 
         message->handleContentBlockStop(index);
@@ -278,10 +277,10 @@ void ClaudeClient::processBufferedResponse(const RequestID &id, const QByteArray
                     QJsonObject{{"signature", block["signature"].toString()}});
             }
             if (auto *tc = dynamic_cast<ThinkingContent *>(message->blockAt(i)))
-                notifyThinkingBlock(id, tc->thinking(), tc->signature());
+                emit thinkingBlockReceived(id, tc->thinking(), tc->signature());
         } else if (blockType == "redacted_thinking") {
             if (auto *rc = dynamic_cast<RedactedThinkingContent *>(message->blockAt(i)))
-                notifyThinkingBlock(id, QString(), rc->signature());
+                emit thinkingBlockReceived(id, QString(), rc->signature());
         }
 
         message->handleContentBlockStop(i);

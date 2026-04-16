@@ -66,7 +66,7 @@ TEST_F(LlamaCppIntegrationTest, SimpleTextResponse)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     if (!m_model.isEmpty())
@@ -76,7 +76,7 @@ TEST_F(LlamaCppIntegrationTest, SimpleTextResponse)
     payload["messages"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"content", "Reply with exactly: Hello Integration Test"}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -93,7 +93,7 @@ TEST_F(LlamaCppIntegrationTest, SimpleStringPrompt)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     if (!m_model.isEmpty())
@@ -103,7 +103,7 @@ TEST_F(LlamaCppIntegrationTest, SimpleStringPrompt)
     payload["messages"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"content", "Reply with exactly one word: Pong"}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -117,7 +117,7 @@ TEST_F(LlamaCppIntegrationTest, StreamingChunks)
     auto client = createClient();
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     if (!m_model.isEmpty())
@@ -127,7 +127,7 @@ TEST_F(LlamaCppIntegrationTest, StreamingChunks)
     payload["messages"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"content", "What is 2+2? Answer with just the number."}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -143,7 +143,7 @@ TEST_F(LlamaCppIntegrationTest, ThinkingModel_ReasoningContent)
     auto client = createClient();
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     if (!m_model.isEmpty())
@@ -153,7 +153,7 @@ TEST_F(LlamaCppIntegrationTest, ThinkingModel_ReasoningContent)
     payload["messages"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"content", "Explain why sky is blue in one sentence."}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -174,14 +174,14 @@ TEST_F(LlamaCppIntegrationTest, InfillRequest)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["input_prefix"] = "def hello():\n    print(\"hell";
     payload["input_suffix"] = "\")\n\ndef goodbye():\n    print(\"bye\")\n";
     payload["n_predict"] = 2048;
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -197,7 +197,7 @@ TEST_F(LlamaCppIntegrationTest, BufferedResponse)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     if (!m_model.isEmpty())
@@ -207,7 +207,7 @@ TEST_F(LlamaCppIntegrationTest, BufferedResponse)
     payload["messages"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"content", "Reply with exactly: Buffered OK"}}};
 
-    client->sendMessage(payload, callbacks, RequestMode::Buffered);
+    client->sendMessage(payload, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 

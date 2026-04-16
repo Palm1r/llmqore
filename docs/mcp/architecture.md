@@ -38,7 +38,7 @@ flowchart TD
     end
 
     subgraph Core["Core infrastructure"]
-        BC["BaseClient<br/><small>request lifecycle, callbacks</small>"]
+        BC["BaseClient<br/><small>request lifecycle, signals</small>"]
         TM["ToolsManager<br/><small>tool registry + exec queue</small>"]
         BM["BaseMessage<br/><small>streaming parser per provider</small>"]
         BT["BaseTool<br/><small>user-defined tool interface</small>"]

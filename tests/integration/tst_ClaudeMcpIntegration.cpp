@@ -115,7 +115,7 @@ TEST_F(ClaudeMcpIntegrationTest, ClaudeCallsMcpEchoTool)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(claude.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -128,7 +128,7 @@ TEST_F(ClaudeMcpIntegrationTest, ClaudeCallsMcpEchoTool)
          "Use the echo tool to echo exactly the message 'mcp loopback ok'. "
          "Then tell me what the tool returned."}}};
 
-    claude->sendMessage(payload, callbacks);
+    claude->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -154,7 +154,7 @@ TEST_F(ClaudeMcpIntegrationTest, ClaudeCallsMcpCalculatorTool)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(claude.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -166,7 +166,7 @@ TEST_F(ClaudeMcpIntegrationTest, ClaudeCallsMcpCalculatorTool)
         {"content",
          "Use the calculator tool to multiply 13 by 17. Report the numeric result."}}};
 
-    claude->sendMessage(payload, callbacks);
+    claude->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
