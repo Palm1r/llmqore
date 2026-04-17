@@ -289,12 +289,12 @@ public:
 };
 
 // Minimal BaseClient stub for sampling loopback tests. Does NOT touch the
-// network — it immediately invokes onFinalized (or onFailed) on the next
-// event loop tick with canned metadata, so the McpClient::setSamplingClient
+// network — it emits requestFinalized (or requestFailed) on the next event
+// loop tick with canned metadata, so the McpClient::setSamplingClient
 // handler sees a complete flow without needing a live HTTP transport.
 //
 // All BaseClient pure virtuals are satisfied with no-op stubs; sendMessage
-// is overridden to short-circuit into the callbacks directly.
+// is overridden to emit the canonical signals via a deferred QTimer tick.
 class FakeSamplingClient : public BaseClient
 {
     Q_OBJECT
@@ -308,8 +308,8 @@ public:
     QString cannedText = QStringLiteral("pong");
     QString cannedStopReason = QStringLiteral("end_turn");
 
-    // If set, sendMessage fires onFailed with this error instead of
-    // onFinalized — used to verify the error envelope round-trip.
+    // If set, sendMessage fires requestFailed with this error instead of
+    // requestFinalized — used to verify the error envelope round-trip.
     QString cannedError;
 
     // Last payload seen — allows tests to verify the SamplingPayloadBuilder
@@ -318,37 +318,29 @@ public:
 
     RequestID sendMessage(
         const QJsonObject &payload,
-        RequestCallbacks callbacks,
         RequestMode /*mode*/ = RequestMode::Streaming) override
     {
         lastPayload = payload;
         const RequestID id = QStringLiteral("fake-req-1");
 
-        // Move callbacks into a shared_ptr so the queued lambda below owns
-        // them by value. Firing on the next tick (QTimer::singleShot(0))
-        // avoids re-entrancy into the sampling handler that is currently
-        // unwinding up the stack.
-        auto cbs = std::make_shared<RequestCallbacks>(std::move(callbacks));
+        // Fire on the next tick (QTimer::singleShot(0)) to avoid re-entrancy
+        // into the sampling handler that is currently unwinding up the stack.
         const QString err = cannedError;
         const QString text = cannedText;
         const QString stop = cannedStopReason;
         const QString modelName = model();
 
-        QTimer::singleShot(0, this, [cbs, id, err, text, stop, modelName]() {
+        QTimer::singleShot(0, this, [this, id, err, text, stop, modelName]() {
             if (!err.isEmpty()) {
-                if (cbs->onFailed)
-                    cbs->onFailed(id, err);
+                emit requestFailed(id, err);
                 return;
             }
-            if (cbs->onFinalized) {
-                CompletionInfo info;
-                info.fullText = text;
-                info.model = modelName;
-                info.stopReason = stop;
-                cbs->onFinalized(id, info);
-            }
-            if (cbs->onCompleted)
-                cbs->onCompleted(id, text);
+            CompletionInfo info;
+            info.fullText = text;
+            info.model = modelName;
+            info.stopReason = stop;
+            emit requestFinalized(id, info);
+            emit requestCompleted(id, text);
         });
 
         return id;
@@ -356,11 +348,9 @@ public:
 
     RequestID ask(
         const QString &prompt,
-        RequestCallbacks callbacks,
         RequestMode mode = RequestMode::Streaming) override
     {
-        return sendMessage(
-            QJsonObject{{"prompt", prompt}}, std::move(callbacks), mode);
+        return sendMessage(QJsonObject{{"prompt", prompt}}, mode);
     }
 
     QFuture<QList<QString>> listModels() override

@@ -39,13 +39,12 @@ bool LlamaCppClient::isInfillRequest(const QJsonObject &payload)
     return payload.contains("input_prefix") || payload.contains("input_suffix");
 }
 
-RequestID LlamaCppClient::sendMessage(
-    const QJsonObject &payload, RequestCallbacks callbacks, RequestMode mode)
+RequestID LlamaCppClient::sendMessage(const QJsonObject &payload, RequestMode mode)
 {
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
-    RequestID id = createRequest(std::move(callbacks));
+    RequestID id = createRequest();
 
     QString endpoint = isInfillRequest(payload) ? "/infill" : "/v1/chat/completions";
 
@@ -55,14 +54,14 @@ RequestID LlamaCppClient::sendMessage(
     return id;
 }
 
-RequestID LlamaCppClient::ask(const QString &prompt, RequestCallbacks callbacks, RequestMode mode)
+RequestID LlamaCppClient::ask(const QString &prompt, RequestMode mode)
 {
     QJsonObject payload;
     if (!m_model.isEmpty())
         payload["model"] = m_model;
     payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
 
-    return sendMessage(payload, std::move(callbacks), mode);
+    return sendMessage(payload, mode);
 }
 
 QFuture<QList<QString>> LlamaCppClient::listModels()
@@ -247,7 +246,7 @@ void LlamaCppClient::emitPendingThinking(const RequestID &id)
     if (thinking.trimmed().isEmpty())
         return;
 
-    notifyThinkingBlock(id, thinking, QString());
+    emit thinkingBlockReceived(id, thinking, QString());
     m_thinkingEmitted.insert(id);
 }
 
@@ -360,7 +359,7 @@ void LlamaCppClient::processBufferedResponse(const RequestID &id, const QByteArr
     if (messageObj.contains("reasoning_content") && !messageObj["reasoning_content"].isNull()) {
         QString reasoning = messageObj["reasoning_content"].toString();
         if (!reasoning.trimmed().isEmpty())
-            notifyThinkingBlock(id, reasoning, QString());
+            emit thinkingBlockReceived(id, reasoning, QString());
     }
 
     QString content = messageObj["content"].toString();

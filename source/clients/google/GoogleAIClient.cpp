@@ -40,10 +40,9 @@ QNetworkRequest GoogleAIClient::prepareNetworkRequest(const QUrl &url) const
     return request;
 }
 
-RequestID GoogleAIClient::sendMessage(
-    const QJsonObject &payload, RequestCallbacks callbacks, RequestMode mode)
+RequestID GoogleAIClient::sendMessage(const QJsonObject &payload, RequestMode mode)
 {
-    RequestID id = createRequest(std::move(callbacks));
+    RequestID id = createRequest();
 
     QString modelName = payload.contains("model") ? payload["model"].toString() : m_model;
     QString endpoint = (mode == RequestMode::Streaming)
@@ -57,13 +56,13 @@ RequestID GoogleAIClient::sendMessage(
     return id;
 }
 
-RequestID GoogleAIClient::ask(const QString &prompt, RequestCallbacks callbacks, RequestMode mode)
+RequestID GoogleAIClient::ask(const QString &prompt, RequestMode mode)
 {
     QJsonObject payload;
     payload["contents"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"parts", QJsonArray{QJsonObject{{"text", prompt}}}}}};
 
-    return sendMessage(payload, std::move(callbacks), mode);
+    return sendMessage(payload, mode);
 }
 
 QFuture<QList<QString>> GoogleAIClient::listModels()

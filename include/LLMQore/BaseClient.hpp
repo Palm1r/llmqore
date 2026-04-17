@@ -40,22 +40,6 @@ struct LLMQORE_EXPORT CompletionInfo
     QString stopReason;
 };
 
-struct RequestCallbacks
-{
-    std::function<void(const RequestID &id, const QString &chunk)> onChunk;
-    std::function<void(const RequestID &id, const QString &accumulated)> onAccumulated;
-    std::function<void(const RequestID &id, const QString &thinking, const QString &signature)>
-        onThinkingBlock;
-    std::function<void(const RequestID &id, const QString &toolId, const QString &toolName)>
-        onToolStarted;
-    std::function<void(
-        const RequestID &id, const QString &toolId, const QString &toolName, const QString &result)>
-        onToolResult;
-    std::function<void(const RequestID &id, const QString &fullText)> onCompleted;
-    std::function<void(const RequestID &id, const CompletionInfo &info)> onFinalized;
-    std::function<void(const RequestID &id, const QString &error)> onFailed;
-};
-
 struct DataBuffers
 {
     LineBuffer lineBuffer;
@@ -78,7 +62,6 @@ struct ActiveRequest
     QByteArray errorBody = {};
 
     DataBuffers buffers = {};
-    RequestCallbacks callbacks = {};
 
     QUrl url = {};
     QJsonObject originalPayload = {};
@@ -88,6 +71,23 @@ struct ActiveRequest
     QString stopReason = {};
 };
 
+/*!
+ * Abstract base for LLM provider clients.
+ *
+ * Threading: a BaseClient lives on the thread of the QObject parent passed
+ * to its constructor. All public methods must be called from that thread,
+ * and all signals are emitted on that thread. Debug builds enforce this
+ * with Q_ASSERT_X.
+ *
+ * Observing progress: subscribe to the signals declared below
+ * (chunkReceived, requestCompleted, requestFinalized, requestFailed,
+ * toolStarted, toolResultReady, thinkingBlockReceived). Qt's default
+ * AutoConnection queues delivery and copies arguments safely when the
+ * receiver lives on a different thread — no manual marshalling required.
+ *
+ * RequestID lifetime: the ID returned by sendMessage / ask is the only
+ * handle for cancelRequest(); losing it forfeits the ability to cancel.
+ */
 class LLMQORE_EXPORT BaseClient : public QObject
 {
     Q_OBJECT
@@ -98,14 +98,10 @@ public:
     ~BaseClient() override;
 
     virtual RequestID sendMessage(
-        const QJsonObject &payload,
-        RequestCallbacks callbacks = {},
-        RequestMode mode = RequestMode::Streaming)
+        const QJsonObject &payload, RequestMode mode = RequestMode::Streaming)
         = 0;
     virtual RequestID ask(
-        const QString &prompt,
-        RequestCallbacks callbacks = {},
-        RequestMode mode = RequestMode::Streaming)
+        const QString &prompt, RequestMode mode = RequestMode::Streaming)
         = 0;
     virtual QFuture<QList<QString>> listModels() = 0;
     void cancelRequest(const RequestID &requestId);
@@ -129,6 +125,12 @@ signals:
     void chunkReceived(const LLMQore::RequestID &id, const QString &chunk);
     void accumulatedReceived(const LLMQore::RequestID &id, const QString &accumulated);
     void requestCompleted(const LLMQore::RequestID &id, const QString &fullText);
+    // Emitted alongside requestCompleted, with richer metadata. Consumers
+    // that only need fullText can use requestCompleted; those that also
+    // want model/stopReason should prefer requestFinalized. Emitted before
+    // requestCompleted so code resolving a QPromise on requestFinalized
+    // sees the resolution before any signal-chain on requestCompleted.
+    void requestFinalized(const LLMQore::RequestID &id, const LLMQore::CompletionInfo &info);
     void requestFailed(const LLMQore::RequestID &id, const QString &error);
     void thinkingBlockReceived(
         const LLMQore::RequestID &id, const QString &thinking, const QString &signature);
@@ -158,7 +160,7 @@ protected:
     virtual void onStreamFinished(const RequestID &id, std::optional<QString> error);
 
     HttpClient *httpClient() const;
-    RequestID createRequest(RequestCallbacks callbacks = {});
+    [[nodiscard]] RequestID createRequest();
     void sendRequest(
         const RequestID &id,
         const QUrl &url,
@@ -166,10 +168,6 @@ protected:
         RequestMode mode = RequestMode::Streaming);
 
     void addChunk(const RequestID &id, const QString &chunk);
-    void notifyThinkingBlock(const RequestID &id, const QString &thinking, const QString &signature);
-    void notifyToolStarted(const RequestID &id, const QString &toolId, const QString &toolName);
-    void notifyToolResult(
-        const RequestID &id, const QString &toolId, const QString &toolName, const QString &result);
     void completeRequest(const RequestID &id);
     void failRequest(const RequestID &id, const QString &error);
 

@@ -5,6 +5,7 @@
 
 #include <QJsonDocument>
 #include <QPointer>
+#include <QThread>
 #include <QUuid>
 
 #include <LLMQore/HttpClient.hpp>
@@ -79,13 +80,14 @@ ToolsManager *BaseClient::tools()
     if (!m_toolsManager) {
         m_toolsManager = new ToolsManager(toolSchemaFormat(), this);
 
+        // Direct signal-to-signal forward: Qt re-emits with argument copy
+        // and respects the owning thread's event loop. No slot needed.
         connect(
-            m_toolsManager,
-            &ToolsManager::toolExecutionStarted,
-            this,
-            &BaseClient::notifyToolStarted);
+            m_toolsManager, &ToolsManager::toolExecutionStarted,
+            this, &BaseClient::toolStarted);
         connect(
-            m_toolsManager, &ToolsManager::toolExecutionResult, this, &BaseClient::notifyToolResult);
+            m_toolsManager, &ToolsManager::toolExecutionResult,
+            this, &BaseClient::toolResultReady);
         connect(
             m_toolsManager,
             &ToolsManager::toolExecutionComplete,
@@ -110,10 +112,12 @@ void BaseClient::setMaxToolContinuations(int limit) noexcept
     m_maxToolContinuations = limit > 0 ? limit : 1;
 }
 
-RequestID BaseClient::createRequest(RequestCallbacks callbacks)
+RequestID BaseClient::createRequest()
 {
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::createRequest called from non-owning thread");
     RequestID id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    m_requests[id] = ActiveRequest{.callbacks = std::move(callbacks)};
+    m_requests[id] = ActiveRequest{};
     return id;
 }
 
@@ -284,103 +288,50 @@ void BaseClient::onStreamFinished(const RequestID &id, std::optional<QString> er
 
 void BaseClient::addChunk(const RequestID &id, const QString &chunk)
 {
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::addChunk called from non-owning thread");
     auto it = m_requests.find(id);
     if (it == m_requests.end())
         return;
 
     it->buffers.responseContent += chunk;
 
-    if (it->callbacks.onChunk)
-        it->callbacks.onChunk(id, chunk);
-
-    if (it->callbacks.onAccumulated)
-        it->callbacks.onAccumulated(id, it->buffers.responseContent);
-
     emit chunkReceived(id, chunk);
     emit accumulatedReceived(id, it->buffers.responseContent);
 }
 
-void BaseClient::notifyThinkingBlock(
-    const RequestID &id, const QString &thinking, const QString &signature)
-{
-    auto it = m_requests.find(id);
-    if (it == m_requests.end())
-        return;
-
-    if (it->callbacks.onThinkingBlock)
-        it->callbacks.onThinkingBlock(id, thinking, signature);
-
-    emit thinkingBlockReceived(id, thinking, signature);
-}
-
-void BaseClient::notifyToolStarted(
-    const RequestID &id, const QString &toolId, const QString &toolName)
-{
-    auto it = m_requests.find(id);
-    if (it == m_requests.end())
-        return;
-
-    if (it->callbacks.onToolStarted)
-        it->callbacks.onToolStarted(id, toolId, toolName);
-
-    emit toolStarted(id, toolId, toolName);
-}
-
-void BaseClient::notifyToolResult(
-    const RequestID &id, const QString &toolId, const QString &toolName, const QString &result)
-{
-    auto it = m_requests.find(id);
-    if (it == m_requests.end())
-        return;
-
-    if (it->callbacks.onToolResult)
-        it->callbacks.onToolResult(id, toolId, toolName, result);
-
-    emit toolResultReady(id, toolId, toolName, result);
-}
-
 void BaseClient::completeRequest(const RequestID &id)
 {
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::completeRequest called from non-owning thread");
     auto it = m_requests.find(id);
     if (it == m_requests.end())
         return;
 
     QString fullText = it->buffers.responseContent;
     QString stopReason = it->stopReason;
-    auto onCompleted = std::move(it->callbacks.onCompleted);
-    auto onFinalized = std::move(it->callbacks.onFinalized);
     cleanupRequest(id);
 
-    // onFinalized fires in addition to onCompleted when both are set — they
-    // serve different consumers (simple text vs rich metadata). onFinalized
-    // goes first so that code using it to resolve a QPromise sees the
-    // resolution before any signal-connected slot on requestCompleted does.
-    if (onFinalized) {
-        CompletionInfo info;
-        info.fullText = fullText;
-        info.model = m_model;
-        info.stopReason = stopReason;
-        onFinalized(id, info);
-    }
-
-    if (onCompleted)
-        onCompleted(id, fullText);
-
+    // requestFinalized carries the rich metadata (model, stopReason) and
+    // is emitted BEFORE requestCompleted so that consumers resolving a
+    // QPromise / future on finalization see the resolution first, before
+    // any simple "fullText-only" handler runs.
+    CompletionInfo info;
+    info.fullText = fullText;
+    info.model = m_model;
+    info.stopReason = stopReason;
+    emit requestFinalized(id, info);
     emit requestCompleted(id, fullText);
 }
 
 void BaseClient::failRequest(const RequestID &id, const QString &error)
 {
-    auto it = m_requests.find(id);
-    if (it == m_requests.end())
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::failRequest called from non-owning thread");
+    if (!m_requests.contains(id))
         return;
 
-    auto onFailed = std::move(it->callbacks.onFailed);
     cleanupRequest(id);
-
-    if (onFailed)
-        onFailed(id, error);
-
     emit requestFailed(id, error);
 }
 
@@ -482,7 +433,8 @@ void BaseClient::notifyPendingThinkingBlocks(const RequestID &id)
     for (int i = alreadyEmitted; i < totalBlocks; ++i) {
         auto *thinkingContent = thinkingBlocks[i];
         if (!thinkingContent->thinking().trimmed().isEmpty()) {
-            notifyThinkingBlock(id, thinkingContent->thinking(), thinkingContent->signature());
+            emit thinkingBlockReceived(
+                id, thinkingContent->thinking(), thinkingContent->signature());
         }
     }
 

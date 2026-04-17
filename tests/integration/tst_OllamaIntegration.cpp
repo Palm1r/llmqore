@@ -46,7 +46,7 @@ TEST_F(OllamaIntegrationTest, SimpleTextResponse)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -54,7 +54,7 @@ TEST_F(OllamaIntegrationTest, SimpleTextResponse)
     payload["messages"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"content", "Reply with exactly: Hello Integration Test"}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
 
@@ -71,9 +71,9 @@ TEST_F(OllamaIntegrationTest, SimpleStringPrompt)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
-    client->ask("Reply with exactly one word: Pong", callbacks);
+    client->ask("Reply with exactly one word: Pong");
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
 
@@ -89,7 +89,7 @@ TEST_F(OllamaIntegrationTest, StreamingChunks)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -101,7 +101,7 @@ TEST_F(OllamaIntegrationTest, StreamingChunks)
         {"role", "user"},
         {"content", "Count from 1 to 30, one number per line, no other text."}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
 
@@ -118,7 +118,7 @@ TEST_F(OllamaIntegrationTest, ToolUse_EchoTool)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -128,7 +128,7 @@ TEST_F(OllamaIntegrationTest, ToolUse_EchoTool)
         {"role", "user"},
         {"content", "Use the echo tool to echo 'ollama test works'. Then tell me the result."}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
 
@@ -145,7 +145,7 @@ TEST_F(OllamaIntegrationTest, ToolUse_Calculator)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -154,7 +154,7 @@ TEST_F(OllamaIntegrationTest, ToolUse_Calculator)
     payload["messages"] = QJsonArray{QJsonObject{
         {"role", "user"}, {"content", "Use the calculator to add 15 and 27. Tell me the result."}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
 
@@ -171,7 +171,7 @@ TEST_F(OllamaIntegrationTest, ThinkingBlocks)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -180,7 +180,7 @@ TEST_F(OllamaIntegrationTest, ThinkingBlocks)
     payload["messages"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"content", "What is 2 + 3? Think before answering."}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
 
@@ -200,7 +200,7 @@ TEST_F(OllamaIntegrationTest, ImageMessage_Base64)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     // 64x64 solid red PNG (must be >= 32x32 for vision model image processors)
     const QString base64Png = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAb0lEQVR4nO3P"
@@ -216,7 +216,7 @@ TEST_F(OllamaIntegrationTest, ImageMessage_Base64)
         {"content", "What color is this image? Reply one word."},
         {"images", QJsonArray{base64Png}}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
 
@@ -232,7 +232,7 @@ TEST_F(OllamaIntegrationTest, BufferedTextResponse)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -240,7 +240,7 @@ TEST_F(OllamaIntegrationTest, BufferedTextResponse)
     payload["messages"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"content", "Reply with exactly: Buffered OK"}}};
 
-    client->sendMessage(payload, callbacks, RequestMode::Buffered);
+    client->sendMessage(payload, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
 
@@ -257,9 +257,9 @@ TEST_F(OllamaIntegrationTest, BufferedStringPrompt)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
-    client->ask("Reply with exactly one word: Pong", callbacks, RequestMode::Buffered);
+    client->ask("Reply with exactly one word: Pong", RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
 

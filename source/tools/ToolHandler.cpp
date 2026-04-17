@@ -4,11 +4,24 @@
 #include "ToolHandler.hpp"
 #include <LLMQore/ToolExceptions.hpp>
 
+#include <QThread>
 #include <QtConcurrent>
 
 #include <LLMQore/Log.hpp>
 
 namespace LLMQore {
+
+// ToolHandler scheduling and result gathering live on its owning thread.
+// The actual tool `run()` is dispatched via QtConcurrent onto a worker pool,
+// but all QFuture continuations land back here via the watcher.
+namespace {
+inline void assertOwningThread(const QObject *self)
+{
+    Q_ASSERT_X(self->thread() == QThread::currentThread(),
+               "LLMQore::ToolHandler",
+               "ToolHandler accessed from non-owning thread");
+}
+} // namespace
 
 ToolHandler::ToolHandler(QObject *parent)
     : QObject(parent)
@@ -17,6 +30,7 @@ ToolHandler::ToolHandler(QObject *parent)
 QFuture<ToolResult> ToolHandler::executeToolAsync(
     const QString &requestId, const QString &toolId, BaseTool *tool, const QJsonObject &input)
 {
+    assertOwningThread(this);
     if (!tool) {
         QTimer::singleShot(0, this, [this, requestId, toolId]() {
             emit toolFailed(requestId, toolId, QStringLiteral("Tool is null"));
@@ -49,6 +63,7 @@ QFuture<ToolResult> ToolHandler::executeToolAsync(
 
 void ToolHandler::cleanupRequest(const QString &requestId)
 {
+    assertOwningThread(this);
     auto it = m_activeExecutions.begin();
     while (it != m_activeExecutions.end()) {
         if (it.value()->requestId == requestId) {
@@ -71,6 +86,7 @@ void ToolHandler::cleanupRequest(const QString &requestId)
 
 void ToolHandler::onToolExecutionFinished(const QString &toolId)
 {
+    assertOwningThread(this);
     if (!m_activeExecutions.contains(toolId)) {
         return;
     }

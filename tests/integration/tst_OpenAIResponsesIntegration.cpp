@@ -38,14 +38,14 @@ TEST_F(OpenAIResponsesIntegrationTest, SimpleTextResponse)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
     payload["input"] = "Reply with exactly: Hello Integration Test";
     payload["stream"] = true;
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -62,9 +62,9 @@ TEST_F(OpenAIResponsesIntegrationTest, SimpleStringPrompt)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
-    client->ask("Reply with exactly one word: Pong", callbacks);
+    client->ask("Reply with exactly one word: Pong");
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -79,7 +79,7 @@ TEST_F(OpenAIResponsesIntegrationTest, StreamingChunks)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -89,7 +89,7 @@ TEST_F(OpenAIResponsesIntegrationTest, StreamingChunks)
     payload["input"] = "Count from 1 to 30, one number per line, no other text.";
     payload["stream"] = true;
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -106,7 +106,7 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_EchoTool)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -115,7 +115,7 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_EchoTool)
     payload["stream"] = true;
     payload["tools"] = client->tools()->getToolsDefinitions();
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -134,7 +134,7 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_Calculator)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -142,7 +142,7 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_Calculator)
     payload["stream"] = true;
     payload["tools"] = client->tools()->getToolsDefinitions();
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -170,7 +170,7 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_ImageReturningTool)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -181,7 +181,7 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_ImageReturningTool)
     payload["stream"] = true;
     payload["tools"] = client->tools()->getToolsDefinitions();
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -203,7 +203,7 @@ TEST_F(OpenAIResponsesIntegrationTest, ImageMessage_InputImage)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     const QString base64Png = "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAEklEQVR4nGP4"
                               "z8CAB+GTG8HSALfKY52fTcuYAAAAAElFTkSuQmCC";
@@ -225,7 +225,7 @@ TEST_F(OpenAIResponsesIntegrationTest, ImageMessage_InputImage)
     payload["input"] = input;
     payload["stream"] = true;
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -243,14 +243,14 @@ TEST_F(OpenAIResponsesIntegrationTest, BufferedTextResponse)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
     payload["input"] = "Reply with exactly: Buffered OK";
     payload["stream"] = false;
 
-    client->sendMessage(payload, callbacks, RequestMode::Buffered);
+    client->sendMessage(payload, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -267,9 +267,9 @@ TEST_F(OpenAIResponsesIntegrationTest, BufferedStringPrompt)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
-    client->ask("Reply with exactly one word: Pong", callbacks, RequestMode::Buffered);
+    client->ask("Reply with exactly one word: Pong", RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 

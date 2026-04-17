@@ -34,13 +34,12 @@ QNetworkRequest OpenAIClient::prepareNetworkRequest(const QUrl &url) const
     return request;
 }
 
-RequestID OpenAIClient::sendMessage(
-    const QJsonObject &payload, RequestCallbacks callbacks, RequestMode mode)
+RequestID OpenAIClient::sendMessage(const QJsonObject &payload, RequestMode mode)
 {
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
-    RequestID id = createRequest(std::move(callbacks));
+    RequestID id = createRequest();
 
     qCDebug(llmOpenAILog).noquote() << QString("Sending request %1").arg(id);
 
@@ -48,13 +47,13 @@ RequestID OpenAIClient::sendMessage(
     return id;
 }
 
-RequestID OpenAIClient::ask(const QString &prompt, RequestCallbacks callbacks, RequestMode mode)
+RequestID OpenAIClient::ask(const QString &prompt, RequestMode mode)
 {
     QJsonObject payload;
     payload["model"] = m_model;
     payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
 
-    return sendMessage(payload, std::move(callbacks), mode);
+    return sendMessage(payload, mode);
 }
 
 QFuture<QList<QString>> OpenAIClient::listModels()

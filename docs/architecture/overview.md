@@ -23,7 +23,7 @@ flowchart TD
     end
 
     subgraph Core["Core infrastructure"]
-        BC["BaseClient<br/><small>request lifecycle, callbacks</small>"]
+        BC["BaseClient<br/><small>request lifecycle, signals</small>"]
         TM["ToolsManager<br/><small>tool registry + execution</small>"]
         BM["BaseMessage<br/><small>streaming response parser</small>"]
         BT["BaseTool<br/><small>tool interface</small>"]
@@ -107,5 +107,5 @@ Each `source/clients/<vendor>/` holds the `*Client.cpp` + `*Message.{hpp,cpp}` p
 - **`McpServer` depends on `ToolRegistry`, not `ToolsManager`** -- no `ToolSchemaFormat` needed for MCP servers.
 - **One `ToolsManager` holds tools from multiple sources** (local and MCP), and they are indistinguishable to the continuation payload builder.
 - **The SSE parser is spec-compliant and shared** across all providers except Ollama, which uses a JSON-lines framer instead.
-- **In-flight request state is centralized** in a single request map inside `BaseClient`. Each entry holds the stream, buffers, callbacks, original payload for continuations, a continuation counter, and the stop reason.
+- **In-flight request state is centralized** in a single request map inside `BaseClient`. Each entry holds the stream, buffers, original payload for continuations, a continuation counter, and the stop reason. Progress and completion reach the host via signals (`chunkReceived`, `requestCompleted`, `requestFinalized`, `requestFailed`, ...), not per-request callback structs.
 - **Tool continuations are bounded** to a fixed maximum (10) to prevent runaway loops.

@@ -51,38 +51,7 @@ void ChatController::send(const QString &text, const QString &model)
     if (!toolsDefs.isEmpty())
         payload["tools"] = toolsDefs;
 
-    LLMQore::RequestCallbacks callbacks;
-
-    callbacks.onChunk = [this](const LLMQore::RequestID &, const QString &chunk) {
-        m_messages.appendOrCreate("assistant", chunk);
-    };
-
-    callbacks.onToolStarted =
-        [this](const LLMQore::RequestID &, const QString &, const QString &toolName) {
-            setStatus(QString("Tool: %1 ...").arg(toolName));
-        };
-
-    callbacks.onToolResult = [this](
-                                 const LLMQore::RequestID &,
-                                 const QString &,
-                                 const QString &toolName,
-                                 const QString &result) {
-        m_messages.append("tool", QString("[%1]: %2").arg(toolName, result));
-    };
-
-    callbacks.onCompleted = [this](const LLMQore::RequestID &, const QString &fullText) {
-        m_history.append(QJsonObject{{"role", "assistant"}, {"content", fullText}});
-        setBusy(false);
-        setStatus("Ready");
-    };
-
-    callbacks.onFailed = [this](const LLMQore::RequestID &, const QString &error) {
-        m_messages.append("error", error);
-        setBusy(false);
-        setStatus("Request failed");
-    };
-
-    m_currentRequest = m_client->sendMessage(payload, callbacks);
+    m_currentRequest = m_client->sendMessage(payload);
 }
 
 void ChatController::stopGeneration()
@@ -151,6 +120,37 @@ void ChatController::createClient(const QString &provider, const QString &url, c
 
     connect(m_client->tools(), &LLMQore::ToolRegistry::toolsChanged,
             this, &ChatController::refreshToolListUi);
+
+    // Route BaseClient signals to UI state mutations. AutoConnection is fine
+    // — sender and receiver both live on this thread, so calls are direct
+    // without queueing.
+    connect(m_client, &LLMQore::BaseClient::chunkReceived, this,
+            [this](const LLMQore::RequestID &, const QString &chunk) {
+                m_messages.appendOrCreate("assistant", chunk);
+            });
+    connect(m_client, &LLMQore::BaseClient::toolStarted, this,
+            [this](const LLMQore::RequestID &, const QString &, const QString &toolName) {
+                setStatus(QString("Tool: %1 ...").arg(toolName));
+            });
+    connect(m_client, &LLMQore::BaseClient::toolResultReady, this,
+            [this](const LLMQore::RequestID &,
+                   const QString &,
+                   const QString &toolName,
+                   const QString &result) {
+                m_messages.append("tool", QString("[%1]: %2").arg(toolName, result));
+            });
+    connect(m_client, &LLMQore::BaseClient::requestCompleted, this,
+            [this](const LLMQore::RequestID &, const QString &fullText) {
+                m_history.append(QJsonObject{{"role", "assistant"}, {"content", fullText}});
+                setBusy(false);
+                setStatus("Ready");
+            });
+    connect(m_client, &LLMQore::BaseClient::requestFailed, this,
+            [this](const LLMQore::RequestID &, const QString &error) {
+                m_messages.append("error", error);
+                setBusy(false);
+                setStatus("Request failed");
+            });
 }
 
 void ChatController::fetchModels()
@@ -216,8 +216,8 @@ void ChatController::refreshToolListUi()
     m_toolNames.clear();
     if (!m_client)
         return;
-    for (auto *tool : m_client->tools()->registeredTools())
-        m_toolNames.append(QString("%1 - %2").arg(tool->displayName(), tool->description()));
+    for (const auto &snap : m_client->tools()->toolsSnapshot())
+        m_toolNames.append(QString("%1 - %2").arg(snap.displayName, snap.description));
     emit toolNamesChanged();
 }
 

@@ -36,7 +36,7 @@ TEST_F(ClaudeIntegrationTest, SimpleTextResponse)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -45,7 +45,7 @@ TEST_F(ClaudeIntegrationTest, SimpleTextResponse)
     payload["messages"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"content", "Reply with exactly: Hello Integration Test"}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -63,9 +63,9 @@ TEST_F(ClaudeIntegrationTest, SimpleStringPrompt)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
-    client->ask("Reply with exactly one word: Pong", callbacks);
+    client->ask("Reply with exactly one word: Pong");
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -80,7 +80,7 @@ TEST_F(ClaudeIntegrationTest, StreamingChunks)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -96,7 +96,7 @@ TEST_F(ClaudeIntegrationTest, StreamingChunks)
          "Write a 500-word essay about the history of programming languages, "
          "covering FORTRAN, C, and Python. Use complete sentences."}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -113,7 +113,7 @@ TEST_F(ClaudeIntegrationTest, ToolUse_EchoTool)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -126,7 +126,7 @@ TEST_F(ClaudeIntegrationTest, ToolUse_EchoTool)
          "Use the echo tool to echo the message 'integration test works'. "
          "Then tell me the result."}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -145,7 +145,7 @@ TEST_F(ClaudeIntegrationTest, ToolUse_Calculator)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -156,7 +156,7 @@ TEST_F(ClaudeIntegrationTest, ToolUse_Calculator)
         {"role", "user"},
         {"content", "Use the calculator tool to multiply 7 by 8. Tell me the result."}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -173,7 +173,7 @@ TEST_F(ClaudeIntegrationTest, ExtendedThinking)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -183,7 +183,7 @@ TEST_F(ClaudeIntegrationTest, ExtendedThinking)
     payload["messages"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"content", "What is 15 factorial? Think step by step."}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -198,7 +198,7 @@ TEST_F(ClaudeIntegrationTest, ImageMessage_Base64)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     const QString base64Png = "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAEklEQVR4nGP4"
                               "z8CAB+GTG8HSALfKY52fTcuYAAAAAElFTkSuQmCC";
@@ -219,7 +219,7 @@ TEST_F(ClaudeIntegrationTest, ImageMessage_Base64)
     payload["stream"] = true;
     payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", content}}};
 
-    client->sendMessage(payload, callbacks);
+    client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -237,7 +237,7 @@ TEST_F(ClaudeIntegrationTest, BufferedTextResponse)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
     QJsonObject payload;
     payload["model"] = m_model;
@@ -246,7 +246,7 @@ TEST_F(ClaudeIntegrationTest, BufferedTextResponse)
     payload["messages"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"content", "Reply with exactly: Buffered OK"}}};
 
-    client->sendMessage(payload, callbacks, RequestMode::Buffered);
+    client->sendMessage(payload, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -263,9 +263,9 @@ TEST_F(ClaudeIntegrationTest, BufferedStringPrompt)
 
     TestResult result;
     QEventLoop loop;
-    auto callbacks = makeLoggingCallbacks(result, loop);
+    wireLoggingSignals(client.get(), result, loop);
 
-    client->ask("Reply with exactly one word: Pong", callbacks, RequestMode::Buffered);
+    client->ask("Reply with exactly one word: Pong", RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
