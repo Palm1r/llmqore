@@ -111,7 +111,7 @@ Common fields for every entry:
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `type` | string | `"stdio"` | Upstream transport: `"stdio"`, `"sse"`, `"http"` / `"streamable-http"` |
+| `type` | string | `"stdio"` | Upstream transport: `"stdio"`, `"sse"`, or `"http"` |
 | `enable` | bool | `true` | Set to `false` to skip this entry without removing it |
 
 **stdio entries** (`type: "stdio"`, the default) — bridge launches the upstream as a child process and talks over stdin/stdout:
@@ -133,7 +133,7 @@ Minimal template:
 
 `type` is omitted — it defaults to `"stdio"`. `url` / `httpSpec` / `headers` don't apply here.
 
-**HTTP/SSE entries** (`type: "sse"` / `"http"` / `"streamable-http"`) — upstream is already running on the network; bridge connects to its URL:
+**HTTP/SSE entries** (`type: "sse"` or `"http"`) — upstream is already running on the network; bridge connects to its URL. `"sse"` and `"http"` are treated identically; the actual wire revision is chosen by `httpSpec`, not by `type`:
 
 | Field | Type | Description |
 |---|---|---|
@@ -145,9 +145,9 @@ Minimal template:
 
 ```json
 "my-http-server": {
-  "type": "streamable-http",
+  "type": "http",
   "url": "http://127.0.0.1:29180/mcp",
-  "httpSpec": "2025-11-25"
+  "httpSpec": "2025-11-25"   // Streamable HTTP (single /mcp endpoint)
 }
 ```
 
@@ -162,12 +162,12 @@ Minimal template:
 
 ---
 
-The `type` field selects HTTP vs stdio. `httpSpec` selects the wire-protocol revision:
+The `type` field selects the transport family (HTTP vs stdio). `httpSpec` is the single knob that picks the wire-protocol revision inside the HTTP family:
 
-- `"2024-11-05"` — legacy SSE transport (separate `/sse` + `POST` endpoints). Pair with `type: "sse"`.
-- `"2025-03-26"`, `"2025-06-18"`, `"2025-11-25"` (and `"latest"`) — Streamable HTTP transport (single `/mcp` endpoint). Pair with `type: "http"` or `"streamable-http"`.
+- `"2024-11-05"` — legacy SSE transport (separate `/sse` + `POST /messages` endpoints). Conventionally written as `type: "sse"` for readability.
+- `"2025-03-26"`, `"2025-06-18"`, `"2025-11-25"` (and `"latest"`) — Streamable HTTP transport (single `/mcp` endpoint). Conventionally written as `type: "http"`.
 
-If you don't set `httpSpec`, the bridge speaks the latest known revision. Match it to whatever the upstream MCP server expects — mismatched revisions show up as immediate `Transport closed` after the initial HTTP request.
+`"sse"` and `"http"` are interchangeable in code — use whichever names the upstream's actual shape best. If you don't set `httpSpec`, the bridge speaks the latest known revision. Match it to whatever the upstream MCP server expects — mismatched revisions show up as immediate `Transport closed` after the initial HTTP request.
 
 ## Common configurations
 
@@ -218,9 +218,9 @@ Claude Desktop only speaks stdio, but your MCP server lives inside a Qt/Electron
 {
   "mcpServers": {
     "myapp": {
-      "type": "streamable-http",
+      "type": "http",
       "url": "http://127.0.0.1:29180/mcp",
-      "httpSpec": "2025-11-25"
+      "httpSpec": "2025-11-25"   // Streamable HTTP (single /mcp endpoint)
     }
   }
 }
@@ -246,12 +246,12 @@ Run the bridge as an HTTP endpoint and put any combination of stdio and HTTP ups
     "qtcreator": {
       "type": "sse",
       "url": "http://127.0.0.1:3001/sse",
-      "httpSpec": "2024-11-05"
+      "httpSpec": "2024-11-05"   // legacy split: GET /sse + POST /messages
     },
     "myapp": {
-      "type": "streamable-http",
+      "type": "http",
       "url": "http://127.0.0.1:29180/mcp",
-      "httpSpec": "2025-11-25"
+      "httpSpec": "2025-11-25"   // Streamable HTTP (single /mcp endpoint)
     }
   }
 }

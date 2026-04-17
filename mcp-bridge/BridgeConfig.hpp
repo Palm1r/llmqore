@@ -16,7 +16,7 @@ namespace McpBridge {
 
 enum class UpstreamType {
     Stdio,
-    Sse, // legacy SSE / Streamable HTTP (MCP over HTTP)
+    Sse, // legacy SSE / Streamable HTTP (MCP over HTTP); wire spec via httpSpec
 };
 
 struct UpstreamEntry

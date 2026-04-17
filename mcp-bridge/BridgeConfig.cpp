@@ -51,7 +51,12 @@ BridgeConfig loadConfig(const QString &path)
         }
 
         const QString typeStr = entry["type"].toString().toLower();
-        if (typeStr == "sse" || typeStr == "http" || typeStr == "streamable-http") {
+        // `"sse"` and `"http"` both mean «MCP over HTTP» — which wire spec
+        // is actually spoken is selected by `"httpSpec"` below, not by the
+        // `"type"` string. Historically we also accepted `"streamable-http"`
+        // as a synonym of `"http"`; it was a pure alias and has been
+        // dropped to keep the config surface honest.
+        if (typeStr == "sse" || typeStr == "http") {
             upstream.type = UpstreamType::Sse;
             upstream.url = QUrl(entry["url"].toString());
             if (!upstream.url.isValid()) {
@@ -63,6 +68,18 @@ BridgeConfig loadConfig(const QString &path)
                 for (auto it = hdrs.begin(); it != hdrs.end(); ++it)
                     upstream.headers.insert(it.key(), it.value().toString());
             }
+
+            // `"type"` selects the transport family (stdio vs HTTP). The
+            // HTTP wire spec is *separately* chosen via `"httpSpec"` and
+            // has to be set by the user when the default (Latest, currently
+            // Streamable HTTP 2025-03-26) doesn't match the upstream.
+            //
+            // Concretely: servers that advertise a `/sse` URL usually speak
+            // the legacy 2024-11-05 transport (split GET /sse + POST
+            // /messages). For those, the user must write:
+            //     "httpSpec": "2024-11-05"
+            // Without it, initialize round-trips to a spec the server
+            // doesn't recognise and hangs until the client timeout.
             if (entry.contains("httpSpec"))
                 upstream.httpSpec = entry["httpSpec"].toString();
         } else {

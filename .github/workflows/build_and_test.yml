@@ -333,6 +333,21 @@ jobs:
         dist="$GITHUB_WORKSPACE/dist/mcp-bridge-${platform}"
         cmake --install build --prefix "$dist" --component mcp-bridge --strip
 
+        if [ "${{ runner.os }}" = "macOS" ]; then
+          shopt -s nullglob
+          for app in "$dist"/*.app; do
+            find "$app" -type f \( -name '*.dylib' -o -name '*.so' \) \
+              -exec codesign --force --timestamp=none --sign - {} \;
+            find "$app" -type d -name '*.framework' \
+              -exec codesign --force --timestamp=none --sign - {} \;
+            main_exe="$app/Contents/MacOS/$(basename "$app" .app)"
+            [ -f "$main_exe" ] && \
+              codesign --force --timestamp=none --sign - "$main_exe"
+            codesign --force --timestamp=none --sign - "$app"
+            codesign --verify --strict --verbose=2 "$app"
+          done
+        fi
+
         cd "$GITHUB_WORKSPACE/dist"
         if [ "$ext" = "zip" ]; then
           7z a "mcp-bridge-${platform}.zip" "mcp-bridge-${platform}"

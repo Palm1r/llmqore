@@ -8,9 +8,9 @@
             "env": {}
         },
         "qtcreator": {
-            "enable": false,
             "type": "sse",
-            "url": "http://127.0.0.1:3001/sse"
+            "url": "http://127.0.0.1:3001/sse",
+            "httpSpec": "2024-11-05"
         }
     }
 }
