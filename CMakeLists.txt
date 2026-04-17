@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(LLMQore
-    VERSION 0.3.1
+    VERSION 0.4.0
     LANGUAGES CXX
     DESCRIPTION "Qt/C++ library for LLM provider integration"
 )
