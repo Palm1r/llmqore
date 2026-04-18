@@ -8,6 +8,7 @@
 #include <LLMQore/ClaudeClient.hpp>
 #include <LLMQore/GoogleAIClient.hpp>
 #include <LLMQore/LlamaCppClient.hpp>
+#include <LLMQore/MistralClient.hpp>
 #include <LLMQore/OllamaClient.hpp>
 #include <LLMQore/OpenAIClient.hpp>
 #include <LLMQore/OpenAIResponsesClient.hpp>
@@ -121,6 +122,25 @@ TEST(LlamaCppClientConstructor, Basic)
 TEST(LlamaCppClientConstructor, Default)
 {
     LlamaCppClient client;
+
+    EXPECT_EQ(client.toolSchemaFormat(), ToolSchemaFormat::OpenAI);
+    EXPECT_NE(client.tools(), nullptr);
+    EXPECT_TRUE(client.url().isEmpty());
+    EXPECT_TRUE(client.apiKey().isEmpty());
+    EXPECT_TRUE(client.model().isEmpty());
+}
+
+TEST(MistralClientConstructor, Basic)
+{
+    MistralClient client("https://api.mistral.ai/v1", "sk-test", "codestral-latest");
+
+    EXPECT_EQ(client.toolSchemaFormat(), ToolSchemaFormat::OpenAI);
+    EXPECT_NE(client.tools(), nullptr);
+}
+
+TEST(MistralClientConstructor, Default)
+{
+    MistralClient client;
 
     EXPECT_EQ(client.toolSchemaFormat(), ToolSchemaFormat::OpenAI);
     EXPECT_NE(client.tools(), nullptr);

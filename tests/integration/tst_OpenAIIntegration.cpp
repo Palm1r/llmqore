@@ -212,7 +212,7 @@ TEST_F(OpenAIIntegrationTest, BufferedTextResponse)
     payload["messages"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"content", "Reply with exactly: Buffered OK"}}};
 
-    client->sendMessage(payload, RequestMode::Buffered);
+    client->sendMessage(payload, {}, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 

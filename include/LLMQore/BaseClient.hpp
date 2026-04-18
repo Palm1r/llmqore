@@ -97,8 +97,16 @@ public:
         const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
     ~BaseClient() override;
 
+    // `endpoint` lets callers override the path the request goes to; pass
+    // an empty string to use the provider's default (e.g. /v1/messages
+    // for Claude, /chat/completions for OpenAI/Mistral). Mistral uses it
+    // to target /fim/completions in addition to /chat/completions; most
+    // providers expose only one endpoint and ignore non-empty values
+    // unless documented otherwise.
     virtual RequestID sendMessage(
-        const QJsonObject &payload, RequestMode mode = RequestMode::Streaming)
+        const QJsonObject &payload,
+        const QString &endpoint = {},
+        RequestMode mode = RequestMode::Streaming)
         = 0;
     virtual RequestID ask(
         const QString &prompt, RequestMode mode = RequestMode::Streaming)

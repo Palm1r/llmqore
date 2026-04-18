@@ -34,16 +34,18 @@ QNetworkRequest OpenAIClient::prepareNetworkRequest(const QUrl &url) const
     return request;
 }
 
-RequestID OpenAIClient::sendMessage(const QJsonObject &payload, RequestMode mode)
+RequestID OpenAIClient::sendMessage(
+    const QJsonObject &payload, const QString &endpoint, RequestMode mode)
 {
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
     RequestID id = createRequest();
+    const QString resolved = endpoint.isEmpty() ? QStringLiteral("/chat/completions") : endpoint;
 
-    qCDebug(llmOpenAILog).noquote() << QString("Sending request %1").arg(id);
+    qCDebug(llmOpenAILog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
 
-    sendRequest(id, QUrl(m_url + "/chat/completions"), request, mode);
+    sendRequest(id, QUrl(m_url + resolved), request, mode);
     return id;
 }
 
@@ -53,7 +55,7 @@ RequestID OpenAIClient::ask(const QString &prompt, RequestMode mode)
     payload["model"] = m_model;
     payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
 
-    return sendMessage(payload, mode);
+    return sendMessage(payload, {}, mode);
 }
 
 QFuture<QList<QString>> OpenAIClient::listModels()

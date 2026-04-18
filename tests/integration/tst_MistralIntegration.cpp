@@ -2,37 +2,41 @@
 // SPDX-License-Identifier: MIT
 
 #include "IntegrationTestHelpers.hpp"
-#include <LLMQore/OpenAIResponsesClient.hpp>
-#include <LLMQore/ToolResult.hpp>
-#include <LLMQore/ToolsManager.hpp>
+#include <LLMQore/MistralClient.hpp>
 
 using namespace LLMQore;
 using namespace LLMQore::IntegrationTest;
 
-class OpenAIResponsesIntegrationTest : public ProviderTestBase
+class MistralIntegrationTest : public ProviderTestBase
 {
 protected:
     void SetUp() override
     {
         ProviderTestBase::SetUp();
 
-        m_apiKey = getEnvOrSkip("OPENAI_API_KEY");
-        m_url = getEnvOrDefault("OPENAI_API_URL", "https://api.openai.com/v1");
-        m_model = getEnvOrDefault("OPENAI_RESPONSES_MODEL", "gpt-4.1-nano");
+        m_apiKey = getEnvOrSkip("MISTRAL_API_KEY");
+        m_url = getEnvOrDefault("MISTRAL_API_URL", "https://api.mistral.ai/v1");
+        m_model = getEnvOrDefault("MISTRAL_MODEL", "mistral-small-latest");
+        m_fimModel = getEnvOrDefault("MISTRAL_FIM_MODEL", "codestral-latest");
     }
 
-    std::unique_ptr<OpenAIResponsesClient> createClient()
+    std::unique_ptr<MistralClient> createClient()
     {
-        return std::make_unique<OpenAIResponsesClient>(
-            m_url, m_apiKey, m_model);
+        return std::make_unique<MistralClient>(m_url, m_apiKey, m_model);
+    }
+
+    std::unique_ptr<MistralClient> createFimClient()
+    {
+        return std::make_unique<MistralClient>(m_url, m_apiKey, m_fimModel);
     }
 
     QString m_apiKey;
     QString m_url;
     QString m_model;
+    QString m_fimModel;
 };
 
-TEST_F(OpenAIResponsesIntegrationTest, SimpleTextResponse)
+TEST_F(MistralIntegrationTest, SimpleTextResponse)
 {
     auto client = createClient();
 
@@ -42,8 +46,10 @@ TEST_F(OpenAIResponsesIntegrationTest, SimpleTextResponse)
 
     QJsonObject payload;
     payload["model"] = m_model;
-    payload["input"] = "Reply with exactly: Hello Integration Test";
+    payload["max_tokens"] = 50;
     payload["stream"] = true;
+    payload["messages"] = QJsonArray{
+        QJsonObject{{"role", "user"}, {"content", "Reply with exactly: Hello Integration Test"}}};
 
     client->sendMessage(payload);
 
@@ -56,7 +62,7 @@ TEST_F(OpenAIResponsesIntegrationTest, SimpleTextResponse)
     EXPECT_GT(result.chunks.size(), 0) << result.diagnostics();
 }
 
-TEST_F(OpenAIResponsesIntegrationTest, SimpleStringPrompt)
+TEST_F(MistralIntegrationTest, SimpleStringPrompt)
 {
     auto client = createClient();
 
@@ -73,7 +79,7 @@ TEST_F(OpenAIResponsesIntegrationTest, SimpleStringPrompt)
     EXPECT_FALSE(result.fullText.isEmpty()) << result.diagnostics();
 }
 
-TEST_F(OpenAIResponsesIntegrationTest, StreamingChunks)
+TEST_F(MistralIntegrationTest, StreamingChunks)
 {
     auto client = createClient();
 
@@ -83,11 +89,11 @@ TEST_F(OpenAIResponsesIntegrationTest, StreamingChunks)
 
     QJsonObject payload;
     payload["model"] = m_model;
-    // Ask for a long enough response that the API cannot coalesce it into
-    // a single SSE chunk — counting to 30 gives ~90 characters, which the
-    // API always streams as multiple chunks.
-    payload["input"] = "Count from 1 to 30, one number per line, no other text.";
+    payload["max_tokens"] = 500;
     payload["stream"] = true;
+    payload["messages"] = QJsonArray{QJsonObject{
+        {"role", "user"},
+        {"content", "Count from 1 to 30, one number per line, no other text."}}};
 
     client->sendMessage(payload);
 
@@ -98,7 +104,7 @@ TEST_F(OpenAIResponsesIntegrationTest, StreamingChunks)
     EXPECT_GT(result.chunks.size(), 1) << "Expected multiple chunks\n" << result.diagnostics();
 }
 
-TEST_F(OpenAIResponsesIntegrationTest, ToolUse_EchoTool)
+TEST_F(MistralIntegrationTest, ToolUse_EchoTool)
 {
     auto client = createClient();
     auto *echoTool = new EchoTool(client.get());
@@ -110,10 +116,13 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_EchoTool)
 
     QJsonObject payload;
     payload["model"] = m_model;
-    payload["input"]
-        = "Use the echo tool to echo 'responses integration test'. Then tell me the result.";
+    payload["max_tokens"] = 300;
     payload["stream"] = true;
     payload["tools"] = client->tools()->getToolsDefinitions();
+    payload["messages"] = QJsonArray{QJsonObject{
+        {"role", "user"},
+        {"content",
+         "Use the echo tool to echo 'integration test works'. Then tell me the result."}}};
 
     client->sendMessage(payload);
 
@@ -126,7 +135,7 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_EchoTool)
                                              << result.diagnostics();
 }
 
-TEST_F(OpenAIResponsesIntegrationTest, ToolUse_Calculator)
+TEST_F(MistralIntegrationTest, ToolUse_Calculator)
 {
     auto client = createClient();
     auto *calcTool = new CalculatorTool(client.get());
@@ -138,9 +147,12 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_Calculator)
 
     QJsonObject payload;
     payload["model"] = m_model;
-    payload["input"] = "Use the calculator to add 123 and 456. Tell me the result.";
+    payload["max_tokens"] = 300;
     payload["stream"] = true;
     payload["tools"] = client->tools()->getToolsDefinitions();
+    payload["messages"] = QJsonArray{QJsonObject{
+        {"role", "user"},
+        {"content", "Use the calculator to multiply 7 by 8. Tell me the result."}}};
 
     client->sendMessage(payload);
 
@@ -149,81 +161,34 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_Calculator)
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
     EXPECT_FALSE(result.failed) << result.diagnostics();
-    EXPECT_TRUE(result.fullText.contains("579")) << "Expected 579 in response\n"
-                                                 << result.diagnostics();
+    EXPECT_TRUE(result.fullText.contains("56")) << "Expected 56 in response\n"
+                                                << result.diagnostics();
 }
 
-TEST_F(OpenAIResponsesIntegrationTest, ToolUse_ImageReturningTool)
+TEST_F(MistralIntegrationTest, ImageMessage_Base64)
 {
-    // A tool returns a small PNG as a ToolResult with an image content
-    // block; OpenAIResponsesMessage serialises it as an input_image block
-    // inside function_call_output.output. This test exercises the whole
-    // path end-to-end against the real Responses API: the model must call
-    // the tool, receive the image, and describe its colour.
-    //
-    // NOTE: the default nano model has vision but sometimes misses a
-    // 10x10 bitmap. We override via env var if the user provides a more
-    // capable model (e.g. gpt-4.1-mini).
+    // Mistral vision models (mistral-small-latest, pixtral-*) accept the
+    // OpenAI-compatible `image_url` content-block shape.
     auto client = createClient();
-    auto *imageTool = new ImageReturningTool(client.get());
-    client->tools()->addTool(imageTool);
 
     TestResult result;
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
+
+    QJsonArray content;
+    content.append(
+        QJsonObject{{"type", "text"}, {"text", "What color is this image? Reply one word."}});
+    content.append(
+        QJsonObject{
+            {"type", "image_url"},
+            {"image_url",
+             QJsonObject{{"url", QString("data:image/png;base64,%1").arg(kTinyPngBase64)}}}});
 
     QJsonObject payload;
     payload["model"] = m_model;
-    payload["input"]
-        = "Call the get_sample_image tool (no arguments) and then tell me what "
-          "colour the returned image is. Reply with a single lowercase colour "
-          "word like 'red' or 'blue'.";
+    payload["max_tokens"] = 500;
     payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
-
-    client->sendMessage(payload);
-
-    waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
-
-    ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
-    EXPECT_TRUE(result.completed) << result.diagnostics();
-    EXPECT_FALSE(result.failed) << result.diagnostics();
-    EXPECT_FALSE(result.toolCalls.isEmpty())
-        << "Model did not invoke the image-returning tool\n" << result.diagnostics();
-    // Model should have something non-empty in its final response — we
-    // don't assert the exact colour because tiny bitmaps are hard for the
-    // default nano model. The important invariant is that the multi-turn
-    // loop didn't crash when a non-string `output` flew through the wire.
-    EXPECT_FALSE(result.fullText.isEmpty()) << result.diagnostics();
-}
-
-TEST_F(OpenAIResponsesIntegrationTest, ImageMessage_InputImage)
-{
-    auto client = createClient();
-
-    TestResult result;
-    QEventLoop loop;
-    wireLoggingSignals(client.get(), result, loop);
-
-    const QString base64Png = "iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAIAAAACUFjqAAAAEklEQVR4nGP4"
-                              "z8CAB+GTG8HSALfKY52fTcuYAAAAAElFTkSuQmCC";
-
-    QJsonArray inputContent;
-    inputContent.append(
-        QJsonObject{{"type", "input_text"}, {"text", "What color is this image? Reply one word."}});
-    inputContent.append(
-        QJsonObject{
-            {"type", "input_image"},
-            {"image_url", QString("data:image/png;base64,%1").arg(base64Png)},
-            {"detail", "high"}});
-
-    QJsonArray input;
-    input.append(QJsonObject{{"role", "user"}, {"content", inputContent}});
-
-    QJsonObject payload;
-    payload["model"] = "gpt-5.4";
-    payload["input"] = input;
-    payload["stream"] = true;
+    payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", content}}};
 
     client->sendMessage(payload);
 
@@ -233,11 +198,9 @@ TEST_F(OpenAIResponsesIntegrationTest, ImageMessage_InputImage)
     EXPECT_FALSE(result.failed) << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
     EXPECT_FALSE(result.fullText.isEmpty()) << result.diagnostics();
-    EXPECT_TRUE(result.fullText.toLower().contains("red")) << "Expected 'red' in response\n"
-                                                           << result.diagnostics();
 }
 
-TEST_F(OpenAIResponsesIntegrationTest, BufferedTextResponse)
+TEST_F(MistralIntegrationTest, BufferedTextResponse)
 {
     auto client = createClient();
 
@@ -247,8 +210,9 @@ TEST_F(OpenAIResponsesIntegrationTest, BufferedTextResponse)
 
     QJsonObject payload;
     payload["model"] = m_model;
-    payload["input"] = "Reply with exactly: Buffered OK";
     payload["stream"] = false;
+    payload["messages"] = QJsonArray{
+        QJsonObject{{"role", "user"}, {"content", "Reply with exactly: Buffered OK"}}};
 
     client->sendMessage(payload, {}, RequestMode::Buffered);
 
@@ -261,7 +225,7 @@ TEST_F(OpenAIResponsesIntegrationTest, BufferedTextResponse)
     EXPECT_TRUE(result.fullText.contains("Buffered")) << result.diagnostics();
 }
 
-TEST_F(OpenAIResponsesIntegrationTest, BufferedStringPrompt)
+TEST_F(MistralIntegrationTest, BufferedStringPrompt)
 {
     auto client = createClient();
 
@@ -278,7 +242,7 @@ TEST_F(OpenAIResponsesIntegrationTest, BufferedStringPrompt)
     EXPECT_FALSE(result.fullText.isEmpty()) << result.diagnostics();
 }
 
-TEST_F(OpenAIResponsesIntegrationTest, ListModels)
+TEST_F(MistralIntegrationTest, ListModels)
 {
     auto client = createClient();
 
@@ -294,4 +258,85 @@ TEST_F(OpenAIResponsesIntegrationTest, ListModels)
     ASSERT_TRUE(future.isFinished()) << "ListModels timed out";
     QList<QString> models = future.result();
     EXPECT_GT(models.size(), 0) << "No models returned";
+}
+
+// --- Mistral-specific: Fill-In-the-Middle (FIM) completion ---
+//
+// FIM is only available on Codestral models and lives behind the
+// /fim/completions endpoint, which the caller selects explicitly via
+// the endpoint parameter on sendMessage().
+
+constexpr const char *kFimEndpoint = "/fim/completions";
+
+TEST_F(MistralIntegrationTest, FimCompletion_Streaming)
+{
+    auto client = createFimClient();
+
+    TestResult result;
+    QEventLoop loop;
+    wireLoggingSignals(client.get(), result, loop);
+
+    QJsonObject payload;
+    payload["model"] = m_fimModel;
+    payload["prompt"] = "def fib(n):\n    ";
+    payload["suffix"] = "\n\nprint(fib(10))\n";
+    payload["max_tokens"] = 64;
+
+    client->sendMessage(payload, kFimEndpoint);
+
+    waitWithTimeout(loop, result, kRequestTimeoutMs);
+
+    ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
+    ASSERT_TRUE(result.completed) << result.diagnostics();
+    EXPECT_FALSE(result.failed) << result.diagnostics();
+    EXPECT_FALSE(result.fullText.isEmpty()) << result.diagnostics();
+}
+
+TEST_F(MistralIntegrationTest, FimCompletion_NoSuffix)
+{
+    // `suffix` is optional in the FIM API; the explicit endpoint
+    // argument is what selects the route, not the payload shape.
+    auto client = createFimClient();
+
+    TestResult result;
+    QEventLoop loop;
+    wireLoggingSignals(client.get(), result, loop);
+
+    QJsonObject payload;
+    payload["model"] = m_fimModel;
+    payload["prompt"] = "// Returns the factorial of n\nint factorial(int n) {\n    ";
+    payload["max_tokens"] = 64;
+
+    client->sendMessage(payload, kFimEndpoint);
+
+    waitWithTimeout(loop, result, kRequestTimeoutMs);
+
+    ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
+    ASSERT_TRUE(result.completed) << result.diagnostics();
+    EXPECT_FALSE(result.failed) << result.diagnostics();
+    EXPECT_FALSE(result.fullText.isEmpty()) << result.diagnostics();
+}
+
+TEST_F(MistralIntegrationTest, FimCompletion_Buffered)
+{
+    auto client = createFimClient();
+
+    TestResult result;
+    QEventLoop loop;
+    wireLoggingSignals(client.get(), result, loop);
+
+    QJsonObject payload;
+    payload["model"] = m_fimModel;
+    payload["prompt"] = "def add(a, b):\n    return ";
+    payload["suffix"] = "\n";
+    payload["max_tokens"] = 32;
+
+    client->sendMessage(payload, kFimEndpoint, RequestMode::Buffered);
+
+    waitWithTimeout(loop, result, kRequestTimeoutMs);
+
+    ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
+    ASSERT_TRUE(result.completed) << result.diagnostics();
+    EXPECT_FALSE(result.failed) << result.diagnostics();
+    EXPECT_FALSE(result.fullText.isEmpty()) << result.diagnostics();
 }

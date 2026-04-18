@@ -40,17 +40,22 @@ QNetworkRequest GoogleAIClient::prepareNetworkRequest(const QUrl &url) const
     return request;
 }
 
-RequestID GoogleAIClient::sendMessage(const QJsonObject &payload, RequestMode mode)
+RequestID GoogleAIClient::sendMessage(
+    const QJsonObject &payload, const QString &endpoint, RequestMode mode)
 {
     RequestID id = createRequest();
 
-    QString modelName = payload.contains("model") ? payload["model"].toString() : m_model;
-    QString endpoint = (mode == RequestMode::Streaming)
-                           ? QStringLiteral(":streamGenerateContent?alt=sse")
-                           : QStringLiteral(":generateContent");
-    QUrl url(QString("%1/models/%2%3").arg(m_url, modelName, endpoint));
+    QString resolved = endpoint;
+    if (resolved.isEmpty()) {
+        const QString modelName = payload.contains("model") ? payload["model"].toString() : m_model;
+        const QString suffix = (mode == RequestMode::Streaming)
+                                   ? QStringLiteral(":streamGenerateContent?alt=sse")
+                                   : QStringLiteral(":generateContent");
+        resolved = QStringLiteral("/models/%1%2").arg(modelName, suffix);
+    }
+    QUrl url(m_url + resolved);
 
-    qCDebug(llmGoogleLog).noquote() << QString("Sending request %1").arg(id);
+    qCDebug(llmGoogleLog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
 
     sendRequest(id, url, payload, mode);
     return id;
@@ -62,7 +67,7 @@ RequestID GoogleAIClient::ask(const QString &prompt, RequestMode mode)
     payload["contents"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"parts", QJsonArray{QJsonObject{{"text", prompt}}}}}};
 
-    return sendMessage(payload, mode);
+    return sendMessage(payload, {}, mode);
 }
 
 QFuture<QList<QString>> GoogleAIClient::listModels()

@@ -181,7 +181,7 @@ TEST_F(LlamaCppIntegrationTest, InfillRequest)
     payload["input_suffix"] = "\")\n\ndef goodbye():\n    print(\"bye\")\n";
     payload["n_predict"] = 2048;
 
-    client->sendMessage(payload);
+    client->sendMessage(payload, "/infill");
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 
@@ -207,7 +207,7 @@ TEST_F(LlamaCppIntegrationTest, BufferedResponse)
     payload["messages"] = QJsonArray{
         QJsonObject{{"role", "user"}, {"content", "Reply with exactly: Buffered OK"}}};
 
-    client->sendMessage(payload, RequestMode::Buffered);
+    client->sendMessage(payload, {}, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 

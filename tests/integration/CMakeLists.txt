@@ -9,6 +9,7 @@ add_executable(LLMQoreIntegrationTests
     tst_OllamaIntegration.cpp
     tst_GoogleAIIntegration.cpp
     tst_LlamaCppIntegration.cpp
+    tst_MistralIntegration.cpp
 )
 
 set_target_properties(LLMQoreIntegrationTests PROPERTIES

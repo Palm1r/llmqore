@@ -34,23 +34,18 @@ QNetworkRequest LlamaCppClient::prepareNetworkRequest(const QUrl &url) const
     return request;
 }
 
-bool LlamaCppClient::isInfillRequest(const QJsonObject &payload)
-{
-    return payload.contains("input_prefix") || payload.contains("input_suffix");
-}
-
-RequestID LlamaCppClient::sendMessage(const QJsonObject &payload, RequestMode mode)
+RequestID LlamaCppClient::sendMessage(
+    const QJsonObject &payload, const QString &endpoint, RequestMode mode)
 {
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
     RequestID id = createRequest();
+    const QString resolved = endpoint.isEmpty() ? QStringLiteral("/v1/chat/completions") : endpoint;
 
-    QString endpoint = isInfillRequest(payload) ? "/infill" : "/v1/chat/completions";
+    qCDebug(llmLlamaCppLog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
 
-    qCDebug(llmLlamaCppLog).noquote() << QString("Sending request %1 to %2").arg(id, endpoint);
-
-    sendRequest(id, QUrl(m_url + endpoint), request, mode);
+    sendRequest(id, QUrl(m_url + resolved), request, mode);
     return id;
 }
 
@@ -61,7 +56,7 @@ RequestID LlamaCppClient::ask(const QString &prompt, RequestMode mode)
         payload["model"] = m_model;
     payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
 
-    return sendMessage(payload, mode);
+    return sendMessage(payload, {}, mode);
 }
 
 QFuture<QList<QString>> LlamaCppClient::listModels()

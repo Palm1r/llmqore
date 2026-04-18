@@ -36,16 +36,18 @@ QNetworkRequest ClaudeClient::prepareNetworkRequest(const QUrl &url) const
     return request;
 }
 
-RequestID ClaudeClient::sendMessage(const QJsonObject &payload, RequestMode mode)
+RequestID ClaudeClient::sendMessage(
+    const QJsonObject &payload, const QString &endpoint, RequestMode mode)
 {
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
     RequestID id = createRequest();
+    const QString resolved = endpoint.isEmpty() ? QStringLiteral("/v1/messages") : endpoint;
 
-    qCDebug(llmClaudeLog).noquote() << QString("Sending request %1").arg(id);
+    qCDebug(llmClaudeLog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
 
-    sendRequest(id, QUrl(m_url + "/v1/messages"), request, mode);
+    sendRequest(id, QUrl(m_url + resolved), request, mode);
     return id;
 }
 
@@ -56,7 +58,7 @@ RequestID ClaudeClient::ask(const QString &prompt, RequestMode mode)
     payload["max_tokens"] = 4096;
     payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
 
-    return sendMessage(payload, mode);
+    return sendMessage(payload, {}, mode);
 }
 
 QFuture<QList<QString>> ClaudeClient::listModels()

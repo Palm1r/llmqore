@@ -33,17 +33,18 @@ QNetworkRequest OllamaClient::prepareNetworkRequest(const QUrl &url) const
     return request;
 }
 
-RequestID OllamaClient::sendMessage(const QJsonObject &payload, RequestMode mode)
+RequestID OllamaClient::sendMessage(
+    const QJsonObject &payload, const QString &endpoint, RequestMode mode)
 {
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
     RequestID id = createRequest();
-    QString endpoint = payload.contains("prompt") ? "/api/generate" : "/api/chat";
+    const QString resolved = endpoint.isEmpty() ? QStringLiteral("/api/chat") : endpoint;
 
-    qCDebug(llmOllamaLog).noquote() << QString("Sending request %1").arg(id);
+    qCDebug(llmOllamaLog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
 
-    sendRequest(id, QUrl(m_url + endpoint), request, mode);
+    sendRequest(id, QUrl(m_url + resolved), request, mode);
     return id;
 }
 
@@ -53,7 +54,7 @@ RequestID OllamaClient::ask(const QString &prompt, RequestMode mode)
     payload["model"] = m_model;
     payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
 
-    return sendMessage(payload, mode);
+    return sendMessage(payload, {}, mode);
 }
 
 QFuture<QList<QString>> OllamaClient::listModels()

@@ -272,7 +272,7 @@ TEST_F(GoogleAIIntegrationTest, BufferedTextResponse)
         {"role", "user"},
         {"parts", QJsonArray{QJsonObject{{"text", "Reply with exactly: Buffered OK"}}}}}};
 
-    client->sendMessage(payload, RequestMode::Buffered);
+    client->sendMessage(payload, {}, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
 

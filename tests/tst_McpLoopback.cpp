@@ -318,6 +318,7 @@ public:
 
     RequestID sendMessage(
         const QJsonObject &payload,
+        const QString & /*endpoint*/ = {},
         RequestMode /*mode*/ = RequestMode::Streaming) override
     {
         lastPayload = payload;
@@ -350,7 +351,7 @@ public:
         const QString &prompt,
         RequestMode mode = RequestMode::Streaming) override
     {
-        return sendMessage(QJsonObject{{"prompt", prompt}}, mode);
+        return sendMessage(QJsonObject{{"prompt", prompt}}, {}, mode);
     }
 
     QFuture<QList<QString>> listModels() override

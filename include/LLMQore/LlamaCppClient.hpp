@@ -24,7 +24,9 @@ public:
         const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
 
     RequestID sendMessage(
-        const QJsonObject &payload, RequestMode mode = RequestMode::Streaming) override;
+        const QJsonObject &payload,
+        const QString &endpoint = {},
+        RequestMode mode = RequestMode::Streaming) override;
     RequestID ask(
         const QString &prompt, RequestMode mode = RequestMode::Streaming) override;
     ToolSchemaFormat toolSchemaFormat() const override { return ToolSchemaFormat::OpenAI; }
@@ -48,7 +50,6 @@ protected:
     [[nodiscard]] QString parseHttpError(const HttpResponse &response) const override;
 
 private:
-    static bool isInfillRequest(const QJsonObject &payload);
     void processStreamChunk(const RequestID &id, const QJsonObject &chunk);
     void emitPendingThinking(const RequestID &id);
 
