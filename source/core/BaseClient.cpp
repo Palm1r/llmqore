@@ -80,8 +80,6 @@ ToolsManager *BaseClient::tools()
     if (!m_toolsManager) {
         m_toolsManager = new ToolsManager(toolSchemaFormat(), this);
 
-        // Direct signal-to-signal forward: Qt re-emits with argument copy
-        // and respects the owning thread's event loop. No slot needed.
         connect(
             m_toolsManager, &ToolsManager::toolExecutionStarted,
             this, &BaseClient::toolStarted);
@@ -114,16 +112,25 @@ void BaseClient::setMaxToolContinuations(int limit) noexcept
 
 RequestID BaseClient::createRequest()
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::createRequest called from non-owning thread");
     RequestID id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    m_requests[id] = ActiveRequest{};
+    const auto registerRequest = [this, id]() { m_requests[id] = ActiveRequest{}; };
+    if (thread() == QThread::currentThread())
+        registerRequest();
+    else
+        QMetaObject::invokeMethod(this, registerRequest, Qt::QueuedConnection);
     return id;
 }
 
 void BaseClient::sendRequest(
     const RequestID &id, const QUrl &url, const QJsonObject &payload, RequestMode mode)
 {
+    if (thread() != QThread::currentThread()) {
+        QMetaObject::invokeMethod(
+            this,
+            [this, id, url, payload, mode]() { sendRequest(id, url, payload, mode); },
+            Qt::QueuedConnection);
+        return;
+    }
     storeRequestContext(id, url, payload);
     auto it = m_requests.find(id);
     if (it != m_requests.end())
@@ -258,9 +265,6 @@ void BaseClient::startHttpRequest(
     });
 }
 
-// cleanupFullRequest() intentionally does NOT touch m_requests.
-// completeRequest()/failRequest() then extract data from m_requests and remove the entry.
-// This ordering must be preserved.
 void BaseClient::onStreamFinished(const RequestID &id, std::optional<QString> error)
 {
     if (error) {
@@ -273,9 +277,6 @@ void BaseClient::onStreamFinished(const RequestID &id, std::optional<QString> er
     if (msg && msg->state() == MessageState::RequiresToolExecution)
         return;
 
-    // Capture finalisation metadata BEFORE cleanupFullRequest destroys the
-    // message via cleanupDerivedData(). This is what completeRequest() then
-    // reads to populate CompletionInfo::stopReason for onFinalized consumers.
     if (msg) {
         auto it = m_requests.find(id);
         if (it != m_requests.end())
@@ -312,10 +313,6 @@ void BaseClient::completeRequest(const RequestID &id)
     QString stopReason = it->stopReason;
     cleanupRequest(id);
 
-    // requestFinalized carries the rich metadata (model, stopReason) and
-    // is emitted BEFORE requestCompleted so that consumers resolving a
-    // QPromise / future on finalization see the resolution first, before
-    // any simple "fullText-only" handler runs.
     CompletionInfo info;
     info.fullText = fullText;
     info.model = m_model;
@@ -337,6 +334,12 @@ void BaseClient::failRequest(const RequestID &id, const QString &error)
 
 void BaseClient::cancelRequest(const RequestID &requestId)
 {
+    if (thread() != QThread::currentThread()) {
+        QMetaObject::invokeMethod(
+            this, [this, requestId]() { cancelRequest(requestId); }, Qt::QueuedConnection);
+        return;
+    }
+
     auto it = m_requests.find(requestId);
     if (it == m_requests.end())
         return;
