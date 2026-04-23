@@ -15,7 +15,7 @@ protected:
         ProviderTestBase::SetUp();
 
         m_apiKey = getEnvOrSkip("MISTRAL_API_KEY");
-        m_url = getEnvOrDefault("MISTRAL_API_URL", "https://api.mistral.ai/v1");
+        m_url = getEnvOrDefault("MISTRAL_API_URL", "https://api.mistral.ai");
         m_model = getEnvOrDefault("MISTRAL_MODEL", "mistral-small-latest");
         m_fimModel = getEnvOrDefault("MISTRAL_FIM_MODEL", "codestral-latest");
     }
@@ -266,7 +266,7 @@ TEST_F(MistralIntegrationTest, ListModels)
 // /fim/completions endpoint, which the caller selects explicitly via
 // the endpoint parameter on sendMessage().
 
-constexpr const char *kFimEndpoint = "/fim/completions";
+constexpr const char *kFimEndpoint = "/v1/fim/completions";
 
 TEST_F(MistralIntegrationTest, FimCompletion_Streaming)
 {
