@@ -9,9 +9,59 @@
 #include <LLMQore/McpStdioTransport.hpp>
 #include <LLMQore/ToolsManager.hpp>
 #include <LLMQore/Version.hpp>
+#include <QSet>
 #include <QTimer>
 
 namespace LLMQore {
+
+namespace {
+
+QJsonValue sanitizeSchemaValueForGoogle(const QJsonValue &value);
+
+QJsonObject sanitizeSchemaForGoogle(const QJsonObject &schema)
+{
+    static const QSet<QString> kUnsupported{
+        QStringLiteral("$schema"),
+        QStringLiteral("$id"),
+        QStringLiteral("$ref"),
+        QStringLiteral("$defs"),
+        QStringLiteral("definitions"),
+        QStringLiteral("additionalProperties"),
+        QStringLiteral("patternProperties"),
+        QStringLiteral("unevaluatedProperties"),
+        QStringLiteral("dependencies"),
+        QStringLiteral("dependentSchemas"),
+        QStringLiteral("dependentRequired"),
+        QStringLiteral("allOf"),
+        QStringLiteral("oneOf"),
+        QStringLiteral("not"),
+        QStringLiteral("const"),
+    };
+
+    QJsonObject result;
+    for (auto it = schema.begin(); it != schema.end(); ++it) {
+        if (kUnsupported.contains(it.key()))
+            continue;
+        result.insert(it.key(), sanitizeSchemaValueForGoogle(it.value()));
+    }
+    return result;
+}
+
+QJsonValue sanitizeSchemaValueForGoogle(const QJsonValue &value)
+{
+    if (value.isObject())
+        return sanitizeSchemaForGoogle(value.toObject());
+    if (value.isArray()) {
+        QJsonArray out;
+        const QJsonArray arr = value.toArray();
+        for (const auto &item : arr)
+            out.append(sanitizeSchemaValueForGoogle(item));
+        return out;
+    }
+    return value;
+}
+
+} // namespace
 
 ToolsManager::ToolsManager(ToolSchemaFormat format, QObject *parent)
     : ToolRegistry(parent)
@@ -227,10 +277,6 @@ void ToolsManager::executeNextTool(const QString &requestId)
             continue;
         }
 
-        // Insert into completed with complete=false; finalizePendingTool() will
-        // set complete=true once the async execution finishes.  The entry must
-        // exist before executeToolAsync() because a synchronously-resolved
-        // future triggers finalizePendingTool() immediately.
         pendingTool.complete = false;
         queue.completed[pendingTool.id] = pendingTool;
 
@@ -295,7 +341,7 @@ QJsonObject ToolsManager::wrapDefinition(const BaseTool *tool) const
         QJsonObject functionDeclaration;
         functionDeclaration["name"] = tool->id();
         functionDeclaration["description"] = tool->description();
-        functionDeclaration["parameters"] = schema;
+        functionDeclaration["parameters"] = sanitizeSchemaForGoogle(schema);
         return functionDeclaration;
     }
     }

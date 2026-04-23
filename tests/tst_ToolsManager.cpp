@@ -29,7 +29,12 @@ public:
     QString displayName() const override { return m_displayName; }
     QString description() const override { return "A fake tool for testing"; }
 
-    QJsonObject parametersSchema() const override { return QJsonObject{{"type", "object"}}; }
+    QJsonObject parametersSchema() const override
+    {
+        return m_schema.isEmpty() ? QJsonObject{{"type", "object"}} : m_schema;
+    }
+
+    void setParametersSchema(const QJsonObject &schema) { m_schema = schema; }
 
     QFuture<ToolResult> executeAsync(const QJsonObject &input) override
     {
@@ -40,6 +45,7 @@ public:
 private:
     QString m_id;
     QString m_displayName;
+    QJsonObject m_schema;
 };
 
 class ToolsManagerTest : public ::testing::Test
@@ -151,6 +157,72 @@ TEST_F(ToolsManagerTest, GetToolsDefinitions_AllFormats)
     QJsonArray googleDefs = googleMgr.getToolsDefinitions();
     EXPECT_EQ(googleDefs.size(), 1);
     EXPECT_TRUE(googleDefs[0].toObject().contains("function_declarations"));
+}
+
+TEST_F(ToolsManagerTest, GetToolsDefinitions_GoogleStripsUnsupportedSchemaKeys)
+{
+    // Simulates an MCP-backed tool whose schema comes from a remote server using
+    // JSON Schema draft-07, which includes "$schema" and other meta keys Gemini rejects.
+    QJsonObject nestedItemSchema{
+        {"type", "object"},
+        {"$schema", "http://json-schema.org/draft-07/schema#"},
+        {"additionalProperties", false},
+        {"properties", QJsonObject{{"name", QJsonObject{{"type", "string"}}}}},
+    };
+    QJsonObject dirtySchema{
+        {"$schema", "http://json-schema.org/draft-07/schema#"},
+        {"$id", "https://example.com/tool.json"},
+        {"type", "object"},
+        {"additionalProperties", false},
+        {"definitions", QJsonObject{{"Foo", QJsonObject{{"type", "string"}}}}},
+        {"properties",
+         QJsonObject{
+             {"path", QJsonObject{{"type", "string"}}},
+             {"items",
+              QJsonObject{
+                  {"type", "array"},
+                  {"items", nestedItemSchema},
+              }},
+         }},
+        {"required", QJsonArray{"path"}},
+    };
+
+    auto *googleTool = new FakeTool("read_file", "Read File");
+    googleTool->setParametersSchema(dirtySchema);
+
+    ToolsManager googleMgr(ToolSchemaFormat::Google);
+    googleMgr.addTool(googleTool);
+    QJsonArray googleDefs = googleMgr.getToolsDefinitions();
+    ASSERT_EQ(googleDefs.size(), 1);
+
+    QJsonObject wrapper = googleDefs[0].toObject();
+    ASSERT_TRUE(wrapper.contains("function_declarations"));
+    QJsonArray decls = wrapper["function_declarations"].toArray();
+    ASSERT_EQ(decls.size(), 1);
+
+    QJsonObject params = decls[0].toObject()["parameters"].toObject();
+    EXPECT_FALSE(params.contains("$schema"));
+    EXPECT_FALSE(params.contains("$id"));
+    EXPECT_FALSE(params.contains("additionalProperties"));
+    EXPECT_FALSE(params.contains("definitions"));
+    EXPECT_EQ(params["type"].toString(), "object");
+    EXPECT_TRUE(params.contains("properties"));
+
+    // Recurses into nested items.
+    QJsonObject items = params["properties"].toObject()["items"].toObject()["items"].toObject();
+    EXPECT_FALSE(items.contains("$schema"));
+    EXPECT_FALSE(items.contains("additionalProperties"));
+    EXPECT_EQ(items["type"].toString(), "object");
+
+    // Claude format must keep the schema untouched (its API accepts meta keys).
+    auto *claudeTool = new FakeTool("read_file", "Read File");
+    claudeTool->setParametersSchema(dirtySchema);
+    ToolsManager claudeMgr(ToolSchemaFormat::Claude);
+    claudeMgr.addTool(claudeTool);
+    QJsonObject claudeSchema
+        = claudeMgr.getToolsDefinitions()[0].toObject()["input_schema"].toObject();
+    EXPECT_TRUE(claudeSchema.contains("$schema"));
+    EXPECT_TRUE(claudeSchema.contains("additionalProperties"));
 }
 
 TEST_F(ToolsManagerTest, GetToolsDefinitions_DisabledToolExcluded)
