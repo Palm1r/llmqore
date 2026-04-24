@@ -34,6 +34,7 @@ private:
     void updateStateFromDone();
     bool tryParseToolCall();
     bool isLikelyToolCallJson(const QString &content) const;
+    QString stripMarkdownCodeFence(const QString &content) const;
     ThinkingContent *getOrCreateThinkingContent();
 };
 

@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QRegularExpression>
 
 namespace LLMQore {
 
@@ -19,7 +20,7 @@ void OllamaMessage::handleContentDelta(const QString &content)
     m_accumulatedContent += content;
     QString trimmed = m_accumulatedContent.trimmed();
 
-    if (trimmed.startsWith('{')) {
+    if (trimmed.startsWith('{') || trimmed.startsWith('`')) {
         return;
     }
 
@@ -79,7 +80,7 @@ void OllamaMessage::handleDone(bool done)
         bool isToolCall = tryParseToolCall();
 
         if (!isToolCall && !m_contentAddedToTextBlock && !m_accumulatedContent.trimmed().isEmpty()) {
-            QString trimmed = m_accumulatedContent.trimmed();
+            QString trimmed = stripMarkdownCodeFence(m_accumulatedContent);
 
             if (trimmed.startsWith('{')
                 && (trimmed.contains("\"name\"") || trimmed.contains("\"arguments\""))) {
@@ -114,7 +115,7 @@ void OllamaMessage::handleDone(bool done)
 }
 bool OllamaMessage::tryParseToolCall()
 {
-    QString trimmed = m_accumulatedContent.trimmed();
+    QString trimmed = stripMarkdownCodeFence(m_accumulatedContent);
 
     if (trimmed.isEmpty() || !trimmed.startsWith('{')) {
         return false;
@@ -186,6 +187,18 @@ bool OllamaMessage::tryParseToolCall()
                    QString::fromUtf8(QJsonDocument(arguments).toJson(QJsonDocument::Compact)));
 
     return true;
+}
+
+QString OllamaMessage::stripMarkdownCodeFence(const QString &content) const
+{
+    static const QRegularExpression fenceRegex(
+        QStringLiteral(R"(^\s*```(?:\w+)?\s*\n?([\s\S]*?)\n?\s*```\s*$)"));
+
+    QRegularExpressionMatch match = fenceRegex.match(content);
+    if (match.hasMatch()) {
+        return match.captured(1).trimmed();
+    }
+    return content.trimmed();
 }
 
 bool OllamaMessage::isLikelyToolCallJson(const QString &content) const
