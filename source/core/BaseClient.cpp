@@ -42,31 +42,43 @@ BaseClient::~BaseClient()
 
 QString BaseClient::url() const
 {
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::url called from non-owning thread");
     return m_url;
 }
 
 void BaseClient::setUrl(const QString &url)
 {
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::setUrl called from non-owning thread");
     m_url = url;
 }
 
 QString BaseClient::apiKey() const
 {
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::apiKey called from non-owning thread");
     return m_apiKey;
 }
 
 void BaseClient::setApiKey(const QString &apiKey)
 {
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::setApiKey called from non-owning thread");
     m_apiKey = apiKey;
 }
 
 QString BaseClient::model() const
 {
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::model called from non-owning thread");
     return m_model;
 }
 
 void BaseClient::setModel(const QString &model)
 {
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::setModel called from non-owning thread");
     m_model = model;
 }
 

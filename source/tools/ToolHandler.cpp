@@ -11,9 +11,6 @@
 
 namespace LLMQore {
 
-// ToolHandler scheduling and result gathering live on its owning thread.
-// The actual tool `run()` is dispatched via QtConcurrent onto a worker pool,
-// but all QFuture continuations land back here via the watcher.
 namespace {
 inline void assertOwningThread(const QObject *self)
 {
@@ -51,11 +48,15 @@ QFuture<ToolResult> ToolHandler::executeToolAsync(
     qCDebug(llmToolsLog).noquote()
         << QString("Starting tool execution: %1 (ID: %2)").arg(tool->id(), toolId);
 
-    // FIX: Insert before setFuture() — if the future is already complete,
-    // finished fires synchronously and needs the map entry to exist.
     m_activeExecutions.insert(toolId, execution);
 
-    auto future = tool->executeAsync(input);
+    QJsonObject enrichedInput = input;
+    if (!requestId.isEmpty()
+        && !enrichedInput.contains(QStringLiteral("_request_id"))) {
+        enrichedInput.insert(QStringLiteral("_request_id"), requestId);
+    }
+
+    auto future = tool->executeAsync(enrichedInput);
     execution->watcher->setFuture(future);
 
     return future;

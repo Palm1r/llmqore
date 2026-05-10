@@ -16,9 +16,19 @@ McpRemoteTool::McpRemoteTool(McpClient *client, ToolInfo info, QObject *parent)
     , m_info(std::move(info))
 {}
 
+McpRemoteTool::McpRemoteTool(
+    McpClient *client, const QString &serverName, ToolInfo info, QObject *parent)
+    : LLMQore::BaseTool(parent)
+    , m_client(client)
+    , m_serverName(serverName)
+    , m_info(std::move(info))
+{}
+
 QString McpRemoteTool::id() const
 {
-    return m_info.name;
+    return m_serverName.isEmpty()
+               ? m_info.name
+               : QStringLiteral("%1_%2").arg(m_serverName, m_info.name);
 }
 
 QString McpRemoteTool::displayName() const
