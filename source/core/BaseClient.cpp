@@ -323,14 +323,49 @@ void BaseClient::completeRequest(const RequestID &id)
 
     QString fullText = it->buffers.responseContent;
     QString stopReason = it->stopReason;
+    std::optional<TokenUsage> usage = it->usage;
     cleanupRequest(id);
 
     CompletionInfo info;
     info.fullText = fullText;
     info.model = m_model;
     info.stopReason = stopReason;
+    info.usage = usage;
     emit requestFinalized(id, info);
     emit requestCompleted(id, fullText);
+}
+
+void BaseClient::setUsage(const RequestID &id, const TokenUsage &usage)
+{
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::setUsage called from non-owning thread");
+    auto it = m_requests.find(id);
+    if (it == m_requests.end())
+        return;
+    it->usage = usage;
+}
+
+std::optional<TokenUsage> BaseClient::currentUsage(const RequestID &id) const
+{
+    auto it = m_requests.find(id);
+    if (it == m_requests.end())
+        return std::nullopt;
+    return it->usage;
+}
+
+void BaseClient::accumulateUsage(const RequestID &id, const TokenUsage &delta)
+{
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::accumulateUsage called from non-owning thread");
+    auto it = m_requests.find(id);
+    if (it == m_requests.end())
+        return;
+    if (!it->usage)
+        it->usage = TokenUsage{};
+    it->usage->promptTokens += delta.promptTokens;
+    it->usage->completionTokens += delta.completionTokens;
+    it->usage->cachedPromptTokens += delta.cachedPromptTokens;
+    it->usage->reasoningTokens += delta.reasoningTokens;
 }
 
 void BaseClient::failRequest(const RequestID &id, const QString &error)

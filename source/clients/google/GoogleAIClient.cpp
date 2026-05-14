@@ -195,6 +195,16 @@ void GoogleAIClient::onStreamFinished(const RequestID &id, std::optional<QString
 
 void GoogleAIClient::processStreamChunk(const RequestID &id, const QJsonObject &chunk)
 {
+    const QJsonObject usageMeta = chunk.value("usageMetadata").toObject();
+    if (!usageMeta.isEmpty()) {
+        TokenUsage u;
+        u.promptTokens = usageMeta.value("promptTokenCount").toInt();
+        u.completionTokens = usageMeta.value("candidatesTokenCount").toInt();
+        u.cachedPromptTokens = usageMeta.value("cachedContentTokenCount").toInt();
+        u.reasoningTokens = usageMeta.value("thoughtsTokenCount").toInt();
+        setUsage(id, u);
+    }
+
     if (!chunk.contains("candidates"))
         return;
 

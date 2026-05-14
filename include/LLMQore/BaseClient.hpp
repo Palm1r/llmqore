@@ -10,6 +10,7 @@
 #include <QFuture>
 #include <QHash>
 #include <QJsonObject>
+#include <QMetaType>
 #include <QNetworkRequest>
 #include <QObject>
 #include <QString>
@@ -33,11 +34,23 @@ class ToolsManager;
 
 using RequestID = QString;
 
+struct LLMQORE_EXPORT TokenUsage
+{
+    int promptTokens = 0;
+    int completionTokens = 0;
+    int cachedPromptTokens = 0;
+    int reasoningTokens = 0;
+
+    bool isValid() const noexcept { return promptTokens > 0 || completionTokens > 0; }
+    int totalTokens() const noexcept { return promptTokens + completionTokens; }
+};
+
 struct LLMQORE_EXPORT CompletionInfo
 {
     QString fullText;
     QString model;
     QString stopReason;
+    std::optional<TokenUsage> usage;
 };
 
 struct DataBuffers
@@ -69,6 +82,7 @@ struct ActiveRequest
     int emittedThinkingBlocksCount = 0;
     RequestMode mode = RequestMode::Streaming;
     QString stopReason = {};
+    std::optional<TokenUsage> usage = {};
 };
 
 /*!
@@ -179,6 +193,10 @@ protected:
     void completeRequest(const RequestID &id);
     void failRequest(const RequestID &id, const QString &error);
 
+    void setUsage(const RequestID &id, const TokenUsage &usage);
+    void accumulateUsage(const RequestID &id, const TokenUsage &delta);
+    std::optional<TokenUsage> currentUsage(const RequestID &id) const;
+
     void executeToolsFromMessage(const RequestID &id);
     void cleanupFullRequest(const RequestID &id);
     void notifyPendingThinkingBlocks(const RequestID &id);
@@ -214,3 +232,6 @@ private:
 };
 
 } // namespace LLMQore
+
+Q_DECLARE_METATYPE(LLMQore::TokenUsage)
+Q_DECLARE_METATYPE(LLMQore::CompletionInfo)

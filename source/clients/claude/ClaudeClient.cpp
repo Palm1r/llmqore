@@ -193,6 +193,15 @@ void ClaudeClient::processStreamEvent(const RequestID &id, const QJsonObject &ev
         message->startNewContinuation();
         qCDebug(llmClaudeLog).noquote() << QString("Starting continuation for request %1").arg(id);
 
+        const QJsonObject usage = event["message"].toObject().value("usage").toObject();
+        if (!usage.isEmpty()) {
+            TokenUsage u;
+            u.promptTokens = usage.value("input_tokens").toInt();
+            u.completionTokens = usage.value("output_tokens").toInt();
+            u.cachedPromptTokens = usage.value("cache_read_input_tokens").toInt();
+            setUsage(id, u);
+        }
+
     } else if (eventType == "content_block_start") {
         int index = event["index"].toInt();
         QJsonObject contentBlock = event["content_block"].toObject();
@@ -228,6 +237,17 @@ void ClaudeClient::processStreamEvent(const RequestID &id, const QJsonObject &ev
         if (delta.contains("stop_reason")) {
             message->handleStopReason(delta["stop_reason"].toString());
             executeToolsFromMessage(id);
+        }
+        const QJsonObject usage = event.value("usage").toObject();
+        if (!usage.isEmpty()) {
+            TokenUsage u = currentUsage(id).value_or(TokenUsage{});
+            if (usage.contains("output_tokens"))
+                u.completionTokens = usage.value("output_tokens").toInt();
+            if (usage.contains("input_tokens"))
+                u.promptTokens = usage.value("input_tokens").toInt();
+            if (usage.contains("cache_read_input_tokens"))
+                u.cachedPromptTokens = usage.value("cache_read_input_tokens").toInt();
+            setUsage(id, u);
         }
     }
 }
@@ -292,6 +312,15 @@ void ClaudeClient::processBufferedResponse(const RequestID &id, const QByteArray
     if (!stopReason.isEmpty()) {
         message->handleStopReason(stopReason);
         executeToolsFromMessage(id);
+    }
+
+    const QJsonObject usage = response.value("usage").toObject();
+    if (!usage.isEmpty()) {
+        TokenUsage u;
+        u.promptTokens = usage.value("input_tokens").toInt();
+        u.completionTokens = usage.value("output_tokens").toInt();
+        u.cachedPromptTokens = usage.value("cache_read_input_tokens").toInt();
+        setUsage(id, u);
     }
 }
 

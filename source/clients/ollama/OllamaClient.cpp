@@ -255,6 +255,13 @@ void OllamaClient::processStreamData(const RequestID &id, const QJsonObject &dat
 
         message->handleDone(true);
 
+        if (data.contains("prompt_eval_count") || data.contains("eval_count")) {
+            TokenUsage u;
+            u.promptTokens = data.value("prompt_eval_count").toInt();
+            u.completionTokens = data.value("eval_count").toInt();
+            setUsage(id, u);
+        }
+
         notifyThinkingBlocks(id, message);
         executeToolsFromMessage(id);
     }
