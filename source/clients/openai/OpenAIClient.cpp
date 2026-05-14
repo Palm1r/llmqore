@@ -40,6 +40,12 @@ RequestID OpenAIClient::sendMessage(
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
+    if (mode == RequestMode::Streaming) {
+        QJsonObject streamOptions = request.value("stream_options").toObject();
+        streamOptions["include_usage"] = true;
+        request["stream_options"] = streamOptions;
+    }
+
     RequestID id = createRequest();
     const QString resolved = endpoint.isEmpty() ? QStringLiteral("/chat/completions") : endpoint;
 
@@ -124,6 +130,18 @@ void OpenAIClient::processData(const RequestID &id, const QByteArray &data)
             continue;
         if (chunk.contains("choices"))
             processStreamChunk(id, chunk);
+
+        const QJsonObject usage = chunk.value("usage").toObject();
+        if (!usage.isEmpty()) {
+            TokenUsage u;
+            u.promptTokens = usage.value("prompt_tokens").toInt();
+            u.completionTokens = usage.value("completion_tokens").toInt();
+            const QJsonObject ptd = usage.value("prompt_tokens_details").toObject();
+            u.cachedPromptTokens = ptd.value("cached_tokens").toInt();
+            const QJsonObject ctd = usage.value("completion_tokens_details").toObject();
+            u.reasoningTokens = ctd.value("reasoning_tokens").toInt();
+            setUsage(id, u);
+        }
     }
 }
 
@@ -267,6 +285,18 @@ void OpenAIClient::processBufferedResponse(const RequestID &id, const QByteArray
     if (!finishReason.isEmpty()) {
         message->handleFinishReason(finishReason);
         executeToolsFromMessage(id);
+    }
+
+    const QJsonObject usage = response.value("usage").toObject();
+    if (!usage.isEmpty()) {
+        TokenUsage u;
+        u.promptTokens = usage.value("prompt_tokens").toInt();
+        u.completionTokens = usage.value("completion_tokens").toInt();
+        const QJsonObject ptd = usage.value("prompt_tokens_details").toObject();
+        u.cachedPromptTokens = ptd.value("cached_tokens").toInt();
+        const QJsonObject ctd = usage.value("completion_tokens_details").toObject();
+        u.reasoningTokens = ctd.value("reasoning_tokens").toInt();
+        setUsage(id, u);
     }
 }
 

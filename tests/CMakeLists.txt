@@ -31,6 +31,7 @@ add_executable(LLMQoreUnitTests
     tst_ToolResult.cpp
     tst_HttpClient.cpp
     tst_HttpRequestParser.cpp
+    tst_TokenUsage.cpp
 )
 
 set_target_properties(LLMQoreUnitTests PROPERTIES

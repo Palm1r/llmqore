@@ -271,6 +271,18 @@ void OpenAIResponsesClient::processStreamEvent(
 
         message->handleStatus(statusStr);
 
+        const QJsonObject usage = responseObj.value("usage").toObject();
+        if (!usage.isEmpty()) {
+            TokenUsage u;
+            u.promptTokens = usage.value("input_tokens").toInt();
+            u.completionTokens = usage.value("output_tokens").toInt();
+            const QJsonObject itd = usage.value("input_tokens_details").toObject();
+            u.cachedPromptTokens = itd.value("cached_tokens").toInt();
+            const QJsonObject otd = usage.value("output_tokens_details").toObject();
+            u.reasoningTokens = otd.value("reasoning_tokens").toInt();
+            setUsage(id, u);
+        }
+
         notifyPendingThinkingBlocks(id);
         executeToolsFromMessage(id);
 
@@ -419,6 +431,18 @@ void OpenAIResponsesClient::processBufferedResponse(const RequestID &id, const Q
     if (!status.isEmpty()) {
         message->handleStatus(status);
         executeToolsFromMessage(id);
+    }
+
+    const QJsonObject usage = response.value("usage").toObject();
+    if (!usage.isEmpty()) {
+        TokenUsage u;
+        u.promptTokens = usage.value("input_tokens").toInt();
+        u.completionTokens = usage.value("output_tokens").toInt();
+        const QJsonObject itd = usage.value("input_tokens_details").toObject();
+        u.cachedPromptTokens = itd.value("cached_tokens").toInt();
+        const QJsonObject otd = usage.value("output_tokens_details").toObject();
+        u.reasoningTokens = otd.value("reasoning_tokens").toInt();
+        setUsage(id, u);
     }
 }
 

@@ -40,6 +40,12 @@ RequestID LlamaCppClient::sendMessage(
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
+    if (mode == RequestMode::Streaming) {
+        QJsonObject streamOptions = request.value("stream_options").toObject();
+        streamOptions["include_usage"] = true;
+        request["stream_options"] = streamOptions;
+    }
+
     RequestID id = createRequest();
     const QString resolved = endpoint.isEmpty() ? QStringLiteral("/v1/chat/completions") : endpoint;
 
@@ -160,12 +166,26 @@ void LlamaCppClient::processData(const RequestID &id, const QByteArray &data)
                 addChunk(id, content);
 
             if (chunk["stop"].toBool()) {
+                if (chunk.contains("tokens_evaluated") || chunk.contains("tokens_predicted")) {
+                    TokenUsage u;
+                    u.promptTokens = chunk.value("tokens_evaluated").toInt();
+                    u.completionTokens = chunk.value("tokens_predicted").toInt();
+                    setUsage(id, u);
+                }
                 cleanupFullRequest(id);
                 completeRequest(id);
                 return;
             }
         } else if (chunk.contains("choices")) {
             processStreamChunk(id, chunk);
+        }
+
+        const QJsonObject usage = chunk.value("usage").toObject();
+        if (!usage.isEmpty()) {
+            TokenUsage u;
+            u.promptTokens = usage.value("prompt_tokens").toInt();
+            u.completionTokens = usage.value("completion_tokens").toInt();
+            setUsage(id, u);
         }
     }
 }
@@ -333,6 +353,13 @@ void LlamaCppClient::processBufferedResponse(const RequestID &id, const QByteArr
         if (!content.isEmpty())
             addChunk(id, content);
 
+        if (response.contains("tokens_evaluated") || response.contains("tokens_predicted")) {
+            TokenUsage u;
+            u.promptTokens = response.value("tokens_evaluated").toInt();
+            u.completionTokens = response.value("tokens_predicted").toInt();
+            setUsage(id, u);
+        }
+
         cleanupFullRequest(id);
         completeRequest(id);
         return;
@@ -381,6 +408,14 @@ void LlamaCppClient::processBufferedResponse(const RequestID &id, const QByteArr
     if (!finishReason.isEmpty()) {
         message->handleFinishReason(finishReason);
         executeToolsFromMessage(id);
+    }
+
+    const QJsonObject usage = response.value("usage").toObject();
+    if (!usage.isEmpty()) {
+        TokenUsage u;
+        u.promptTokens = usage.value("prompt_tokens").toInt();
+        u.completionTokens = usage.value("completion_tokens").toInt();
+        setUsage(id, u);
     }
 }
 

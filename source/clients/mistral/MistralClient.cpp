@@ -26,6 +26,12 @@ RequestID MistralClient::sendMessage(
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
+    if (mode == RequestMode::Streaming) {
+        QJsonObject streamOptions = request.value("stream_options").toObject();
+        streamOptions["include_usage"] = true;
+        request["stream_options"] = streamOptions;
+    }
+
     const RequestID id = createRequest();
     const QString resolved = endpoint.isEmpty() ? QStringLiteral("/v1/chat/completions") : endpoint;
 
