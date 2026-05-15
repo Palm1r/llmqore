@@ -28,12 +28,24 @@ QNetworkRequest ClaudeClient::prepareNetworkRequest(const QUrl &url) const
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     request.setRawHeader("anthropic-version", "2023-06-01");
+    if (m_useExtendedCacheTTL)
+        request.setRawHeader("anthropic-beta", "extended-cache-ttl-2025-04-11");
 
     QString key = m_apiKey;
     if (!key.isEmpty())
         request.setRawHeader("x-api-key", key.toUtf8());
 
     return request;
+}
+
+void ClaudeClient::setUseExtendedCacheTTL(bool enabled)
+{
+    m_useExtendedCacheTTL = enabled;
+}
+
+bool ClaudeClient::useExtendedCacheTTL() const noexcept
+{
+    return m_useExtendedCacheTTL;
 }
 
 RequestID ClaudeClient::sendMessage(
@@ -240,7 +252,10 @@ void ClaudeClient::processStreamEvent(const RequestID &id, const QJsonObject &ev
         }
         const QJsonObject usage = event.value("usage").toObject();
         if (!usage.isEmpty()) {
-            TokenUsage u = currentUsage(id).value_or(TokenUsage{});
+            const auto prior = currentUsage(id);
+            if (!prior)
+                return;
+            TokenUsage u = *prior;
             if (usage.contains("output_tokens"))
                 u.completionTokens = usage.value("output_tokens").toInt();
             if (usage.contains("input_tokens"))

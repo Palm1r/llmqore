@@ -321,6 +321,8 @@ void BaseClient::completeRequest(const RequestID &id)
     if (it == m_requests.end())
         return;
 
+    finalizeTurn(id);
+
     QString fullText = it->buffers.responseContent;
     QString stopReason = it->stopReason;
     std::optional<TokenUsage> usage = it->usage;
@@ -342,7 +344,7 @@ void BaseClient::setUsage(const RequestID &id, const TokenUsage &usage)
     auto it = m_requests.find(id);
     if (it == m_requests.end())
         return;
-    it->usage = usage;
+    it->turnUsage = usage;
 }
 
 std::optional<TokenUsage> BaseClient::currentUsage(const RequestID &id) const
@@ -350,7 +352,26 @@ std::optional<TokenUsage> BaseClient::currentUsage(const RequestID &id) const
     auto it = m_requests.find(id);
     if (it == m_requests.end())
         return std::nullopt;
-    return it->usage;
+    return it->turnUsage;
+}
+
+std::optional<TokenUsage> BaseClient::totalUsage(const RequestID &id) const
+{
+    auto it = m_requests.find(id);
+    if (it == m_requests.end())
+        return std::nullopt;
+
+    if (!it->turnUsage)
+        return it->usage;
+    if (!it->usage)
+        return it->turnUsage;
+
+    TokenUsage combined = *it->usage;
+    combined.promptTokens += it->turnUsage->promptTokens;
+    combined.completionTokens += it->turnUsage->completionTokens;
+    combined.cachedPromptTokens += it->turnUsage->cachedPromptTokens;
+    combined.reasoningTokens += it->turnUsage->reasoningTokens;
+    return combined;
 }
 
 void BaseClient::accumulateUsage(const RequestID &id, const TokenUsage &delta)
@@ -360,12 +381,31 @@ void BaseClient::accumulateUsage(const RequestID &id, const TokenUsage &delta)
     auto it = m_requests.find(id);
     if (it == m_requests.end())
         return;
-    if (!it->usage)
-        it->usage = TokenUsage{};
-    it->usage->promptTokens += delta.promptTokens;
-    it->usage->completionTokens += delta.completionTokens;
-    it->usage->cachedPromptTokens += delta.cachedPromptTokens;
-    it->usage->reasoningTokens += delta.reasoningTokens;
+    if (!it->turnUsage)
+        it->turnUsage = TokenUsage{};
+    it->turnUsage->promptTokens += delta.promptTokens;
+    it->turnUsage->completionTokens += delta.completionTokens;
+    it->turnUsage->cachedPromptTokens += delta.cachedPromptTokens;
+    it->turnUsage->reasoningTokens += delta.reasoningTokens;
+}
+
+void BaseClient::finalizeTurn(const RequestID &id)
+{
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::finalizeTurn called from non-owning thread");
+    auto it = m_requests.find(id);
+    if (it == m_requests.end() || !it->turnUsage)
+        return;
+
+    if (!it->usage) {
+        it->usage = it->turnUsage;
+    } else {
+        it->usage->promptTokens += it->turnUsage->promptTokens;
+        it->usage->completionTokens += it->turnUsage->completionTokens;
+        it->usage->cachedPromptTokens += it->turnUsage->cachedPromptTokens;
+        it->usage->reasoningTokens += it->turnUsage->reasoningTokens;
+    }
+    it->turnUsage.reset();
 }
 
 void BaseClient::failRequest(const RequestID &id, const QString &error)
@@ -443,6 +483,7 @@ void BaseClient::handleToolContinuation(
 
     QJsonObject payload = buildContinuationPayload(it->originalPayload, message, toolResults);
 
+    finalizeTurn(id);
     sendRequest(id, it->url, payload, it->mode);
 }
 

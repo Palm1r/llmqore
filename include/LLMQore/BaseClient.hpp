@@ -83,6 +83,7 @@ struct ActiveRequest
     RequestMode mode = RequestMode::Streaming;
     QString stopReason = {};
     std::optional<TokenUsage> usage = {};
+    std::optional<TokenUsage> turnUsage = {};
 };
 
 /*!
@@ -196,6 +197,8 @@ protected:
     void setUsage(const RequestID &id, const TokenUsage &usage);
     void accumulateUsage(const RequestID &id, const TokenUsage &delta);
     std::optional<TokenUsage> currentUsage(const RequestID &id) const;
+    std::optional<TokenUsage> totalUsage(const RequestID &id) const;
+    void finalizeTurn(const RequestID &id);
 
     void executeToolsFromMessage(const RequestID &id);
     void cleanupFullRequest(const RequestID &id);

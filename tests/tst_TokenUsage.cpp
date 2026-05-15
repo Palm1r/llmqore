@@ -66,9 +66,13 @@ class UsageDriver : public ClientT
 {
 public:
     using ClientT::ClientT;
+    using BaseClient::accumulateUsage;
     using BaseClient::completeRequest;
     using BaseClient::createRequest;
     using BaseClient::currentUsage;
+    using BaseClient::finalizeTurn;
+    using BaseClient::setUsage;
+    using BaseClient::totalUsage;
     using ClientT::processBufferedResponse;
     using ClientT::processData;
 };
@@ -331,4 +335,179 @@ TEST(TokenUsageGoogleAI, UsageMetadataExtractsAllFields)
     EXPECT_EQ(info.usage->completionTokens, 120);
     EXPECT_EQ(info.usage->cachedPromptTokens, 200);
     EXPECT_EQ(info.usage->reasoningTokens, 40);
+}
+
+TEST(TokenUsageAccumulation, FinalizeTurnIsNoopWhenNoTurnUsage)
+{
+    UsageDriver<ClaudeClient> client;
+    const auto id = client.createRequest();
+
+    client.finalizeTurn(id);
+    EXPECT_FALSE(client.currentUsage(id).has_value());
+    EXPECT_FALSE(client.totalUsage(id).has_value());
+}
+
+TEST(TokenUsageAccumulation, CompleteRequestFlushesTurnIntoUsage)
+{
+    UsageDriver<ClaudeClient> client;
+    const auto id = client.createRequest();
+
+    TokenUsage u;
+    u.promptTokens = 100;
+    u.completionTokens = 50;
+    u.cachedPromptTokens = 25;
+    u.reasoningTokens = 5;
+    client.setUsage(id, u);
+
+    const auto info = runAndCapture(client, id, [&] {});
+
+    ASSERT_TRUE(info.usage.has_value());
+    EXPECT_EQ(info.usage->promptTokens, 100);
+    EXPECT_EQ(info.usage->completionTokens, 50);
+    EXPECT_EQ(info.usage->cachedPromptTokens, 25);
+    EXPECT_EQ(info.usage->reasoningTokens, 5);
+}
+
+TEST(TokenUsageAccumulation, MultiTurnSumsAcrossFinalizeTurn)
+{
+    UsageDriver<ClaudeClient> client;
+    const auto id = client.createRequest();
+
+    TokenUsage turn1;
+    turn1.promptTokens = 1000;
+    turn1.completionTokens = 80;
+    turn1.cachedPromptTokens = 0;
+    turn1.reasoningTokens = 10;
+    client.setUsage(id, turn1);
+    client.finalizeTurn(id);
+
+    TokenUsage turn2;
+    turn2.promptTokens = 1200;
+    turn2.completionTokens = 150;
+    turn2.cachedPromptTokens = 800;
+    turn2.reasoningTokens = 20;
+    client.setUsage(id, turn2);
+
+    const auto info = runAndCapture(client, id, [&] {});
+
+    ASSERT_TRUE(info.usage.has_value());
+    EXPECT_EQ(info.usage->promptTokens, 2200);
+    EXPECT_EQ(info.usage->completionTokens, 230);
+    EXPECT_EQ(info.usage->cachedPromptTokens, 800);
+    EXPECT_EQ(info.usage->reasoningTokens, 30);
+}
+
+TEST(TokenUsageAccumulation, TotalUsageReflectsBothAccumulatedAndCurrent)
+{
+    UsageDriver<ClaudeClient> client;
+    const auto id = client.createRequest();
+
+    TokenUsage turn1;
+    turn1.promptTokens = 500;
+    turn1.completionTokens = 40;
+    turn1.cachedPromptTokens = 100;
+    client.setUsage(id, turn1);
+    client.finalizeTurn(id);
+
+    EXPECT_EQ(client.totalUsage(id)->promptTokens, 500);
+    EXPECT_FALSE(client.currentUsage(id).has_value());
+
+    TokenUsage turn2;
+    turn2.promptTokens = 700;
+    turn2.completionTokens = 20;
+    client.setUsage(id, turn2);
+
+    const auto total = client.totalUsage(id);
+    ASSERT_TRUE(total.has_value());
+    EXPECT_EQ(total->promptTokens, 1200);
+    EXPECT_EQ(total->completionTokens, 60);
+    EXPECT_EQ(total->cachedPromptTokens, 100);
+
+    client.completeRequest(id);
+}
+
+TEST(TokenUsageAccumulation, AccumulateUsageAddsIntoTurnSnapshot)
+{
+    UsageDriver<ClaudeClient> client;
+    const auto id = client.createRequest();
+
+    TokenUsage a;
+    a.promptTokens = 10;
+    a.completionTokens = 3;
+    client.accumulateUsage(id, a);
+
+    TokenUsage b;
+    b.promptTokens = 4;
+    b.cachedPromptTokens = 7;
+    client.accumulateUsage(id, b);
+
+    const auto turn = client.currentUsage(id);
+    ASSERT_TRUE(turn.has_value());
+    EXPECT_EQ(turn->promptTokens, 14);
+    EXPECT_EQ(turn->completionTokens, 3);
+    EXPECT_EQ(turn->cachedPromptTokens, 7);
+
+    client.completeRequest(id);
+}
+
+TEST(TokenUsageClaude, StreamingMessageDeltaWithoutMessageStartIsIgnored)
+{
+    UsageDriver<ClaudeClient> client;
+    const auto id = client.createRequest();
+
+    const QByteArray sse =
+        "event: message_delta\n"
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"
+        "\"usage\":{\"output_tokens\":50,\"input_tokens\":100}}\n\n";
+
+    client.processData(id, sse);
+    EXPECT_FALSE(client.currentUsage(id).has_value());
+
+    client.completeRequest(id);
+}
+
+TEST(TokenUsageClaude, StreamingToolUseDoesNotResetCacheTokensAcrossTurns)
+{
+    UsageDriver<ClaudeClient> client;
+    const auto id = client.createRequest();
+
+    const QByteArray turn1 =
+        "event: message_start\n"
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1000,"
+        "\"output_tokens\":1,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":900}}}\n\n"
+        "event: content_block_start\n"
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n"
+        "event: content_block_delta\n"
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\","
+        "\"text\":\"thinking\"}}\n\n"
+        "event: message_delta\n"
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"
+        "\"usage\":{\"output_tokens\":40}}\n\n"
+        "event: message_stop\n"
+        "data: {\"type\":\"message_stop\"}\n\n";
+
+    client.processData(id, turn1);
+    client.finalizeTurn(id);
+
+    const QByteArray turn2 =
+        "event: message_start\n"
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":120,"
+        "\"output_tokens\":1,\"cache_read_input_tokens\":1000}}}\n\n"
+        "event: content_block_start\n"
+        "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n"
+        "event: content_block_delta\n"
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\","
+        "\"text\":\"answer\"}}\n\n"
+        "event: message_delta\n"
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"
+        "\"usage\":{\"output_tokens\":60}}\n\n"
+        "event: message_stop\n"
+        "data: {\"type\":\"message_stop\"}\n\n";
+
+    const auto info = runAndCapture(client, id, [&] { client.processData(id, turn2); });
+
+    ASSERT_TRUE(info.usage.has_value());
+    EXPECT_EQ(info.usage->promptTokens, 1120);
+    EXPECT_EQ(info.usage->completionTokens, 100);
+    EXPECT_EQ(info.usage->cachedPromptTokens, 1000);
 }

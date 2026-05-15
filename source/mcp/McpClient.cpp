@@ -69,7 +69,10 @@ void McpClient::installHandlers()
 {
     m_session->setNotificationHandler(
         QStringLiteral("notifications/tools/list_changed"),
-        [this](const QJsonObject &) { emit toolsChanged(); });
+        [this](const QJsonObject &) {
+            m_cachedTools.clear();
+            emit toolsChanged();
+        });
     m_session->setNotificationHandler(
         QStringLiteral("notifications/resources/list_changed"),
         [this](const QJsonObject &) { emit resourcesChanged(); });
