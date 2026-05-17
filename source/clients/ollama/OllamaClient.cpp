@@ -231,7 +231,8 @@ void OllamaClient::processStreamData(const RequestID &id, const QJsonObject &dat
             if (!content.isEmpty()) {
                 notifyThinkingBlocks(id, message);
                 message->handleContentDelta(content);
-                addChunk(id, content);
+                if (!message->isAccumulatingToolCall())
+                    addChunk(id, content);
             }
         }
 

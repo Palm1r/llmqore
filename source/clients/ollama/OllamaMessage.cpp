@@ -285,6 +285,11 @@ QJsonArray OllamaMessage::createToolResultMessages(
     return messages;
 }
 
+bool OllamaMessage::isAccumulatingToolCall() const
+{
+    return !m_contentAddedToTextBlock && m_accumulatedContent.trimmed().startsWith('{');
+}
+
 void OllamaMessage::startNewContinuation()
 {
     qCDebug(llmOllamaLog).noquote() << "Starting new continuation";

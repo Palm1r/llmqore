@@ -23,6 +23,8 @@ public:
     QJsonObject toProviderFormat() const;
     QJsonArray createToolResultMessages(const QHash<QString, ToolResult> &toolResults) const;
 
+    bool isAccumulatingToolCall() const;
+
     void startNewContinuation() override;
 
 private:
