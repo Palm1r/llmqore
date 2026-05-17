@@ -285,7 +285,8 @@ void ToolsManager::executeNextTool(const QString &requestId)
                    .arg(pendingTool.name, pendingTool.id, requestId)
                    .arg(queue.queue.size());
 
-        emit toolExecutionStarted(requestId, pendingTool.id, pendingTool.name);
+        emit toolExecutionStarted(
+            requestId, pendingTool.id, pendingTool.name, pendingTool.input);
 
         m_toolHandler->executeToolAsync(requestId, pendingTool.id, toolInstance, pendingTool.input);
         qCDebug(llmToolsLog).noquote()

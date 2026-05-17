@@ -157,7 +157,11 @@ signals:
     void requestFailed(const LLMQore::RequestID &id, const QString &error);
     void thinkingBlockReceived(
         const LLMQore::RequestID &id, const QString &thinking, const QString &signature);
-    void toolStarted(const LLMQore::RequestID &id, const QString &toolId, const QString &toolName);
+    void toolStarted(
+        const LLMQore::RequestID &id,
+        const QString &toolId,
+        const QString &toolName,
+        const QJsonObject &arguments);
     void toolResultReady(
         const LLMQore::RequestID &id,
         const QString &toolId,

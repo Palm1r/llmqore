@@ -92,7 +92,10 @@ public:
 
 signals:
     void toolExecutionStarted(
-        const QString &requestId, const QString &toolId, const QString &toolName);
+        const QString &requestId,
+        const QString &toolId,
+        const QString &toolName,
+        const QJsonObject &arguments);
     void toolExecutionResult(
         const QString &requestId,
         const QString &toolId,
