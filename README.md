@@ -120,6 +120,7 @@ See [MCP Protocol Coverage](docs/mcp/mcp_protocol_coverage.md) for the full spec
 - **Contribute**: pull requests with bug fixes or new features are welcome
 - **Spread the Word**: star the repository and share with fellow developers
 - **Financial Support**:
+   - Paypal: [paypal page](https://www.paypal.com/paypalme/palm1r)
    - Bitcoin (BTC): `bc1qndq7f0mpnlya48vk7kugvyqj5w89xrg4wzg68t`
    - Ethereum (ETH): `0xA5e8c37c94b24e25F9f1f292a01AF55F03099D8D`
    - Litecoin (LTC): `ltc1qlrxnk30s2pcjchzx4qrxvdjt5gzuervy5mv0vy`
