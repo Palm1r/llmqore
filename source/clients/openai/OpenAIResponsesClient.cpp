@@ -251,12 +251,16 @@ void OpenAIResponsesClient::processStreamEvent(
             }
         } else if (item.isEmpty() && !itemId.isEmpty()) {
             QString callId = m_itemIdToCallId.value(id).value(itemId);
-            if (!callId.isEmpty())
-                message->handleToolCallComplete(callId);
+            if (!callId.isEmpty()) {
+                const QString finalArguments = data["arguments"].toString();
+                message->handleToolCallComplete(callId, finalArguments);
+            }
         } else if (!item.isEmpty() && item["type"].toString() == "function_call") {
             QString callId = item["call_id"].toString();
-            if (!callId.isEmpty())
-                message->handleToolCallComplete(callId);
+            if (!callId.isEmpty()) {
+                const QString finalArguments = item["arguments"].toString();
+                message->handleToolCallComplete(callId, finalArguments);
+            }
         }
 
     } else if (eventType == "response.completed") {

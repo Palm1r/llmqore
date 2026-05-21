@@ -17,7 +17,7 @@ public:
     void handleContentDelta(const QString &text);
     void handleToolCallStart(const QString &callId, const QString &name);
     void handleToolCallDelta(const QString &callId, const QString &argumentsDelta);
-    void handleToolCallComplete(const QString &callId);
+    void handleToolCallComplete(const QString &callId, const QString &finalArguments = QString());
     void handleReasoningStart(const QString &itemId);
     void handleReasoningDelta(const QString &itemId, const QString &text);
     void handleReasoningComplete(const QString &itemId);

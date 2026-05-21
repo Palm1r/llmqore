@@ -35,10 +35,15 @@ void OpenAIResponsesMessage::handleToolCallDelta(const QString &callId, const QS
     }
 }
 
-void OpenAIResponsesMessage::handleToolCallComplete(const QString &callId)
+void OpenAIResponsesMessage::handleToolCallComplete(
+    const QString &callId, const QString &finalArguments)
 {
     if (m_pendingToolArguments.contains(callId) && m_toolCalls.contains(callId)) {
-        QString jsonArgs = m_pendingToolArguments[callId];
+        // The server's canonical `arguments` from a `*.done` event is the source of truth.
+        // Streamed deltas can be missing or partial for some providers/models — only fall
+        // back to the accumulated string when no canonical value is delivered.
+        const QString jsonArgs = !finalArguments.isEmpty() ? finalArguments
+                                                           : m_pendingToolArguments[callId];
         QJsonObject argsObject;
 
         if (!jsonArgs.isEmpty()) {
