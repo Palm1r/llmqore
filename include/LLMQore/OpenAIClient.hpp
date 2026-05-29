@@ -46,6 +46,7 @@ protected:
 
 private:
     void processStreamChunk(const RequestID &id, const QJsonObject &chunk);
+    void emitReasoning(const RequestID &id, OpenAIMessage *message, const QString &reasoning);
 
     QHash<RequestID, OpenAIMessage *> m_messages;
 };

@@ -198,6 +198,9 @@ void OpenAIClient::processStreamChunk(const RequestID &id, const QJsonObject &ch
         qCDebug(llmOpenAILog).noquote() << QString("Starting continuation for request %1").arg(id);
     }
 
+    if (delta.contains("reasoning_content") && !delta["reasoning_content"].isNull())
+        emitReasoning(id, message, delta["reasoning_content"].toString());
+
     if (delta.contains("content") && !delta["content"].isNull()) {
         QString content = delta["content"].toString();
         message->handleContentDelta(content);
@@ -261,6 +264,9 @@ void OpenAIClient::processBufferedResponse(const RequestID &id, const QByteArray
     auto *message = new OpenAIMessage(this);
     m_messages[id] = message;
 
+    if (messageObj.contains("reasoning_content") && !messageObj["reasoning_content"].isNull())
+        emitReasoning(id, message, messageObj["reasoning_content"].toString());
+
     QString content = messageObj["content"].toString();
     if (!content.isEmpty()) {
         message->handleContentDelta(content);
@@ -298,6 +304,19 @@ void OpenAIClient::processBufferedResponse(const RequestID &id, const QByteArray
         u.reasoningTokens = ctd.value("reasoning_tokens").toInt();
         setUsage(id, u);
     }
+}
+
+void OpenAIClient::emitReasoning(
+    const RequestID &id, OpenAIMessage *message, const QString &reasoning)
+{
+    if (reasoning.isEmpty())
+        return;
+
+    message->handleReasoningDelta(reasoning);
+
+    const QString accumulated = message->currentThinking();
+    if (!accumulated.isEmpty())
+        emit thinkingBlockReceived(id, accumulated, QString());
 }
 
 } // namespace LLMQore

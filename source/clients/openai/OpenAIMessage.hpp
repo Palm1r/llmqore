@@ -15,6 +15,8 @@ public:
     explicit OpenAIMessage(QObject *parent = nullptr);
 
     void handleContentDelta(const QString &content);
+    void handleReasoningDelta(const QString &reasoning);
+    QString currentThinking() const;
     void handleToolCallStart(int index, const QString &id, const QString &name);
     void handleToolCallDelta(int index, const QString &argumentsDelta);
     void handleToolCallComplete(int index);
@@ -32,8 +34,10 @@ private:
     QString m_finishReason;
     QHash<int, QString> m_pendingToolArguments;
     QHash<int, ToolUseContent *> m_toolCallByIndex;
+    ThinkingContent *m_currentThinkingContent = nullptr;
 
     void updateStateFromFinishReason();
+    ThinkingContent *getOrCreateThinkingContent();
 };
 
 } // namespace LLMQore

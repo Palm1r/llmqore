@@ -20,6 +20,19 @@ void OpenAIMessage::handleContentDelta(const QString &content)
     textContent->appendText(content);
 }
 
+void OpenAIMessage::handleReasoningDelta(const QString &reasoning)
+{
+    auto *thinkingContent = getOrCreateThinkingContent();
+    thinkingContent->appendThinking(reasoning);
+}
+
+QString OpenAIMessage::currentThinking() const
+{
+    if (m_currentThinkingContent)
+        return m_currentThinkingContent->thinking();
+    return {};
+}
+
 void OpenAIMessage::handleToolCallStart(int index, const QString &id, const QString &name)
 {
     qCDebug(llmOpenAILog).noquote()
@@ -134,6 +147,23 @@ void OpenAIMessage::startNewContinuation()
     BaseMessage::startNewContinuation();
     m_pendingToolArguments.clear();
     m_finishReason.clear();
+    m_currentThinkingContent = nullptr;
+}
+
+ThinkingContent *OpenAIMessage::getOrCreateThinkingContent()
+{
+    if (m_currentThinkingContent)
+        return m_currentThinkingContent;
+
+    for (auto *block : m_currentBlocks) {
+        if (auto *thinkingContent = dynamic_cast<ThinkingContent *>(block)) {
+            m_currentThinkingContent = thinkingContent;
+            return m_currentThinkingContent;
+        }
+    }
+
+    m_currentThinkingContent = addCurrentContent<ThinkingContent>();
+    return m_currentThinkingContent;
 }
 
 void OpenAIMessage::updateStateFromFinishReason()
