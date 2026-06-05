@@ -85,7 +85,7 @@ classDiagram
 | `ImageContent` | Base64/URL image + media type | Rare -- some providers echo images back |
 | `ToolUseContent` | Tool id, name, accumulated input JSON | Tool-calling providers. Flips state to RequiresToolExecution |
 | `ToolResultContent` | Tool-use id + flattened text result | Rarely seen on streamed input |
-| `ThinkingContent` | Reasoning text + signature bytes | Claude, OpenAI Responses |
+| `ThinkingContent` | Reasoning text + signature bytes | Claude, OpenAI Responses, OpenAI Chat (DeepSeek `reasoning_content`, Mistral Magistral) |
 | `RedactedThinkingContent` | Opaque signature, no text | Claude (safety redaction) |
 
 ### Extending

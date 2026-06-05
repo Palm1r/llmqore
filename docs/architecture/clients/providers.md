@@ -9,6 +9,7 @@
 | OpenAI Responses | `OpenAIResponsesClient` | `OpenAIResponsesMessage` | SSE | Bearer token |
 | Google AI (Gemini) | `GoogleAIClient` | `GoogleMessage` | SSE (query param) | API key in query string |
 | Mistral | `MistralClient` | reuses `OpenAIMessage` | SSE | Bearer token |
+| DeepSeek | `OpenAIClient` (direct) | reuses `OpenAIMessage` | SSE | Bearer token |
 | Ollama | `OllamaClient` | `OllamaMessage` | JSON-lines (`LineBuffer`) | Bearer token (optional) |
 | llama.cpp | `LlamaCppClient` | reuses `OpenAIMessage` | SSE | Bearer token (optional) |
 
@@ -22,6 +23,8 @@ Claude uses SSE streaming with a proprietary event structure. The message parser
 
 The standard OpenAI chat completions endpoint. The message parser reads from the delta structure within the choices array. Tool results are text-only -- rich content (images, audio) is flattened to a textual description before being sent back to the model. The error parser handles OpenAI's error object format.
 
+Two reasoning shapes are surfaced as `ThinkingContent` (emitted via `thinkingBlockReceived`): a top-level `reasoning_content` string (DeepSeek-style) and an array-form `content` whose entries carry `thinking` and `text` chunks (Mistral Magistral). A plain string `content` is treated as answer text as usual. Both paths apply in streaming and buffered mode, so any OpenAI-compatible provider using either convention works without a dedicated client.
+
 ## OpenAI Responses (`source/clients/openai/OpenAIResponses{Client,Message}.cpp`)
 
 The newer OpenAI Responses API with a different payload shape and its own event namespace. Supports rich tool results including images and structured outputs. Uses a separate tool schema format from Chat Completions. Preferred for newer model families and multi-modal use cases; default to `OpenAIClient` for third-party API clones.
@@ -33,6 +36,12 @@ Streams via SSE with the API key passed as a query parameter. The message parser
 ## Mistral (`source/clients/mistral/`)
 
 OpenAI-compatible -- subclasses `OpenAIClient`, reuses `OpenAIMessage` and the OpenAI tool schema format. Defaults to `/chat/completions`; pass `/fim/completions` as the `endpoint` argument to `sendMessage` to target the Codestral fill-in-the-middle endpoint. Bearer-token auth. Works with the standard OpenAI error envelope handling from the base class.
+
+Reasoning models (Magistral) reason natively -- no `reasoning_effort` parameter is needed. Their `content` arrives as an array of chunks: `thinking` entries (whose `thinking` field is a string or a nested array of `{type:"text", text}` parts) and `text` entries for the final answer. `OpenAIClient` parses these inherited paths, routing the reasoning trace to `ThinkingContent` / `thinkingBlockReceived` and the answer to normal text deltas.
+
+## DeepSeek (via `OpenAIClient`)
+
+OpenAI-compatible with no dedicated client class -- instantiate `OpenAIClient` directly with DeepSeek's base URL and API key. Reasoning models (`deepseek-reasoner`) stream the chain-of-thought in a separate top-level `reasoning_content` field alongside the regular `content`; `OpenAIClient` surfaces it as `ThinkingContent` via `thinkingBlockReceived`, while `content` flows through as the answer. Bearer-token auth and the standard OpenAI error envelope apply.
 
 ## Ollama (`source/clients/ollama/`)
 

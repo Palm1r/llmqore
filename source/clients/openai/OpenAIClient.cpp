@@ -5,6 +5,7 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonValue>
 
 #include "OpenAIMessage.hpp"
 #include <LLMQore/HttpClient.hpp>
@@ -178,6 +179,51 @@ QJsonObject OpenAIClient::buildContinuationPayload(
     return request;
 }
 
+namespace {
+
+void extractContentParts(const QJsonValue &content, QString *thinkingOut, QString *textOut)
+{
+    // Standard OpenAI-compatible providers (OpenAI, DeepSeek, etc.): "content" is a plain string
+    if (content.isString()) {
+        *textOut += content.toString();
+        return;
+    }
+    if (!content.isArray())
+        return;
+    // Mistral Magistral: "content" is an array of typed chunks (thinking + text)
+    const QJsonArray parts = content.toArray();
+    for (const auto &partVal : parts) {
+        const QJsonObject part = partVal.toObject();
+        const QString type = part.value("type").toString();
+        if (type == QLatin1String("text")) {
+            // Magistral final answer chunk
+            *textOut += part.value("text").toString();
+        } else if (type == QLatin1String("thinking")) {
+            // Magistral reasoning chunk: "thinking" is a string, an array of
+            // {type:"text", text:...} chunks, or (SDK-normalized) a flat "text" field
+            const QJsonValue th = part.value("thinking");
+            if (th.isString()) {
+                *thinkingOut += th.toString();
+            } else if (th.isArray()) {
+                const QJsonArray thArr = th.toArray();
+                for (const auto &tv : thArr) {
+                    if (tv.isString()) {
+                        *thinkingOut += tv.toString();
+                    } else {
+                        const QJsonObject thObj = tv.toObject();
+                        if (thObj.value("type").toString() == QLatin1String("text"))
+                            *thinkingOut += thObj.value("text").toString();
+                    }
+                }
+            } else {
+                *thinkingOut += part.value("text").toString();
+            }
+        }
+    }
+}
+
+} // namespace
+
 void OpenAIClient::processStreamChunk(const RequestID &id, const QJsonObject &chunk)
 {
     QJsonArray choices = chunk["choices"].toArray();
@@ -198,13 +244,20 @@ void OpenAIClient::processStreamChunk(const RequestID &id, const QJsonObject &ch
         qCDebug(llmOpenAILog).noquote() << QString("Starting continuation for request %1").arg(id);
     }
 
+    // DeepSeek-style reasoning: dedicated "reasoning_content" field
     if (delta.contains("reasoning_content") && !delta["reasoning_content"].isNull())
         emitReasoning(id, message, delta["reasoning_content"].toString());
 
+    // Standard text (string) or Mistral Magistral thinking+text chunks (array)
     if (delta.contains("content") && !delta["content"].isNull()) {
-        QString content = delta["content"].toString();
-        message->handleContentDelta(content);
-        addChunk(id, content);
+        QString thinking, text;
+        extractContentParts(delta["content"], &thinking, &text);
+        if (!thinking.isEmpty())
+            emitReasoning(id, message, thinking);
+        if (!text.isEmpty()) {
+            message->handleContentDelta(text);
+            addChunk(id, text);
+        }
     }
 
     if (delta.contains("tool_calls")) {
@@ -264,13 +317,20 @@ void OpenAIClient::processBufferedResponse(const RequestID &id, const QByteArray
     auto *message = new OpenAIMessage(this);
     m_messages[id] = message;
 
+    // DeepSeek-style reasoning: dedicated "reasoning_content" field
     if (messageObj.contains("reasoning_content") && !messageObj["reasoning_content"].isNull())
         emitReasoning(id, message, messageObj["reasoning_content"].toString());
 
-    QString content = messageObj["content"].toString();
-    if (!content.isEmpty()) {
-        message->handleContentDelta(content);
-        addChunk(id, content);
+    // Standard text (string) or Mistral Magistral thinking+text chunks (array)
+    if (messageObj.contains("content") && !messageObj["content"].isNull()) {
+        QString thinking, text;
+        extractContentParts(messageObj["content"], &thinking, &text);
+        if (!thinking.isEmpty())
+            emitReasoning(id, message, thinking);
+        if (!text.isEmpty()) {
+            message->handleContentDelta(text);
+            addChunk(id, text);
+        }
     }
 
     if (messageObj.contains("tool_calls")) {
