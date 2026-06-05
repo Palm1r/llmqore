@@ -83,12 +83,13 @@ Prebuilt binaries for Linux/macOS/Windows (with Qt runtime bundled) are publishe
 | Provider | Client class | Streaming | Tools | Thinking |
 |---|---|---|---|---|
 | Anthropic Claude | `ClaudeClient` | ✓ | ✓ | ✓ |
-| OpenAI (Chat Completions) | `OpenAIClient` | ✓ | ✓ | — |
+| OpenAI (Chat Completions) | `OpenAIClient` | ✓ | ✓ | ✓ |
 | OpenAI (Responses API) | `OpenAIResponsesClient` | ✓ | ✓ | ✓ |
 | Ollama | `OllamaClient` | ✓ | ✓ | ✓ |
 | Google AI | `GoogleAIClient` | ✓ | ✓ | ✓ |
-| Mistral | `MistralClient` | ✓ | ✓ | — |
+| Mistral | `MistralClient` | ✓ | ✓ | ✓ |
 | llama.cpp | `LlamaCppClient` | ✓ | ✓ | ✓ |
+| DeepSeek | `OpenAIClient` | ✓ | ✓ | ✓ |
 
 ## MCP (Model Context Protocol)
 
