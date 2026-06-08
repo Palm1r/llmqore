@@ -87,6 +87,16 @@ HttpClient *BaseClient::httpClient() const
     return m_httpClient;
 }
 
+int BaseClient::transferTimeoutMs() const
+{
+    return m_httpClient->transferTimeoutMs();
+}
+
+void BaseClient::setTransferTimeout(int milliseconds)
+{
+    m_httpClient->setTransferTimeout(milliseconds);
+}
+
 ToolsManager *BaseClient::tools()
 {
     if (!m_toolsManager) {

@@ -53,7 +53,7 @@ QNetworkReply *dispatchVerb(
 struct HttpClient::Impl
 {
     QNetworkAccessManager *manager = nullptr;
-    int transferTimeoutMs = 120000;
+    int transferTimeoutMs = HttpClient::DefaultTransferTimeoutMs;
 };
 
 HttpClient::HttpClient(QObject *parent)

@@ -26,6 +26,8 @@ class LLMQORE_EXPORT HttpClient : public QObject
 {
     Q_OBJECT
 public:
+    static constexpr int DefaultTransferTimeoutMs = 120000;
+
     explicit HttpClient(QObject *parent = nullptr);
     ~HttpClient() override;
 

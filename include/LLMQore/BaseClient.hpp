@@ -144,6 +144,9 @@ public:
     int maxToolContinuations() const noexcept;
     void setMaxToolContinuations(int limit) noexcept;
 
+    int transferTimeoutMs() const;
+    void setTransferTimeout(int milliseconds);
+
 signals:
     void chunkReceived(const LLMQore::RequestID &id, const QString &chunk);
     void accumulatedReceived(const LLMQore::RequestID &id, const QString &accumulated);
