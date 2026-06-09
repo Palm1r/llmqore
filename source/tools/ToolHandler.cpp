@@ -4,6 +4,7 @@
 #include "ToolHandler.hpp"
 #include <LLMQore/ToolExceptions.hpp>
 
+#include <QFutureInterface>
 #include <QThread>
 #include <QtConcurrent>
 
@@ -32,7 +33,8 @@ QFuture<ToolResult> ToolHandler::executeToolAsync(
         QTimer::singleShot(0, this, [this, requestId, toolId]() {
             emit toolFailed(requestId, toolId, QStringLiteral("Tool is null"));
         });
-        return QFuture<ToolResult>();
+        QFutureInterface<ToolResult> promise;
+        return promise.future();
     }
 
     auto *execution = new ToolExecution();

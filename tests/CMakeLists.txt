@@ -1,4 +1,7 @@
-find_package(Qt6 REQUIRED COMPONENTS Test Concurrent)
+if(NOT DEFINED QT_VERSION_MAJOR)
+    find_package(QT NAMES Qt5 Qt6 REQUIRED COMPONENTS Test Concurrent)
+endif()
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Test Concurrent)
 
 include(FetchContent)
 
@@ -46,8 +49,8 @@ target_include_directories(LLMQoreUnitTests PRIVATE
 
 target_link_libraries(LLMQoreUnitTests PRIVATE
     LLMQore::LLMQore
-    Qt6::Test
-    Qt6::Concurrent
+    Qt${QT_VERSION_MAJOR}::Test
+    Qt${QT_VERSION_MAJOR}::Concurrent
     GTest::gtest
 )
 

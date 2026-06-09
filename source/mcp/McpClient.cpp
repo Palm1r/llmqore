@@ -6,6 +6,7 @@
 #include <LLMQore/BaseClient.hpp>
 #include <LLMQore/BaseElicitationProvider.hpp>
 #include <LLMQore/BaseRootsProvider.hpp>
+#include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/Log.hpp>
 #include <LLMQore/McpExceptions.hpp>
 #include <LLMQore/McpSession.hpp>
@@ -99,14 +100,13 @@ void McpClient::installHandlers()
             if (!m_rootsProvider)
                 return makeReadyJsonFuture(QJsonObject{{"roots", QJsonArray{}}});
 
-            return m_rootsProvider->listRoots()
-                .then(this,
-                      [](const QList<Root> &list) {
-                          QJsonArray arr;
-                          for (const Root &r : list)
-                              arr.append(r.toJson());
-                          return QJsonValue(QJsonObject{{"roots", arr}});
-                      })
+            return LLMQore::compat(m_rootsProvider->listRoots())
+                .then(this, [](const QList<Root> &list) {
+                    QJsonArray arr;
+                    for (const Root &r : list)
+                        arr.append(r.toJson());
+                    return QJsonValue(QJsonObject{{"roots", arr}});
+                })
                 .onFailed(this, [](const std::exception &) {
                     return QJsonValue(QJsonObject{{"roots", QJsonArray{}}});
                 });
@@ -222,18 +222,15 @@ void McpClient::installHandlers()
                     QStringLiteral("elicitation/create not supported"));
             }
             const ElicitRequestParams req = ElicitRequestParams::fromJson(params);
-            return m_elicitationProvider->elicit(req).then(
-                this,
-                [](const ElicitResult &result) {
-                    return QJsonValue(result.toJson());
-                });
+            return LLMQore::compat(m_elicitationProvider->elicit(req))
+                .then(this, [](const ElicitResult &result) { return QJsonValue(result.toJson()); });
         });
 }
 
 QFuture<InitializeResult> McpClient::connectAndInitialize(std::chrono::milliseconds timeout)
 {
     if (!m_transport) {
-        return makeErrorFuture(McpTransportError(QStringLiteral("No transport")))
+        return LLMQore::compat(makeErrorFuture(McpTransportError(QStringLiteral("No transport"))))
             .then(this, [](const QJsonValue &) { return InitializeResult{}; });
     }
 
@@ -254,41 +251,38 @@ QFuture<InitializeResult> McpClient::connectAndInitialize(std::chrono::milliseco
         {"clientInfo", m_clientInfo.toJson()},
     };
 
-    return m_session->sendRequest(QStringLiteral("initialize"), params, timeout)
-        .then(this,
-              [this](const QJsonValue &result) {
-                  m_initResult = InitializeResult::fromJson(result.toObject());
-                  m_initialized = true;
+    return LLMQore::compat(m_session->sendRequest(QStringLiteral("initialize"), params, timeout))
+        .then(this, [this](const QJsonValue &result) {
+            m_initResult = InitializeResult::fromJson(result.toObject());
+            m_initialized = true;
 
-                  const QString v = m_initResult.protocolVersion;
-                  bool known = false;
-                  for (const char *knownV : kKnownProtocolVersions) {
-                      if (v == QLatin1String(knownV)) {
-                          known = true;
-                          break;
-                      }
-                  }
-                  if (!known) {
-                      qCWarning(llmMcpLog).noquote()
-                          << QString("Unexpected protocol version from server: %1").arg(v);
-                  }
+            const QString v = m_initResult.protocolVersion;
+            bool known = false;
+            for (const char *knownV : kKnownProtocolVersions) {
+                if (v == QLatin1String(knownV)) {
+                    known = true;
+                    break;
+                }
+            }
+            if (!known) {
+                qCWarning(llmMcpLog).noquote()
+                    << QString("Unexpected protocol version from server: %1").arg(v);
+            }
 
-                  m_session->sendNotification(QStringLiteral("notifications/initialized"));
-                  emit initialized(m_initResult);
-                  return m_initResult;
-              })
-        .onFailed(this,
-                  [this](const McpException &e) -> InitializeResult {
-                      emit errorOccurred(e.message());
-                      e.raise();
-                      Q_UNREACHABLE_RETURN(InitializeResult{});
-                  })
-        .onFailed(this,
-                  [this](const std::exception &e) -> InitializeResult {
-                      const QString msg = QString::fromUtf8(e.what());
-                      emit errorOccurred(msg);
-                      throw McpException(msg);
-                  });
+            m_session->sendNotification(QStringLiteral("notifications/initialized"));
+            emit initialized(m_initResult);
+            return m_initResult;
+        })
+        .onFailed(this, [this](const auto &e) -> InitializeResult {
+            if constexpr (std::is_same_v<std::decay_t<decltype(e)>, McpException>) {
+                emit errorOccurred(e.message());
+                throw McpException(e.message());
+            } else {
+                const QString msg = QString::fromUtf8(e.what());
+                emit errorOccurred(msg);
+                throw McpException(msg);
+            }
+        });
 }
 
 QFuture<QJsonValue> McpClient::sendInitialized(
@@ -304,19 +298,19 @@ QFuture<void> McpClient::ping(std::chrono::milliseconds timeout)
     QFuture<QJsonValue> raw = (!m_transport || !m_transport->isOpen())
         ? makeErrorFuture(McpTransportError(QStringLiteral("Transport is not open")))
         : m_session->sendRequest(QStringLiteral("ping"), QJsonObject{}, timeout);
-    return raw.then(this, [](const QJsonValue &) {});
+    return LLMQore::compat(raw).then(this, [](const QJsonValue &) {});
 }
 
 QFuture<void> McpClient::setLogLevel(const QString &level)
 {
-    return sendInitialized(
-               QStringLiteral("logging/setLevel"), QJsonObject{{"level", level}})
+    return LLMQore::compat(
+               sendInitialized(QStringLiteral("logging/setLevel"), QJsonObject{{"level", level}}))
         .then(this, [](const QJsonValue &) {});
 }
 
 QFuture<QList<ToolInfo>> McpClient::listTools()
 {
-    return sendInitialized(QStringLiteral("tools/list"))
+    return LLMQore::compat(sendInitialized(QStringLiteral("tools/list")))
         .then(this, [this](const QJsonValue &result) {
             QList<ToolInfo> tools;
             const QJsonArray arr = result.toObject().value("tools").toArray();
@@ -330,9 +324,8 @@ QFuture<QList<ToolInfo>> McpClient::listTools()
 QFuture<LLMQore::ToolResult> McpClient::callTool(
     const QString &name, const QJsonObject &arguments)
 {
-    return sendInitialized(
-               QStringLiteral("tools/call"),
-               QJsonObject{{"name", name}, {"arguments", arguments}})
+    return LLMQore::compat(
+               sendInitialized(QStringLiteral("tools/call"), QJsonObject{{"name", name}, {"arguments", arguments}}))
         .then(this, [](const QJsonValue &result) {
             return LLMQore::ToolResult::fromJson(result.toObject());
         });
@@ -367,9 +360,10 @@ McpClient::CancellableToolCall McpClient::callToolWithProgress(
             });
     }
 
-    out.future = cancellable.future.then(this, [](const QJsonValue &result) {
-        return LLMQore::ToolResult::fromJson(result.toObject());
-    });
+    out.future = LLMQore::compat(cancellable.future)
+                     .then(this, [](const QJsonValue &result) {
+                         return LLMQore::ToolResult::fromJson(result.toObject());
+                     });
     return out;
 }
 
@@ -381,7 +375,7 @@ void McpClient::cancel(const QString &requestId, const QString &reason)
 
 QFuture<QList<ResourceInfo>> McpClient::listResources()
 {
-    return sendInitialized(QStringLiteral("resources/list"))
+    return LLMQore::compat(sendInitialized(QStringLiteral("resources/list")))
         .then(this, [](const QJsonValue &result) {
             QList<ResourceInfo> resources;
             const QJsonArray arr = result.toObject().value("resources").toArray();
@@ -393,7 +387,7 @@ QFuture<QList<ResourceInfo>> McpClient::listResources()
 
 QFuture<QList<ResourceTemplate>> McpClient::listResourceTemplates()
 {
-    return sendInitialized(QStringLiteral("resources/templates/list"))
+    return LLMQore::compat(sendInitialized(QStringLiteral("resources/templates/list")))
         .then(this, [](const QJsonValue &result) {
             QList<ResourceTemplate> templates;
             const QJsonArray arr = result.toObject().value("resourceTemplates").toArray();
@@ -405,7 +399,7 @@ QFuture<QList<ResourceTemplate>> McpClient::listResourceTemplates()
 
 QFuture<ResourceContents> McpClient::readResource(const QString &uri)
 {
-    return sendInitialized(QStringLiteral("resources/read"), QJsonObject{{"uri", uri}})
+    return LLMQore::compat(sendInitialized(QStringLiteral("resources/read"), QJsonObject{{"uri", uri}}))
         .then(this, [](const QJsonValue &result) {
             const QJsonObject obj = result.toObject();
             const QJsonArray contents = obj.value("contents").toArray();
@@ -417,19 +411,19 @@ QFuture<ResourceContents> McpClient::readResource(const QString &uri)
 
 QFuture<void> McpClient::subscribeResource(const QString &uri)
 {
-    return sendInitialized(QStringLiteral("resources/subscribe"), QJsonObject{{"uri", uri}})
+    return LLMQore::compat(sendInitialized(QStringLiteral("resources/subscribe"), QJsonObject{{"uri", uri}}))
         .then(this, [](const QJsonValue &) {});
 }
 
 QFuture<void> McpClient::unsubscribeResource(const QString &uri)
 {
-    return sendInitialized(QStringLiteral("resources/unsubscribe"), QJsonObject{{"uri", uri}})
+    return LLMQore::compat(sendInitialized(QStringLiteral("resources/unsubscribe"), QJsonObject{{"uri", uri}}))
         .then(this, [](const QJsonValue &) {});
 }
 
 QFuture<QList<PromptInfo>> McpClient::listPrompts()
 {
-    return sendInitialized(QStringLiteral("prompts/list"))
+    return LLMQore::compat(sendInitialized(QStringLiteral("prompts/list")))
         .then(this, [](const QJsonValue &result) {
             QList<PromptInfo> prompts;
             const QJsonArray arr = result.toObject().value("prompts").toArray();
@@ -446,10 +440,8 @@ QFuture<PromptGetResult> McpClient::getPrompt(
     if (!arguments.isEmpty())
         params.insert("arguments", arguments);
 
-    return sendInitialized(QStringLiteral("prompts/get"), params)
-        .then(this, [](const QJsonValue &result) {
-            return PromptGetResult::fromJson(result.toObject());
-        });
+    return LLMQore::compat(sendInitialized(QStringLiteral("prompts/get"), params))
+        .then(this, [](const QJsonValue &result) { return PromptGetResult::fromJson(result.toObject()); });
 }
 
 QFuture<CompletionResult> McpClient::complete(
@@ -465,10 +457,8 @@ QFuture<CompletionResult> McpClient::complete(
     if (!contextArguments.isEmpty())
         params.insert("context", QJsonObject{{"arguments", contextArguments}});
 
-    return sendInitialized(QStringLiteral("completion/complete"), params)
-        .then(this, [](const QJsonValue &result) {
-            return CompletionResult::fromJson(result.toObject());
-        });
+    return LLMQore::compat(sendInitialized(QStringLiteral("completion/complete"), params))
+        .then(this, [](const QJsonValue &result) { return CompletionResult::fromJson(result.toObject()); });
 }
 
 void McpClient::setSamplingClient(

@@ -6,6 +6,8 @@
 #include <QCoreApplication>
 #include <QTimer>
 
+#include <LLMQore/FutureUtils.hpp>
+
 using namespace LLMQore::Mcp;
 
 namespace {
@@ -120,7 +122,7 @@ void BridgeServer::connectUpstream(int index)
 
     qInfo().noquote() << QString("Connecting to [%1]...").arg(name);
 
-    upstream.client->connectAndInitialize(std::chrono::seconds(30))
+    LLMQore::compat(upstream.client->connectAndInitialize(std::chrono::seconds(30)))
         .then(this,
               [this, index, name](const InitializeResult &result) {
                   qInfo().noquote() << QString("[%1] connected — %2 %3")
@@ -191,7 +193,7 @@ void BridgeServer::reconnectUpstream(int index)
     const QString name = upstream.name;
     qInfo().noquote() << QString("[%1] reconnecting...").arg(name);
 
-    upstream.client->connectAndInitialize(std::chrono::seconds(30))
+    LLMQore::compat(upstream.client->connectAndInitialize(std::chrono::seconds(30)))
         .then(this,
               [this, index, name](const InitializeResult &result) {
                   qInfo().noquote() << QString("[%1] reconnected — %2 %3")
@@ -239,7 +241,7 @@ void BridgeServer::resyncTools(int index)
 
     clearTools(index);
 
-    upstream.client->listTools().then(this, [this, index, name](const QList<ToolInfo> &tools) {
+    LLMQore::compat(upstream.client->listTools()).then(this, [this, index, name](const QList<ToolInfo> &tools) {
         registerTools(index, tools);
         qInfo().noquote() << QString("[%1] re-synced: %2 tools.").arg(name).arg(tools.size());
     });

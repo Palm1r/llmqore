@@ -6,6 +6,7 @@
 #include <LLMQore/McpClient.hpp>
 #include <LLMQore/McpExceptions.hpp>
 
+#include <LLMQore/FutureUtils.hpp>
 #include <QPromise>
 
 namespace LLMQore::Mcp {
@@ -57,11 +58,11 @@ QFuture<LLMQore::ToolResult> McpRemoteTool::executeAsync(const QJsonObject &inpu
         return p.future();
     }
 
-    return m_client->callTool(m_info.name, input)
-        .onFailed(this, [](const McpException &e) {
-            return LLMQore::ToolResult::error(e.message());
-        })
-        .onFailed(this, [](const std::exception &e) {
+    return LLMQore::compat(m_client->callTool(m_info.name, input))
+        .then(this, [](const LLMQore::ToolResult &result) { return result; })
+        .onFailed(this, [](const auto &e) {
+            if constexpr (std::is_same_v<std::decay_t<decltype(e)>, McpException>)
+                return LLMQore::ToolResult::error(e.message());
             return LLMQore::ToolResult::error(QString::fromUtf8(e.what()));
         });
 }

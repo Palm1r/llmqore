@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "ToolHandler.hpp"
+#include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/Log.hpp>
 #include <LLMQore/McpClient.hpp>
 #include <LLMQore/McpHttpTransport.hpp>
@@ -110,13 +111,13 @@ void ToolsManager::addMcpServer(const McpServerEntry &entry)
     auto *client = new Mcp::McpClient(
         transport, Mcp::Implementation{entry.name, QStringLiteral(LLMQORE_VERSION_STRING)}, this);
 
-    client->connectAndInitialize().then(this, [this, client](const Mcp::InitializeResult &) {
-        addMcpClient(client);
-    }).onFailed(this, [entry](const std::exception &e) {
-        qCWarning(llmToolsLog).noquote()
-            << QString("Failed to connect MCP server '%1': %2")
-                   .arg(entry.name, QString::fromUtf8(e.what()));
-    });
+    (void)LLMQore::compat(client->connectAndInitialize())
+        .then(this, [this, client](const Mcp::InitializeResult &) { addMcpClient(client); })
+        .onFailed(this, [entry](const std::exception &e) {
+            qCWarning(llmToolsLog).noquote()
+                << QString("Failed to connect MCP server '%1': %2")
+                       .arg(entry.name, QString::fromUtf8(e.what()));
+        });
 }
 
 void ToolsManager::loadMcpServers(const QJsonObject &config)
@@ -177,28 +178,29 @@ void ToolsManager::removeMcpClient(Mcp::McpClient *client)
 
 void ToolsManager::registerMcpTools(Mcp::McpClient *client)
 {
-    client->listTools().then(this, [this, client](const QList<Mcp::ToolInfo> &tools) {
-        QSet<QString> incoming;
-        incoming.reserve(tools.size());
-        for (const Mcp::ToolInfo &t : tools)
-            incoming.insert(t.name);
+    (void)LLMQore::compat(client->listTools())
+        .then(this, [this, client](const QList<Mcp::ToolInfo> &tools) {
+            QSet<QString> incoming;
+            incoming.reserve(tools.size());
+            for (const Mcp::ToolInfo &t : tools)
+                incoming.insert(t.name);
 
-        const QStringList previous = m_mcpClientTools.value(client);
-        for (const QString &old : previous) {
-            if (!incoming.contains(old))
-                removeTool(old);
-        }
+            const QStringList previous = m_mcpClientTools.value(client);
+            for (const QString &old : previous) {
+                if (!incoming.contains(old))
+                    removeTool(old);
+            }
 
-        QStringList registered;
-        registered.reserve(tools.size());
-        for (const Mcp::ToolInfo &info : tools) {
-            if (m_tools.contains(info.name))
-                removeTool(info.name);
-            addTool(new Mcp::McpRemoteTool(client, info));
-            registered.append(info.name);
-        }
-        m_mcpClientTools[client] = std::move(registered);
-    });
+            QStringList registered;
+            registered.reserve(tools.size());
+            for (const Mcp::ToolInfo &info : tools) {
+                if (m_tools.contains(info.name))
+                    removeTool(info.name);
+                addTool(new Mcp::McpRemoteTool(client, info));
+                registered.append(info.name);
+            }
+            m_mcpClientTools[client] = std::move(registered);
+        });
 }
 
 QString ToolsManager::displayName(const QString &toolName) const

@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 
 #include "clients/openai/OpenAIMessage.hpp"
+#include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/HttpClient.hpp>
 #include <LLMQore/Log.hpp>
 #include <LLMQore/SSEParser.hpp>
@@ -70,8 +71,7 @@ QFuture<QList<QString>> LlamaCppClient::listModels()
     QUrl url(m_url + "/v1/models");
     QNetworkRequest request = prepareNetworkRequest(url);
 
-    return httpClient()
-        ->send(request, QByteArrayView("GET"))
+    return LLMQore::compat(httpClient()->send(request, QByteArrayView("GET")))
         .then(this, [](const HttpResponse &response) {
             QList<QString> models;
             if (!response.isSuccess()) {
@@ -102,8 +102,7 @@ QFuture<bool> LlamaCppClient::isServerReady()
     QUrl url(m_url + "/health");
     QNetworkRequest request = prepareNetworkRequest(url);
 
-    return httpClient()
-        ->send(request, QByteArrayView("GET"))
+    return LLMQore::compat(httpClient()->send(request, QByteArrayView("GET")))
         .then(this, [](const HttpResponse &response) {
             if (!response.isSuccess())
                 return false;
@@ -118,8 +117,7 @@ QFuture<QJsonObject> LlamaCppClient::serverProps()
     QUrl url(m_url + "/props");
     QNetworkRequest request = prepareNetworkRequest(url);
 
-    return httpClient()
-        ->send(request, QByteArrayView("GET"))
+    return LLMQore::compat(httpClient()->send(request, QByteArrayView("GET")))
         .then(this, [](const HttpResponse &response) -> QJsonObject {
             if (!response.isSuccess())
                 return {};

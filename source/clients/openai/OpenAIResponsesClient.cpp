@@ -10,6 +10,7 @@
 #include <QJsonDocument>
 
 #include "OpenAIResponsesMessage.hpp"
+#include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/Log.hpp>
 
 namespace LLMQore {
@@ -64,8 +65,7 @@ QFuture<QList<QString>> OpenAIResponsesClient::listModels()
     QUrl url(m_url + "/models");
     QNetworkRequest request = prepareNetworkRequest(url);
 
-    return httpClient()
-        ->send(request, QByteArrayView("GET"))
+    return LLMQore::compat(httpClient()->send(request, QByteArrayView("GET")))
         .then(this, [](const HttpResponse &response) {
             QList<QString> models;
             if (!response.isSuccess()) {

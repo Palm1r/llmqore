@@ -12,9 +12,11 @@
 #include <LLMQore/McpTransport.hpp>
 #include <LLMQore/ToolResult.hpp>
 #include <LLMQore/ToolRegistry.hpp>
+#include <LLMQore/FutureUtils.hpp>
 
 #include <QFuture>
 #include <QJsonArray>
+#include <QFutureWatcher>
 #include <QPromise>
 
 #include <optional>
@@ -57,19 +59,38 @@ QFuture<QJsonValue> collectListFromProviders(
     if (futures.isEmpty())
         return makeReadyFuture(QJsonObject{{resultKey, QJsonArray{}}});
 
-    return QtFuture::whenAll(futures.begin(), futures.end())
-        .then(ctx, [resultKey](const QList<QFuture<QList<Item>>> &finished) {
-            QJsonArray merged;
-            for (const QFuture<QList<Item>> &f : finished) {
-                try {
-                    const QList<Item> list = f.result();
-                    for (const Item &item : list)
-                        merged.append(item.toJson());
-                } catch (...) {
-                }
-            }
-            return QJsonValue(QJsonObject{{resultKey, merged}});
-        });
+    struct State
+    {
+        std::shared_ptr<QPromise<QJsonValue>> promise;
+        QJsonArray merged;
+        int remaining = 0;
+    };
+
+    auto state = std::make_shared<State>();
+    state->promise = std::make_shared<QPromise<QJsonValue>>();
+    state->promise->start();
+    state->remaining = futures.size();
+
+    for (const QFuture<QList<Item>> &future : futures) {
+        auto *watcher = new QFutureWatcher<QList<Item>>(ctx);
+        QObject::connect(watcher, &QFutureWatcher<QList<Item>>::finished, watcher,
+                         [state, watcher, resultKey]() {
+                             try {
+                                 const QList<Item> list = watcher->future().result();
+                                 for (const Item &item : list)
+                                     state->merged.append(item.toJson());
+                             } catch (...) {
+                             }
+                             if (--state->remaining == 0) {
+                                 state->promise->addResult(QJsonValue(QJsonObject{{resultKey, state->merged}}));
+                                 state->promise->finish();
+                             }
+                             watcher->deleteLater();
+                         });
+        watcher->setFuture(future);
+    }
+
+    return state->promise->future();
 }
 
 template<typename Provider, typename T>
@@ -100,19 +121,16 @@ void tryEachAdvance(std::shared_ptr<TryEachState<Provider, T>> s)
     Provider *provider = s->providers.at(s->index).data();
     ++s->index;
 
-    s->runFn(provider)
-        .then(s->ctx,
-              [s](const T &value) {
-                  if (auto json = s->extract(value)) {
-                      s->promise->addResult(std::move(*json));
-                      s->promise->finish();
-                  } else {
-                      tryEachAdvance(s);
-                  }
-              })
-        .onFailed(s->ctx, [s](const std::exception &) {
-            tryEachAdvance(s);
-        });
+    (void)LLMQore::compat(s->runFn(provider))
+        .then(s->ctx, [s](const T &value) {
+            if (auto json = s->extract(value)) {
+                s->promise->addResult(std::move(*json));
+                s->promise->finish();
+            } else {
+                tryEachAdvance(s);
+            }
+        })
+        .onFailed(s->ctx, [s](const std::exception &) { tryEachAdvance(s); });
 }
 
 template<typename Provider, typename T, typename Run, typename Extract>
@@ -239,14 +257,12 @@ void McpServer::installHandlers()
                     ErrorCode::MethodNotFound, QString("Tool not found: %1").arg(name)));
             }
 
-            return tool->executeAsync(args)
-                .then(this,
-                      [](const LLMQore::ToolResult &result) {
-                          return QJsonValue(result.toJson());
-                      })
+            return LLMQore::compat(tool->executeAsync(args))
+                .then(this, [](const LLMQore::ToolResult &result) {
+                    return QJsonValue(result.toJson());
+                })
                 .onFailed(this, [](const std::exception &e) {
-                    return QJsonValue(
-                        LLMQore::ToolResult::error(QString::fromUtf8(e.what())).toJson());
+                    return QJsonValue(LLMQore::ToolResult::error(QString::fromUtf8(e.what())).toJson());
                 });
         });
 
@@ -368,23 +384,42 @@ void McpServer::installHandlers()
                 if (futures.isEmpty())
                     return makeReadyFuture(CompletionResult{}.toJson());
 
-                return QtFuture::whenAll(futures.begin(), futures.end())
-                    .then(this, [](const QList<QFuture<CompletionResult>> &finished) {
-                        CompletionResult merged;
-                        for (const QFuture<CompletionResult> &f : finished) {
-                            try {
-                                const CompletionResult r = f.result();
-                                for (const QString &v : r.values)
-                                    merged.values.append(v);
-                                if (r.hasMore)
-                                    merged.hasMore = true;
-                                if (r.total.has_value())
-                                    merged.total = merged.total.value_or(0) + *r.total;
-                            } catch (...) {
-                            }
-                        }
-                        return QJsonValue(merged.toJson());
-                    });
+                struct State
+                {
+                    std::shared_ptr<QPromise<QJsonValue>> promise;
+                    CompletionResult merged;
+                    int remaining = 0;
+                };
+
+                auto state = std::make_shared<State>();
+                state->promise = std::make_shared<QPromise<QJsonValue>>();
+                state->promise->start();
+                state->remaining = futures.size();
+
+                for (const QFuture<CompletionResult> &future : futures) {
+                    auto *watcher = new QFutureWatcher<CompletionResult>(this);
+                    QObject::connect(watcher, &QFutureWatcher<CompletionResult>::finished, watcher,
+                                     [state, watcher]() {
+                                         try {
+                                             const CompletionResult r = watcher->future().result();
+                                             for (const QString &v : r.values)
+                                                 state->merged.values.append(v);
+                                             if (r.hasMore)
+                                                 state->merged.hasMore = true;
+                                             if (r.total.has_value())
+                                                 state->merged.total = state->merged.total.value_or(0) + *r.total;
+                                         } catch (...) {
+                                         }
+                                         if (--state->remaining == 0) {
+                                             state->promise->addResult(QJsonValue(state->merged.toJson()));
+                                             state->promise->finish();
+                                         }
+                                         watcher->deleteLater();
+                                     });
+                    watcher->setFuture(future);
+                }
+
+                return state->promise->future();
             };
 
             if (ref.type == QLatin1String("ref/prompt")) {
@@ -513,11 +548,9 @@ QFuture<CreateMessageResult> McpServer::createSamplingMessage(
         return p.future();
     }
 
-    return m_session
-        ->sendRequest(QStringLiteral("sampling/createMessage"), params.toJson(), timeout)
-        .then(this, [](const QJsonValue &value) {
-            return CreateMessageResult::fromJson(value.toObject());
-        });
+    return LLMQore::compat(
+               m_session->sendRequest(QStringLiteral("sampling/createMessage"), params.toJson(), timeout))
+        .then(this, [](const QJsonValue &value) { return CreateMessageResult::fromJson(value.toObject()); });
 }
 
 QFuture<ElicitResult> McpServer::createElicitation(
@@ -540,11 +573,9 @@ QFuture<ElicitResult> McpServer::createElicitation(
         return p.future();
     }
 
-    return m_session
-        ->sendRequest(QStringLiteral("elicitation/create"), params.toJson(), timeout)
-        .then(this, [](const QJsonValue &value) {
-            return ElicitResult::fromJson(value.toObject());
-        });
+    return LLMQore::compat(
+               m_session->sendRequest(QStringLiteral("elicitation/create"), params.toJson(), timeout))
+        .then(this, [](const QJsonValue &value) { return ElicitResult::fromJson(value.toObject()); });
 }
 
 void McpServer::sendLogMessage(

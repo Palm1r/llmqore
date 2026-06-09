@@ -213,7 +213,9 @@ TEST(McpTypesTest, CompletionTypesRoundTrip)
     EXPECT_EQ(argBack.value, arg.value);
 
     CompletionResult res;
-    res.values = {"python", "pyramid", "pytorch"};
+    res.values = QStringList{QStringLiteral("python"),
+                             QStringLiteral("pyramid"),
+                             QStringLiteral("pytorch")};
     res.total = 10;
     res.hasMore = true;
     const QJsonObject resObj = res.toJson();
@@ -285,7 +287,7 @@ TEST(McpTypesTest, SamplingMessageAndParamsRoundTrip)
     params.includeContext = "thisServer";
     params.temperature = 0.1;
     params.maxTokens = 128;
-    params.stopSequences = {"END", "###"};
+    params.stopSequences = QStringList{QStringLiteral("END"), QStringLiteral("###")};
     params.metadata = QJsonObject{{"source", "unit-test"}};
 
     const QJsonObject obj = params.toJson();
@@ -305,7 +307,8 @@ TEST(McpTypesTest, SamplingMessageAndParamsRoundTrip)
     ASSERT_TRUE(back.temperature.has_value());
     EXPECT_DOUBLE_EQ(*back.temperature, 0.1);
     EXPECT_EQ(back.maxTokens, 128);
-    EXPECT_EQ(back.stopSequences, QStringList({"END", "###"}));
+    EXPECT_EQ(back.stopSequences,
+              (QStringList{QStringLiteral("END"), QStringLiteral("###")}));
     ASSERT_TRUE(back.modelPreferences.has_value());
     ASSERT_EQ(back.modelPreferences->hints.size(), 1);
     EXPECT_EQ(back.modelPreferences->hints.first().name, "claude-sonnet");

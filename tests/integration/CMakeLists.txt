@@ -1,4 +1,7 @@
-find_package(Qt6 REQUIRED COMPONENTS Test Concurrent)
+if(NOT DEFINED QT_VERSION_MAJOR)
+    find_package(QT NAMES Qt5 Qt6 REQUIRED COMPONENTS Test Concurrent)
+endif()
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Test Concurrent)
 
 add_executable(LLMQoreIntegrationTests
     IntegrationTestTools.cpp
@@ -24,8 +27,8 @@ target_include_directories(LLMQoreIntegrationTests PRIVATE
 
 target_link_libraries(LLMQoreIntegrationTests PRIVATE
     LLMQore::LLMQore
-    Qt6::Test
-    Qt6::Concurrent
+    Qt${QT_VERSION_MAJOR}::Test
+    Qt${QT_VERSION_MAJOR}::Concurrent
     GTest::gtest_main
 )
 
