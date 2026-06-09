@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Martin Siggel
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 #include <memory>
