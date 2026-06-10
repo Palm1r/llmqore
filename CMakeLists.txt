@@ -11,6 +11,12 @@ if(NOT DEFINED QT_VERSION_MAJOR)
 endif()
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network Concurrent)
 
+if(QT_VERSION_MAJOR EQUAL 5)
+    set(LLMQORE_CXX_STANDARD 17)
+else()
+    set(LLMQORE_CXX_STANDARD 20)
+endif()
+
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/LLMQore/Version.hpp.in
     ${CMAKE_CURRENT_BINARY_DIR}/include/LLMQore/Version.hpp
@@ -23,7 +29,7 @@ add_library(LLMQore::LLMQore ALIAS LLMQore)
 
 set_target_properties(LLMQore PROPERTIES
     AUTOMOC ON
-    CXX_STANDARD 20
+    CXX_STANDARD ${LLMQORE_CXX_STANDARD}
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON

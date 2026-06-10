@@ -6,7 +6,7 @@
 
 #include <QFutureInterface>
 #include <QThread>
-#include <QtConcurrent>
+#include <QTimer>
 
 #include <LLMQore/Log.hpp>
 

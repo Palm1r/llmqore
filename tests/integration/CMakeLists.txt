@@ -17,7 +17,7 @@ add_executable(LLMQoreIntegrationTests
 
 set_target_properties(LLMQoreIntegrationTests PROPERTIES
     AUTOMOC ON
-    CXX_STANDARD 20
+    CXX_STANDARD ${LLMQORE_CXX_STANDARD}
     CXX_STANDARD_REQUIRED ON
 )
 
