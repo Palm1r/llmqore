@@ -13,7 +13,7 @@ add_executable(mcp-bridge
 
 set_target_properties(mcp-bridge PROPERTIES
     AUTOMOC ON
-    CXX_STANDARD ${LLMQORE_CXX_STANDARD}
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )

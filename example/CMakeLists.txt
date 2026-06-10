@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 set(CMAKE_AUTOMOC ON)
-set(CMAKE_CXX_STANDARD ${LLMQORE_CXX_STANDARD})
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(QT_KNOWN_POLICY_QTP0001)
@@ -78,10 +78,13 @@ add_executable(example-mcp-server
 )
 set_target_properties(example-mcp-server PROPERTIES
     AUTOMOC ON
-    CXX_STANDARD ${LLMQORE_CXX_STANDARD}
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )
+if(QT_VERSION_MAJOR EQUAL 5)
+    set_property(TARGET example-mcp-server PROPERTY CXX_STANDARD 17)
+endif()
 target_link_libraries(example-mcp-server
     PRIVATE
     LLMQore::LLMQore
@@ -109,7 +112,7 @@ add_executable(example-mcp-http-probe
 )
 set_target_properties(example-mcp-http-probe PROPERTIES
     AUTOMOC ON
-    CXX_STANDARD ${LLMQORE_CXX_STANDARD}
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )

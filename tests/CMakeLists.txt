@@ -39,9 +39,13 @@ add_executable(LLMQoreUnitTests
 
 set_target_properties(LLMQoreUnitTests PROPERTIES
     AUTOMOC ON
-    CXX_STANDARD ${LLMQORE_CXX_STANDARD}
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
 )
+
+if(QT_VERSION_MAJOR EQUAL 5)
+    set_property(TARGET LLMQoreUnitTests PROPERTY CXX_STANDARD 17)
+endif()
 
 target_include_directories(LLMQoreUnitTests PRIVATE
     ${PROJECT_SOURCE_DIR}/source
