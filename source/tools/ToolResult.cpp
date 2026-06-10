@@ -14,6 +14,7 @@ const int _toolResultMetaType = []() {
     qRegisterMetaType<LLMQore::ToolContent>("LLMQore::ToolContent");
     qRegisterMetaType<LLMQore::ToolResult>("LLMQore::ToolResult");
     qRegisterMetaType<LLMQoreToolResultHash>("LLMQoreToolResultHash");
+    qRegisterMetaType<LLMQoreToolResultHash>("QHash<QString,ToolResult>");
     return 0;
 }();
 } // namespace

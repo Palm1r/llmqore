@@ -1,4 +1,9 @@
-qt_add_executable(mcp-bridge
+if(NOT DEFINED QT_VERSION_MAJOR)
+    find_package(QT NAMES Qt5 Qt6 REQUIRED COMPONENTS Core Network Concurrent)
+endif()
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network Concurrent)
+
+add_executable(mcp-bridge
     main.cpp
     BridgeConfig.hpp
     BridgeConfig.cpp
@@ -6,15 +11,20 @@ qt_add_executable(mcp-bridge
     BridgeServer.cpp
 )
 
+set_target_properties(mcp-bridge PROPERTIES
+    AUTOMOC ON
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
 target_link_libraries(mcp-bridge
     PRIVATE
     LLMQore::LLMQore
-    Qt6::Core
-    Qt6::Network
-    Qt6::Concurrent
+    Qt${QT_VERSION_MAJOR}::Core
+    Qt${QT_VERSION_MAJOR}::Network
+    Qt${QT_VERSION_MAJOR}::Concurrent
 )
-
-set_target_properties(mcp-bridge PROPERTIES AUTOMOC ON)
 
 if(APPLE)
     set_target_properties(mcp-bridge PROPERTIES
@@ -48,7 +58,9 @@ install(FILES mcp-bridge.json
 )
 
 if(WIN32)
-    set(_windeployqt "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_BINS}/windeployqt.exe")
+    get_target_property(_qt_qmake_exe Qt${QT_VERSION_MAJOR}::qmake IMPORTED_LOCATION)
+    get_filename_component(_qt_bin_dir "${_qt_qmake_exe}" DIRECTORY)
+    set(_windeployqt "${_qt_bin_dir}/windeployqt.exe")
     install(CODE "
         execute_process(
             COMMAND \"${_windeployqt}\"
@@ -61,7 +73,9 @@ if(WIN32)
         )
     " COMPONENT mcp-bridge)
 elseif(APPLE)
-    set(_macdeployqt "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_BINS}/macdeployqt")
+    get_target_property(_qt_qmake_exe Qt${QT_VERSION_MAJOR}::qmake IMPORTED_LOCATION)
+    get_filename_component(_qt_bin_dir "${_qt_qmake_exe}" DIRECTORY)
+    set(_macdeployqt "${_qt_bin_dir}/macdeployqt")
     install(CODE "
         message(STATUS \"Running macdeployqt on \${CMAKE_INSTALL_PREFIX}/mcp-bridge.app\")
         execute_process(
@@ -85,24 +99,29 @@ elseif(APPLE)
         endif()
     " COMPONENT mcp-bridge)
 else()
-    foreach(_lib Qt6Core Qt6Network Qt6Concurrent)
+    get_target_property(_qt_core_lib Qt${QT_VERSION_MAJOR}::Core IMPORTED_LOCATION)
+    get_filename_component(_qt_lib_dir "${_qt_core_lib}" DIRECTORY)
+
+    foreach(_lib Core Network Concurrent)
         file(GLOB _files
-            "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_LIBS}/lib${_lib}.so*"
+            "${_qt_lib_dir}/libQt${QT_VERSION_MAJOR}${_lib}.so*"
         )
         install(FILES ${_files}
             DESTINATION lib
             COMPONENT mcp-bridge
         )
     endforeach()
-    foreach(_icu icui18n icuuc icudata)
-        file(GLOB _icu_files
-            "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_LIBS}/lib${_icu}.so*"
-        )
-        if(_icu_files)
-            install(FILES ${_icu_files}
-                DESTINATION lib
-                COMPONENT mcp-bridge
+    if(QT_VERSION_MAJOR GREATER_EQUAL 6)
+        foreach(_icu icui18n icuuc icudata)
+            file(GLOB _icu_files
+                "${_qt_lib_dir}/lib${_icu}.so*"
             )
-        endif()
-    endforeach()
+            if(_icu_files)
+                install(FILES ${_icu_files}
+                    DESTINATION lib
+                    COMPONENT mcp-bridge
+                )
+            endif()
+        endforeach()
+    endif()
 endif()

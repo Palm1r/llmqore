@@ -225,7 +225,7 @@ TEST_F(ToolHandlerTest, ExecuteNullTool)
 
     // Null tool should not crash and should emit toolFailed asynchronously.
     auto future = handler.executeToolAsync("req-1", "tool-1", nullptr, {});
-    EXPECT_FALSE(future.isValid());
+    EXPECT_FALSE(future.isStarted());
 
     EXPECT_TRUE(failedSpy.wait(3000));
     EXPECT_EQ(failedSpy.count(), 1);

@@ -8,6 +8,7 @@
 #include <QThread>
 #include <QUuid>
 
+#include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/HttpClient.hpp>
 #include <LLMQore/HttpStream.hpp>
 #include <LLMQore/HttpTransportError.hpp>
@@ -182,7 +183,7 @@ void BaseClient::startHttpRequest(
     const QByteArray body = QJsonDocument(payload).toJson(QJsonDocument::Compact);
 
     if (mode == RequestMode::Buffered) {
-        m_httpClient->send(request, QByteArrayView("POST"), body)
+        (void)LLMQore::compat(m_httpClient->send(request, QByteArrayView("POST"), body))
             .then(this, [this, id](const HttpResponse &response) {
                 if (!hasRequest(id))
                     return;
@@ -196,12 +197,12 @@ void BaseClient::startHttpRequest(
                 processBufferedResponse(id, response.body);
                 onStreamFinished(id, std::nullopt);
             })
-            .onFailed(this, [this, id](const HttpTransportError &e) {
-                if (hasRequest(id))
+            .onFailed(this, [this, id](const auto &e) {
+                if (!hasRequest(id))
+                    return;
+                if constexpr (std::is_same_v<std::decay_t<decltype(e)>, HttpTransportError>)
                     onStreamFinished(id, e.message());
-            })
-            .onFailed(this, [this, id](const std::exception &e) {
-                if (hasRequest(id))
+                else
                     onStreamFinished(id, QString::fromUtf8(e.what()));
             });
         return;

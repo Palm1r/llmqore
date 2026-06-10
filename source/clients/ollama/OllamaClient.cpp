@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 
 #include "OllamaMessage.hpp"
+#include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/HttpClient.hpp>
 #include <LLMQore/LineBuffer.hpp>
 #include <LLMQore/Log.hpp>
@@ -62,8 +63,7 @@ QFuture<QList<QString>> OllamaClient::listModels()
     QUrl url(m_url + "/api/tags");
     QNetworkRequest request = prepareNetworkRequest(url);
 
-    return httpClient()
-        ->send(request, QByteArrayView("GET"))
+    return LLMQore::compat(httpClient()->send(request, QByteArrayView("GET")))
         .then(this, [](const HttpResponse &response) {
             QList<QString> models;
             if (!response.isSuccess()) {

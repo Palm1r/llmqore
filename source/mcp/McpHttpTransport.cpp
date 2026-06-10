@@ -10,6 +10,7 @@
 #include <LLMQore/Log.hpp>
 #include <LLMQore/SSEParser.hpp>
 
+#include <LLMQore/FutureUtils.hpp>
 #include <QByteArray>
 #include <QByteArrayList>
 #include <QJsonDocument>
@@ -128,11 +129,10 @@ struct McpHttpTransport::Impl
 
         const QByteArray body = QJsonDocument(message).toJson(QJsonDocument::Compact);
 
-        http->send(req, QByteArrayView("POST"), body)
+        (void)LLMQore::compat(http->send(req, QByteArrayView("POST"), body))
             .then(q, [this](const HttpResponse &response) {
                 if (!response.isSuccess()) {
-                    const QString reason
-                        = QString("POST failed (HTTP %1)").arg(response.statusCode);
+                    const QString reason = QString("POST failed (HTTP %1)").arg(response.statusCode);
                     qCWarning(llmMcpLog).noquote() << reason;
                     emit q->errorOccurred(reason);
                 }
@@ -161,7 +161,7 @@ struct McpHttpTransport::Impl
 
         const QByteArray body = QJsonDocument(message).toJson(QJsonDocument::Compact);
 
-        http->send(req, QByteArrayView("POST"), body)
+        (void)LLMQore::compat(http->send(req, QByteArrayView("POST"), body))
             .then(q, [this](const HttpResponse &response) { handleV2025Response(response); })
             .onFailed(q, [this](const HttpTransportError &e) {
                 const QString reason = QString("HTTP error: %1").arg(e.message());

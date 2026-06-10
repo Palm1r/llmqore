@@ -6,7 +6,10 @@ project(LLMQore
     DESCRIPTION "Qt/C++ library for LLM provider integration"
 )
 
-find_package(Qt6 REQUIRED COMPONENTS Core Network Concurrent)
+if(NOT DEFINED QT_VERSION_MAJOR)
+    find_package(QT NAMES Qt5 Qt6 REQUIRED COMPONENTS Core Network Concurrent)
+endif()
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core Network Concurrent)
 
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/LLMQore/Version.hpp.in
@@ -41,10 +44,10 @@ target_include_directories(LLMQore
 
 target_link_libraries(LLMQore
     PUBLIC
-        Qt6::Core
-        Qt6::Network
+        Qt${QT_VERSION_MAJOR}::Core
+        Qt${QT_VERSION_MAJOR}::Network
     PRIVATE
-        Qt6::Concurrent
+        Qt${QT_VERSION_MAJOR}::Concurrent
 )
 
 target_compile_definitions(LLMQore PRIVATE LLMQORE_LIBRARY)
@@ -76,6 +79,14 @@ if(LLMQORE_INSTALL)
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
         PATTERN "*.in" EXCLUDE
     )
+
+    if(QT_VERSION_MAJOR EQUAL 5)
+        install(FILES
+            ${CMAKE_CURRENT_SOURCE_DIR}/include/QPromise
+            ${CMAKE_CURRENT_SOURCE_DIR}/include/QByteArrayView
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        )
+    endif()
 
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/LLMQore/Version.hpp
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/LLMQore

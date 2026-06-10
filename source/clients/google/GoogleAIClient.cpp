@@ -8,6 +8,7 @@
 #include <QUrlQuery>
 
 #include "GoogleMessage.hpp"
+#include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/HttpClient.hpp>
 #include <LLMQore/Log.hpp>
 #include <LLMQore/SSEParser.hpp>
@@ -75,8 +76,7 @@ QFuture<QList<QString>> GoogleAIClient::listModels()
     QUrl url(QString("%1/models").arg(m_url));
     QNetworkRequest request = prepareNetworkRequest(url);
 
-    return httpClient()
-        ->send(request, QByteArrayView("GET"))
+    return LLMQore::compat(httpClient()->send(request, QByteArrayView("GET")))
         .then(this, [](const HttpResponse &response) {
             QList<QString> models;
             if (!response.isSuccess()) {

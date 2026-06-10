@@ -1,0 +1,55 @@
+// Copyright (C) 2026 Martin Siggel
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#if QT_VERSION_MAJOR >= 6
+
+#include <QtCore/QByteArrayView>
+
+#else
+
+#include <QByteArray>
+#include <QtGlobal>
+
+class QByteArrayView
+{
+public:
+    QByteArrayView() = default;
+    QByteArrayView(const char *data)
+        : m_data(data)
+    {}
+    QByteArrayView(const QByteArray &data)
+        : m_data(data)
+    {}
+    QByteArrayView(QByteArray &&data)
+        : m_data(std::move(data))
+    {}
+
+    [[nodiscard]] QByteArray toByteArray() const { return m_data; }
+    [[nodiscard]] bool isEmpty() const noexcept { return m_data.isEmpty(); }
+    [[nodiscard]] int size() const noexcept { return m_data.size(); }
+    [[nodiscard]] const char *data() const noexcept { return m_data.constData(); }
+
+    [[nodiscard]] int compare(const QByteArrayView &other, Qt::CaseSensitivity cs = Qt::CaseSensitive) const
+    {
+        return m_data.compare(other.m_data, cs);
+    }
+
+    [[nodiscard]] int compare(const QByteArray &other, Qt::CaseSensitivity cs = Qt::CaseSensitive) const
+    {
+        return m_data.compare(other, cs);
+    }
+
+    [[nodiscard]] int compare(const char *other, Qt::CaseSensitivity cs = Qt::CaseSensitive) const
+    {
+        return m_data.compare(QByteArray(other), cs);
+    }
+
+    operator QByteArray() const { return m_data; }
+
+private:
+    QByteArray m_data;
+};
+
+#endif

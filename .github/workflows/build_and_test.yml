@@ -368,6 +368,44 @@ jobs:
           dist/mcp-bridge-*.zip
         if-no-files-found: ignore
 
+  build-qt5:
+    name: Ubuntu 22.04 GCC (Qt 5.15.2)
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+
+    - name: Download Ninja and CMake
+      uses: lukka/get-cmake@2ecc21724e5215b0e567bc399a2602d2ecb48541
+      with:
+        cmakeVersion: ${{ env.CMAKE_VERSION }}
+        ninjaVersion: ${{ env.NINJA_VERSION }}
+
+    - name: Install Qt
+      uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+      with:
+        version: '5.15.2'
+        cache: 'true'
+
+    - name: Install xvfb
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends xvfb
+
+    - name: Configure
+      run: >
+        cmake -S . -B build -G Ninja
+        -DCMAKE_BUILD_TYPE=Release
+        "-DCMAKE_PREFIX_PATH=$QT_ROOT_DIR"
+        -DLLMQORE_BUILD_TESTS=ON
+        -DLLMQORE_BUILD_EXAMPLES=OFF
+        -DLLMQORE_BUILD_MCP_BRIDGE=ON
+
+    - name: Build
+      run: cmake --build build
+
+    - name: Run unit tests
+      run: xvfb-run ./build/tests/LLMQoreUnitTests
+
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')

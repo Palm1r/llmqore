@@ -1,0 +1,106 @@
+// Copyright (C) 2026 Martin Siggel
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#if QT_VERSION_MAJOR >= 6
+
+#include <QtCore/QPromise>
+
+#else
+
+#include <exception>
+#include <memory>
+
+#include <QException>
+#include <QFuture>
+#include <QFutureInterface>
+#include <QString>
+
+class QStdExceptionWrapper : public QException
+{
+public:
+    QStdExceptionWrapper() = default;
+    explicit QStdExceptionWrapper(QString message)
+        : m_message(std::move(message))
+        , m_stdMessage(m_message.toStdString())
+    {}
+
+    void raise() const override { throw *this; }
+    QStdExceptionWrapper *clone() const override { return new QStdExceptionWrapper(*this); }
+    const char *what() const noexcept override { return m_stdMessage.c_str(); }
+
+private:
+    QString m_message;
+    std::string m_stdMessage;
+};
+
+template<typename T>
+class QPromise
+{
+public:
+    QPromise() = default;
+    QPromise(const QPromise &) = delete;
+    QPromise &operator=(const QPromise &) = delete;
+
+    void start() { m_interface.reportStarted(); }
+    void finish() { m_interface.reportFinished(); }
+
+    void addResult(const T &result) { m_interface.reportResult(result); }
+    void addResult(T &&result) { m_interface.reportResult(std::move(result)); }
+
+    void setException(std::exception_ptr exception)
+    {
+        if (!exception)
+            return;
+        try {
+            std::rethrow_exception(exception);
+        } catch (const QException &e) {
+            m_interface.reportException(e);
+        } catch (const std::exception &e) {
+            m_interface.reportException(QStdExceptionWrapper(QString::fromUtf8(e.what())));
+        } catch (...) {
+            m_interface.reportException(QStdExceptionWrapper(QStringLiteral("unknown exception")));
+        }
+    }
+
+    QFuture<T> future() { return m_interface.future(); }
+
+private:
+    QFutureInterface<T> m_interface;
+};
+
+template<>
+class QPromise<void>
+{
+public:
+    QPromise() = default;
+    QPromise(const QPromise &) = delete;
+    QPromise &operator=(const QPromise &) = delete;
+
+    void start() { m_interface.reportStarted(); }
+    void finish() { m_interface.reportFinished(); }
+    void addResult() {}
+
+    void setException(std::exception_ptr exception)
+    {
+        if (!exception)
+            return;
+        try {
+            std::rethrow_exception(exception);
+        } catch (const QException &e) {
+            m_interface.reportException(e);
+        } catch (const std::exception &e) {
+            m_interface.reportException(QStdExceptionWrapper(QString::fromUtf8(e.what())));
+        } catch (...) {
+            m_interface.reportException(QStdExceptionWrapper(QStringLiteral("unknown exception")));
+        }
+    }
+
+    QFuture<void> future() { return m_interface.future(); }
+
+private:
+    QFutureInterface<void> m_interface;
+};
+
+#endif
