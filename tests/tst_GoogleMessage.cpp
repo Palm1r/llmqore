@@ -437,7 +437,7 @@ TEST(GoogleMessage, CreateToolResultParts_ImageBecomesInlineDataPart)
     results[tools[0]->id()] = r;
 
     const QJsonArray parts = msg.createToolResultParts(results);
-    ASSERT_EQ(parts.size(), 1);
+    ASSERT_EQ(parts.size(), 2);
 
     const QJsonObject funcResp = parts[0].toObject()["functionResponse"].toObject();
     EXPECT_EQ(funcResp["name"].toString(), "get_sample_image");
@@ -446,12 +446,11 @@ TEST(GoogleMessage, CreateToolResultParts_ImageBecomesInlineDataPart)
     EXPECT_EQ(
         funcResp["response"].toObject()["result"].toString(), "here is the screenshot");
 
-    // The rich image is an inlineData part inside the functionResponse.
-    ASSERT_TRUE(funcResp.contains("parts"));
-    const QJsonArray inner = funcResp["parts"].toArray();
-    ASSERT_EQ(inner.size(), 1);
-
-    const QJsonObject inlineData = inner[0].toObject()["inlineData"].toObject();
+    // The rich image is a sibling inlineData part next to the
+    // functionResponse (the nested FunctionResponse.parts shape is rejected
+    // by the live Gemini API).
+    EXPECT_FALSE(funcResp.contains("parts"));
+    const QJsonObject inlineData = parts[1].toObject()["inlineData"].toObject();
     EXPECT_EQ(inlineData["mimeType"].toString(), "image/png");
     EXPECT_EQ(
         QByteArray::fromBase64(inlineData["data"].toString().toUtf8()), QByteArray("PNGDATA"));
@@ -491,14 +490,12 @@ TEST(GoogleMessage, CreateToolResultParts_AudioAlsoBecomesInlineData)
     results[tools[0]->id()] = r;
 
     const QJsonArray parts = msg.createToolResultParts(results);
-    ASSERT_EQ(parts.size(), 1);
+    ASSERT_EQ(parts.size(), 2);
 
     const QJsonObject funcResp = parts[0].toObject()["functionResponse"].toObject();
-    ASSERT_TRUE(funcResp.contains("parts"));
-    const QJsonArray inner = funcResp["parts"].toArray();
-    ASSERT_EQ(inner.size(), 1);
+    EXPECT_FALSE(funcResp.contains("parts"));
 
-    const QJsonObject inlineData = inner[0].toObject()["inlineData"].toObject();
+    const QJsonObject inlineData = parts[1].toObject()["inlineData"].toObject();
     EXPECT_EQ(inlineData["mimeType"].toString(), "audio/wav");
     EXPECT_EQ(
         QByteArray::fromBase64(inlineData["data"].toString().toUtf8()), QByteArray("WAVDATA"));

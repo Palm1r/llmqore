@@ -219,23 +219,25 @@ QJsonArray GoogleMessage::createToolResultParts(
 
         if (hasOnlyText(r)) {
             functionResponse["response"] = QJsonObject{{"result", r.asText()}};
-        } else {
-            // Textual preamble (if any) + inline binary parts.
-            const QString textPart = buildGeminiResponseText(r);
-            functionResponse["response"]
-                = QJsonObject{{"result", textPart.isEmpty() ? QString() : textPart}};
-
-            QJsonArray innerParts;
-            for (const ToolContent &block : r.content) {
-                const QJsonObject inlinePart = toInlineDataPart(block);
-                if (!inlinePart.isEmpty())
-                    innerParts.append(inlinePart);
-            }
-            if (!innerParts.isEmpty())
-                functionResponse["parts"] = innerParts;
+            parts.append(QJsonObject{{"functionResponse", functionResponse}});
+            continue;
         }
 
+        // Binary blocks ride as sibling inlineData parts in the same function
+        // turn. The nested FunctionResponse.parts shape from the multimodal
+        // function-response docs is rejected with a generic INVALID_ARGUMENT
+        // by the live Gemini API (verified 2026-06 on gemini-3.1-flash-lite
+        // and gemini-3-flash with valid thought signatures).
+        const QString textPart = buildGeminiResponseText(r);
+        functionResponse["response"]
+            = QJsonObject{{"result", textPart.isEmpty() ? QString() : textPart}};
         parts.append(QJsonObject{{"functionResponse", functionResponse}});
+
+        for (const ToolContent &block : r.content) {
+            const QJsonObject inlinePart = toInlineDataPart(block);
+            if (!inlinePart.isEmpty())
+                parts.append(inlinePart);
+        }
     }
 
     return parts;

@@ -127,12 +127,12 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_EchoTool)
 
 TEST_F(GoogleAIIntegrationTest, ToolUse_ImageReturningTool)
 {
-    // Exercises the Gemini 3-series multimodal function-response path:
-    // a tool returns a ToolResult containing an image content block;
-    // GoogleMessage::createToolResultParts upgrades the wire shape to
-    // emit `functionResponse.parts[].inlineData` for the image.
-    //
-    // Requires a Gemini 3 model (default GOOGLE_MODEL already is).
+    // Exercises the multimodal function-response path: a tool returns a
+    // ToolResult containing an image content block;
+    // GoogleMessage::createToolResultParts emits the image as a sibling
+    // inlineData part next to the functionResponse in the same function
+    // turn (the nested FunctionResponse.parts shape is rejected with
+    // INVALID_ARGUMENT by the live Gemini API as of 2026-06).
     auto client = createClient();
     auto *imageTool = new ImageReturningTool(client.get());
     client->tools()->addTool(imageTool);
