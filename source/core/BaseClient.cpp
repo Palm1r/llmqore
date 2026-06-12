@@ -13,6 +13,7 @@
 #include <LLMQore/HttpStream.hpp>
 #include <LLMQore/HttpTransportError.hpp>
 #include <LLMQore/Log.hpp>
+#include <LLMQore/ToolLoopRunner.hpp>
 #include <LLMQore/ToolsManager.hpp>
 
 namespace LLMQore {
@@ -112,8 +113,8 @@ ToolsManager *BaseClient::tools()
         connect(
             m_toolsManager,
             &ToolsManager::toolExecutionComplete,
-            this,
-            &BaseClient::handleToolContinuation);
+            toolLoop(),
+            &ToolLoopRunner::handleToolsCompleted);
     }
     return m_toolsManager;
 }
@@ -123,14 +124,23 @@ bool BaseClient::hasTools() const noexcept
     return m_toolsManager != nullptr;
 }
 
-int BaseClient::maxToolContinuations() const noexcept
+int BaseClient::maxToolContinuations() const
 {
-    return m_maxToolContinuations;
+    return m_toolLoop ? m_toolLoop->maxRounds() : ToolLoopRunner::kDefaultMaxRounds;
 }
 
-void BaseClient::setMaxToolContinuations(int limit) noexcept
+void BaseClient::setMaxToolContinuations(int limit)
 {
-    m_maxToolContinuations = limit > 0 ? limit : 1;
+    toolLoop()->setMaxRounds(limit);
+}
+
+ToolLoopRunner *BaseClient::toolLoop()
+{
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::toolLoop called from non-owning thread");
+    if (!m_toolLoop)
+        m_toolLoop = new ToolLoopRunner(this);
+    return m_toolLoop;
 }
 
 RequestID BaseClient::createRequest()
@@ -432,13 +442,18 @@ void BaseClient::failRequest(const RequestID &id, const QString &error)
 
 void BaseClient::cancelRequest(const RequestID &requestId)
 {
+    abortRequest(requestId, QStringLiteral("Request cancelled"));
+}
+
+void BaseClient::abortRequest(const RequestID &id, const QString &error)
+{
     if (thread() != QThread::currentThread()) {
         QMetaObject::invokeMethod(
-            this, [this, requestId]() { cancelRequest(requestId); }, Qt::QueuedConnection);
+            this, [this, id, error]() { abortRequest(id, error); }, Qt::QueuedConnection);
         return;
     }
 
-    auto it = m_requests.find(requestId);
+    auto it = m_requests.find(id);
     if (it == m_requests.end())
         return;
 
@@ -449,8 +464,8 @@ void BaseClient::cancelRequest(const RequestID &requestId)
         it->stream = nullptr;
     }
 
-    cleanupFullRequest(requestId);
-    failRequest(requestId, QStringLiteral("Request cancelled"));
+    cleanupFullRequest(id);
+    failRequest(id, error);
 }
 
 void BaseClient::executeToolsFromMessage(const RequestID &id)
@@ -471,28 +486,29 @@ void BaseClient::executeToolsFromMessage(const RequestID &id)
     }
 }
 
-void BaseClient::handleToolContinuation(
+QJsonObject BaseClient::buildReplayContinuation(
     const RequestID &id, const QHash<QString, ToolResult> &toolResults)
 {
     auto *message = messageForRequest(id);
     auto it = m_requests.find(id);
-    if (!message || it == m_requests.end() || it->url.isEmpty()) {
+    if (!message || it == m_requests.end())
+        return {};
+
+    return buildContinuationPayload(it->originalPayload, message, toolResults);
+}
+
+void BaseClient::continueRequest(const RequestID &id, const QJsonObject &payload)
+{
+    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
+               "BaseClient::continueRequest called from non-owning thread");
+    auto it = m_requests.find(id);
+    if (it == m_requests.end() || it->url.isEmpty()) {
         qCWarning(llmQoreLog).noquote()
-            << QString("Missing data for continuation request %1").arg(id);
+            << QString("Missing transport context for continuation request %1").arg(id);
         cleanupFullRequest(id);
-        failRequest(id, "Missing data for tool continuation");
+        failRequest(id, QStringLiteral("Missing data for tool continuation"));
         return;
     }
-
-    if (!checkContinuationLimit(id)) {
-        qCWarning(llmQoreLog).noquote()
-            << QString("Tool continuation limit reached for request %1").arg(id);
-        cleanupFullRequest(id);
-        failRequest(id, "Tool continuation limit reached");
-        return;
-    }
-
-    QJsonObject payload = buildContinuationPayload(it->originalPayload, message, toolResults);
 
     finalizeTurn(id);
     sendRequest(id, it->url, payload, it->mode);
@@ -506,7 +522,6 @@ void BaseClient::cleanupFullRequest(const RequestID &id)
     if (it != m_requests.end()) {
         it->url.clear();
         it->originalPayload = {};
-        it->continuationCount = 0;
         it->emittedThinkingBlocksCount = 0;
         it->mode = RequestMode::Streaming;
     }
@@ -553,15 +568,6 @@ void BaseClient::storeRequestContext(const RequestID &id, const QUrl &url, const
     it->originalPayload = payload;
     it->buffers.lineBuffer.clear();
     it->buffers.sseParser.clear();
-}
-
-bool BaseClient::checkContinuationLimit(const RequestID &id)
-{
-    auto it = m_requests.find(id);
-    if (it == m_requests.end())
-        return false;
-    ++it->continuationCount;
-    return it->continuationCount <= m_maxToolContinuations;
 }
 
 bool BaseClient::hasRequest(const RequestID &id) const noexcept

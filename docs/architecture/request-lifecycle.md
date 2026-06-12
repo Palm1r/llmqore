@@ -10,6 +10,7 @@ sequenceDiagram
     participant SSE as SSEParser
     participant MSG as BaseMessage<br/>(e.g. ClaudeMessage)
     participant TM as ToolsManager
+    participant TLR as ToolLoopRunner
     participant BT as BaseTool<br/>(local or McpRemoteTool)
 
     App->>CC: sendMessage(payload)
@@ -65,11 +66,12 @@ sequenceDiagram
             BT-->>TM: QFuture<ToolResult>
         end
         TM-->>BC: toolExecutionComplete(id, QHash<String, ToolResult>)
-        BC->>BC: handleToolContinuation(id, results)
-        Note right of BC: Checks kMaxToolContinuations<br/>(= 10), increments counter
+        BC->>TLR: handleToolsCompleted(id, results)
+        Note right of TLR: ToolLoopRunner increments the<br/>round counter, checks maxRounds (= 10)
+        TLR->>BC: buildReplayContinuation(id, results)
         BC->>CC: buildContinuationPayload(<br/>originalPayload, message, results)
-        CC-->>BC: new payload
-        BC->>BC: sendRequest(id, url, new payload, mode)
+        CC-->>TLR: new payload
+        TLR->>BC: continueRequest(id, new payload)
         Note over BC: Loops back to openStream above<br/>for the continuation turn
     else stream finished cleanly
         BC->>MSG: stopReason() → captured in ActiveRequest
@@ -96,7 +98,7 @@ sequenceDiagram
 
 6. **Tool execution.** `ToolsManager` queues all pending tool calls, runs them asynchronously, and collects their results. Each tool produces a `ToolResult` (or an error result if it throws).
 
-7. **Continuation.** After tool execution, the continuation counter is checked against the maximum (10). The provider builds a new payload incorporating the assistant's response and the tool results, and the request re-enters the HTTP phase under the same request ID.
+7. **Continuation.** After tool execution, `ToolLoopRunner` (the per-client loop policy object) increments the request's round counter and checks it against the limit (default 10). It obtains the continuation body from `BaseClient::buildReplayContinuation` — the provider incorporates the assistant's response and the tool results into a new payload — and resends via `BaseClient::continueRequest`; the request re-enters the HTTP phase under the same request ID. On a missing body or an exceeded limit the runner aborts the request with a descriptive error.
 
 8. **Final completion.** On clean completion, two signals fire in order: `requestFinalized` (carrying `CompletionInfo{fullText, model, stopReason}`), then `requestCompleted` (just `fullText`). The finalized-first order lets consumers resolving a `QPromise` on finalization run before any simple-text handler.
 

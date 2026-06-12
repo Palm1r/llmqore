@@ -21,6 +21,7 @@ add_executable(LLMQoreUnitTests
     tst_SSEParser.cpp
     tst_ToolsManager.cpp
     tst_ToolHandler.cpp
+    tst_ToolLoopRunner.cpp
     tst_ClaudeMessage.cpp
     tst_OpenAIMessage.cpp
     tst_OpenAIResponsesMessage.cpp

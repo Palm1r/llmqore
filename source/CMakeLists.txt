@@ -6,6 +6,8 @@ target_sources(LLMQore PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/core/Log.cpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/BaseClient.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/BaseClient.cpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/ToolLoopRunner.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/ToolLoopRunner.cpp
 
     ${PROJECT_SOURCE_DIR}/include/LLMQore/HttpResponse.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/network/HttpResponse.cpp
