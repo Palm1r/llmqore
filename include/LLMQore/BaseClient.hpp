@@ -30,6 +30,7 @@ namespace LLMQore {
 
 class HttpClient;
 class HttpStream;
+class ToolLoopRunner;
 class ToolsManager;
 
 using RequestID = QString;
@@ -78,7 +79,6 @@ struct ActiveRequest
 
     QUrl url = {};
     QJsonObject originalPayload = {};
-    int continuationCount = 0;
     int emittedThinkingBlocksCount = 0;
     RequestMode mode = RequestMode::Streaming;
     QString stopReason = {};
@@ -86,23 +86,6 @@ struct ActiveRequest
     std::optional<TokenUsage> turnUsage = {};
 };
 
-/*!
- * Abstract base for LLM provider clients.
- *
- * Threading: a BaseClient lives on the thread of the QObject parent passed
- * to its constructor. All public methods must be called from that thread,
- * and all signals are emitted on that thread. Debug builds enforce this
- * with Q_ASSERT_X.
- *
- * Observing progress: subscribe to the signals declared below
- * (chunkReceived, requestCompleted, requestFinalized, requestFailed,
- * toolStarted, toolResultReady, thinkingBlockReceived). Qt's default
- * AutoConnection queues delivery and copies arguments safely when the
- * receiver lives on a different thread — no manual marshalling required.
- *
- * RequestID lifetime: the ID returned by sendMessage / ask is the only
- * handle for cancelRequest(); losing it forfeits the ability to cancel.
- */
 class LLMQORE_EXPORT BaseClient : public QObject
 {
     Q_OBJECT
@@ -112,12 +95,6 @@ public:
         const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
     ~BaseClient() override;
 
-    // `endpoint` lets callers override the path the request goes to; pass
-    // an empty string to use the provider's default (e.g. /v1/messages
-    // for Claude, /chat/completions for OpenAI/Mistral). Mistral uses it
-    // to target /fim/completions in addition to /chat/completions; most
-    // providers expose only one endpoint and ignore non-empty values
-    // unless documented otherwise.
     virtual RequestID sendMessage(
         const QJsonObject &payload,
         const QString &endpoint = {},
@@ -140,9 +117,16 @@ public:
 
     ToolsManager *tools();
     bool hasTools() const noexcept;
+    
+    ToolLoopRunner *toolLoop();
 
-    int maxToolContinuations() const noexcept;
-    void setMaxToolContinuations(int limit) noexcept;
+    int maxToolContinuations() const;
+    void setMaxToolContinuations(int limit);
+
+    virtual void continueRequest(const RequestID &id, const QJsonObject &payload);
+    void abortRequest(const RequestID &id, const QString &error);
+    QJsonObject buildReplayContinuation(
+        const RequestID &id, const QHash<QString, ToolResult> &toolResults);
 
     int transferTimeoutMs() const;
     void setTransferTimeout(int milliseconds);
@@ -151,11 +135,6 @@ signals:
     void chunkReceived(const LLMQore::RequestID &id, const QString &chunk);
     void accumulatedReceived(const LLMQore::RequestID &id, const QString &accumulated);
     void requestCompleted(const LLMQore::RequestID &id, const QString &fullText);
-    // Emitted alongside requestCompleted, with richer metadata. Consumers
-    // that only need fullText can use requestCompleted; those that also
-    // want model/stopReason should prefer requestFinalized. Emitted before
-    // requestCompleted so code resolving a QPromise on requestFinalized
-    // sees the resolution before any signal-chain on requestCompleted.
     void requestFinalized(const LLMQore::RequestID &id, const LLMQore::CompletionInfo &info);
     void requestFailed(const LLMQore::RequestID &id, const QString &error);
     void thinkingBlockReceived(
@@ -212,7 +191,6 @@ protected:
     void notifyPendingThinkingBlocks(const RequestID &id);
 
     void storeRequestContext(const RequestID &id, const QUrl &url, const QJsonObject &payload);
-    bool checkContinuationLimit(const RequestID &id);
 
     bool hasRequest(const RequestID &id) const noexcept;
     LineBuffer &requestLineBuffer(const RequestID &id);
@@ -224,10 +202,7 @@ protected:
     QString m_apiKey;
     QString m_model;
 
-    static constexpr int kMaxToolContinuations = 10;
-
 private:
-    void handleToolContinuation(const RequestID &id, const QHash<QString, ToolResult> &toolResults);
     void cleanupRequest(const RequestID &id);
     void startHttpRequest(
         const RequestID &id,
@@ -237,8 +212,8 @@ private:
 
     HttpClient *m_httpClient;
     ToolsManager *m_toolsManager = nullptr;
+    ToolLoopRunner *m_toolLoop = nullptr;
     QHash<RequestID, ActiveRequest> m_requests;
-    int m_maxToolContinuations = kMaxToolContinuations;
 };
 
 } // namespace LLMQore

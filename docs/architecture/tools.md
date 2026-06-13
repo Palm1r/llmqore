@@ -65,7 +65,7 @@ When building tool definitions for the provider, `ToolsManager` wraps each enabl
 
 ### Execution queue
 
-Each in-flight request has its own tool queue. When `BaseClient` detects pending tool calls in a response, it dispatches each one through `ToolsManager`, which appends them to the request's queue and runs them through `ToolHandler`. Tools execute asynchronously and their futures are monitored for completion. On success, the result is stored; on failure (thrown exception or future error), an error result is recorded so the model sees the failure. Once all tools in the queue complete, a batch-level completion signal delivers the full set of results to `BaseClient`, which proceeds to build the continuation payload.
+Each in-flight request has its own tool queue. When `BaseClient` detects pending tool calls in a response, it dispatches each one through `ToolsManager`, which appends them to the request's queue and runs them through `ToolHandler`. Tools execute asynchronously and their futures are monitored for completion. On success, the result is stored; on failure (thrown exception or future error), an error result is recorded so the model sees the failure. Once all tools in the queue complete, a batch-level completion signal delivers the full set of results to `ToolLoopRunner`, which enforces the round limit, builds the continuation payload through the client, and resends.
 
 Two levels of notification exist: a per-tool signal with flattened text (for UI display) and a per-batch signal with the full rich results (for continuation payload building, preserving images and resources).
 
