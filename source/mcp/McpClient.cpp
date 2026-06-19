@@ -8,9 +8,9 @@
 #include <LLMQore/BaseRootsProvider.hpp>
 #include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/Log.hpp>
-#include <LLMQore/McpExceptions.hpp>
-#include <LLMQore/McpSession.hpp>
-#include <LLMQore/McpTransport.hpp>
+#include <LLMQore/RpcExceptions.hpp>
+#include <LLMQore/JsonRpcSession.hpp>
+#include <LLMQore/RpcTransport.hpp>
 
 #include <QJsonArray>
 #include <QPromise>
@@ -19,7 +19,7 @@ namespace LLMQore::Mcp {
 
 namespace {
 
-QFuture<QJsonValue> makeErrorFuture(McpException err)
+QFuture<QJsonValue> makeErrorFuture(Rpc::JsonRpcException err)
 {
     QPromise<QJsonValue> promise;
     promise.start();
@@ -39,16 +39,16 @@ QFuture<QJsonValue> makeReadyJsonFuture(QJsonValue value)
 
 } // namespace
 
-McpClient::McpClient(McpTransport *transport, Implementation clientInfo, QObject *parent)
+McpClient::McpClient(Rpc::Transport *transport, Implementation clientInfo, QObject *parent)
     : QObject(parent)
     , m_transport(transport)
-    , m_session(new McpSession(transport, this))
+    , m_session(new Rpc::JsonRpcSession(transport, this))
     , m_clientInfo(std::move(clientInfo))
 {
     if (m_transport) {
         connect(
             m_transport,
-            &McpTransport::closed,
+            &Rpc::Transport::closed,
             this,
             [this]() {
                 m_initialized = false;
@@ -56,7 +56,7 @@ McpClient::McpClient(McpTransport *transport, Implementation clientInfo, QObject
             });
         connect(
             m_transport,
-            &McpTransport::errorOccurred,
+            &Rpc::Transport::errorOccurred,
             this,
             &McpClient::errorOccurred);
     }
@@ -121,8 +121,8 @@ void McpClient::installHandlers()
         QStringLiteral("sampling/createMessage"),
         [this](const QJsonObject &params) -> QFuture<QJsonValue> {
             if (!m_samplingClient || !m_samplingBuilder) {
-                throw McpRemoteError(
-                    ErrorCode::MethodNotFound,
+                throw Rpc::RemoteError(
+                    Rpc::ErrorCode::MethodNotFound,
                     QStringLiteral("sampling/createMessage not supported"));
             }
 
@@ -131,8 +131,8 @@ void McpClient::installHandlers()
             try {
                 payload = m_samplingBuilder(req);
             } catch (const std::exception &e) {
-                throw McpRemoteError(
-                    ErrorCode::InvalidParams,
+                throw Rpc::RemoteError(
+                    Rpc::ErrorCode::InvalidParams,
                     QString::fromUtf8(e.what()));
             }
 
@@ -204,7 +204,7 @@ void McpClient::installHandlers()
                     state->done = true;
                     disconnectBoth();
                     promise->setException(std::make_exception_ptr(
-                        McpRemoteError(ErrorCode::InternalError, err)));
+                        Rpc::RemoteError(Rpc::ErrorCode::InternalError, err)));
                     promise->finish();
                 });
 
@@ -217,8 +217,8 @@ void McpClient::installHandlers()
         QStringLiteral("elicitation/create"),
         [this](const QJsonObject &params) -> QFuture<QJsonValue> {
             if (!m_elicitationProvider) {
-                throw McpRemoteError(
-                    ErrorCode::MethodNotFound,
+                throw Rpc::RemoteError(
+                    Rpc::ErrorCode::MethodNotFound,
                     QStringLiteral("elicitation/create not supported"));
             }
             const ElicitRequestParams req = ElicitRequestParams::fromJson(params);
@@ -230,7 +230,7 @@ void McpClient::installHandlers()
 QFuture<InitializeResult> McpClient::connectAndInitialize(std::chrono::milliseconds timeout)
 {
     if (!m_transport) {
-        return LLMQore::compat(makeErrorFuture(McpTransportError(QStringLiteral("No transport"))))
+        return LLMQore::compat(makeErrorFuture(Rpc::TransportError(QStringLiteral("No transport"))))
             .then(this, [](const QJsonValue &) { return InitializeResult{}; });
     }
 
@@ -274,13 +274,13 @@ QFuture<InitializeResult> McpClient::connectAndInitialize(std::chrono::milliseco
             return m_initResult;
         })
         .onFailed(this, [this](const auto &e) -> InitializeResult {
-            if constexpr (std::is_same_v<std::decay_t<decltype(e)>, McpException>) {
+            if constexpr (std::is_same_v<std::decay_t<decltype(e)>, Rpc::JsonRpcException>) {
                 emit errorOccurred(e.message());
-                throw McpException(e.message());
+                throw Rpc::JsonRpcException(e.message());
             } else {
                 const QString msg = QString::fromUtf8(e.what());
                 emit errorOccurred(msg);
-                throw McpException(msg);
+                throw Rpc::JsonRpcException(msg);
             }
         });
 }
@@ -289,14 +289,14 @@ QFuture<QJsonValue> McpClient::sendInitialized(
     const QString &method, const QJsonObject &params)
 {
     if (!m_initialized)
-        return makeErrorFuture(McpProtocolError(QStringLiteral("Client not initialized")));
+        return makeErrorFuture(Rpc::ProtocolError(QStringLiteral("Client not initialized")));
     return m_session->sendRequest(method, params);
 }
 
 QFuture<void> McpClient::ping(std::chrono::milliseconds timeout)
 {
     QFuture<QJsonValue> raw = (!m_transport || !m_transport->isOpen())
-        ? makeErrorFuture(McpTransportError(QStringLiteral("Transport is not open")))
+        ? makeErrorFuture(Rpc::TransportError(QStringLiteral("Transport is not open")))
         : m_session->sendRequest(QStringLiteral("ping"), QJsonObject{}, timeout);
     return LLMQore::compat(raw).then(this, [](const QJsonValue &) {});
 }
@@ -340,7 +340,7 @@ McpClient::CancellableToolCall McpClient::callToolWithProgress(
         auto p = std::make_shared<QPromise<LLMQore::ToolResult>>();
         p->start();
         p->setException(std::make_exception_ptr(
-            McpProtocolError(QStringLiteral("Client not initialized"))));
+            Rpc::ProtocolError(QStringLiteral("Client not initialized"))));
         p->finish();
         out.future = p->future();
         return out;

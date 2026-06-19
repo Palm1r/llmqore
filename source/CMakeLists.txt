@@ -68,17 +68,24 @@ target_sources(LLMQore PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/tools/ToolsManager.cpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/ToolSchemaFormat.hpp
 
-    # --- MCP ---
+    # --- RPC (shared JSON-RPC layer: transport + session) ---
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/RpcExceptions.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/RpcTransport.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/JsonRpcSession.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/RpcStdioTransport.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/RpcPipeTransport.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rpc/RpcLineFramer.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rpc/RpcTransport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rpc/JsonRpcSession.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rpc/RpcStdioClientTransport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/rpc/RpcPipeTransport.cpp
+
+    # --- MCP (builds on Rpc) ---
     ${PROJECT_SOURCE_DIR}/include/LLMQore/Mcp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/McpTypes.hpp
-    ${PROJECT_SOURCE_DIR}/include/LLMQore/McpExceptions.hpp
-    ${PROJECT_SOURCE_DIR}/include/LLMQore/McpTransport.hpp
-    ${PROJECT_SOURCE_DIR}/include/LLMQore/McpSession.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/McpClient.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/McpServer.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/McpRemoteTool.hpp
-    ${PROJECT_SOURCE_DIR}/include/LLMQore/McpPipeTransport.hpp
-    ${PROJECT_SOURCE_DIR}/include/LLMQore/McpStdioTransport.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/McpStdioServerTransport.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/McpHttpTransport.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/BaseResourceProvider.hpp
@@ -87,17 +94,30 @@ target_sources(LLMQore PRIVATE
     ${PROJECT_SOURCE_DIR}/include/LLMQore/BaseElicitationProvider.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/McpHttpServerTransport.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpTypes.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpTransport.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpSession.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpClient.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpServer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpRemoteTool.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpPipeTransport.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpLineFramer.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpStdioClientTransport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpStdioServerTransport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpHttpTransport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpHttpServerTransport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/BaseResourceProvider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/BasePromptProvider.cpp
+
+    # --- ACP (Agent Client Protocol, host side) ---
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/AcpTypes.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/AcpPermissionProvider.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/AcpFileSystemProvider.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/AcpTerminalProvider.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/AcpClient.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/CallbackPermissionProvider.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/DefaultFileSystemProvider.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/TerminalManager.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/AcpAgentConfig.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/AcpAgentRegistry.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/acp/AcpTypes.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/acp/AcpClient.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/acp/DefaultFileSystemProvider.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/acp/TerminalManager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/acp/AcpAgentConfig.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/acp/AcpAgentRegistry.cpp
 )

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // End-to-end loopback: a real ClaudeClient talks to a local McpServer via
-// McpPipeTransport, exercising the full MCP handshake + tools/list + tools/call
+// Rpc::PipeTransport, exercising the full MCP handshake + tools/list + tools/call
 // path through the BaseClient -> ToolsManager -> McpRemoteTool adapter chain.
 
 #include "IntegrationTestHelpers.hpp"
@@ -13,7 +13,7 @@
 
 #include <LLMQore/ClaudeClient.hpp>
 #include <LLMQore/McpClient.hpp>
-#include <LLMQore/McpPipeTransport.hpp>
+#include <LLMQore/RpcPipeTransport.hpp>
 #include <LLMQore/McpServer.hpp>
 #include <LLMQore/McpTypes.hpp>
 #include <LLMQore/ToolsManager.hpp>
@@ -59,7 +59,7 @@ protected:
 
     McpFixture startMcpServerWithTools(ToolsManager *manager)
     {
-        auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+        auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
 
         McpServerConfig cfg;
         cfg.serverInfo = {"llmqore-integration-server", "0.0.1"};

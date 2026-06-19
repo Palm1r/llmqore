@@ -7,9 +7,9 @@
 #include <LLMQore/BaseResourceProvider.hpp>
 #include <LLMQore/BaseTool.hpp>
 #include <LLMQore/Log.hpp>
-#include <LLMQore/McpExceptions.hpp>
-#include <LLMQore/McpSession.hpp>
-#include <LLMQore/McpTransport.hpp>
+#include <LLMQore/RpcExceptions.hpp>
+#include <LLMQore/JsonRpcSession.hpp>
+#include <LLMQore/RpcTransport.hpp>
 #include <LLMQore/ToolResult.hpp>
 #include <LLMQore/ToolRegistry.hpp>
 #include <LLMQore/FutureUtils.hpp>
@@ -25,7 +25,7 @@ namespace LLMQore::Mcp {
 
 namespace {
 
-QFuture<QJsonValue> makeErrorFuture(const McpRemoteError &err)
+QFuture<QJsonValue> makeErrorFuture(const Rpc::RemoteError &err)
 {
     QPromise<QJsonValue> promise;
     promise.start();
@@ -113,7 +113,7 @@ void tryEachAdvance(std::shared_ptr<TryEachState<Provider, T>> s)
 
     if (s->index >= s->providers.size()) {
         s->promise->setException(std::make_exception_ptr(
-            McpRemoteError(ErrorCode::InvalidParams, s->notFoundMsg)));
+            Rpc::RemoteError(Rpc::ErrorCode::InvalidParams, s->notFoundMsg)));
         s->promise->finish();
         return;
     }
@@ -156,10 +156,10 @@ QFuture<QJsonValue> tryEachProvider(
 
 } // namespace
 
-McpServer::McpServer(McpTransport *transport, McpServerConfig config, QObject *parent)
+McpServer::McpServer(Rpc::Transport *transport, McpServerConfig config, QObject *parent)
     : QObject(parent)
     , m_transport(transport)
-    , m_session(new McpSession(transport, this))
+    , m_session(new Rpc::JsonRpcSession(transport, this))
     , m_config(std::move(config))
 {
     installHandlers();
@@ -253,8 +253,8 @@ void McpServer::installHandlers()
 
             LLMQore::BaseTool *tool = findTool(name);
             if (!tool) {
-                return makeErrorFuture(McpRemoteError(
-                    ErrorCode::MethodNotFound, QString("Tool not found: %1").arg(name)));
+                return makeErrorFuture(Rpc::RemoteError(
+                    Rpc::ErrorCode::MethodNotFound, QString("Tool not found: %1").arg(name)));
             }
 
             return LLMQore::compat(tool->executeAsync(args))
@@ -293,8 +293,8 @@ void McpServer::installHandlers()
             emit resourceRead(uri);
 
             if (m_resourceProviders.isEmpty()) {
-                return makeErrorFuture(McpRemoteError(
-                    ErrorCode::InvalidParams, QStringLiteral("No resource providers")));
+                return makeErrorFuture(Rpc::RemoteError(
+                    Rpc::ErrorCode::InvalidParams, QStringLiteral("No resource providers")));
             }
 
             return tryEachProvider<BaseResourceProvider, ResourceContents>(
@@ -351,8 +351,8 @@ void McpServer::installHandlers()
             emit promptRequested(name);
 
             if (m_promptProviders.isEmpty()) {
-                return makeErrorFuture(McpRemoteError(
-                    ErrorCode::InvalidParams, QStringLiteral("No prompt providers")));
+                return makeErrorFuture(Rpc::RemoteError(
+                    Rpc::ErrorCode::InvalidParams, QStringLiteral("No prompt providers")));
             }
 
             return tryEachProvider<BasePromptProvider, PromptGetResult>(
@@ -448,8 +448,8 @@ void McpServer::installHandlers()
         [this](const QJsonObject &params) -> QFuture<QJsonValue> {
             const QString level = params.value("level").toString();
             if (level.isEmpty()) {
-                return makeErrorFuture(McpRemoteError(
-                    ErrorCode::InvalidParams, QStringLiteral("Missing 'level'")));
+                return makeErrorFuture(Rpc::RemoteError(
+                    Rpc::ErrorCode::InvalidParams, QStringLiteral("Missing 'level'")));
             }
             m_logLevel = level;
             emit logLevelChanged(level);
@@ -535,14 +535,14 @@ QFuture<CreateMessageResult> McpServer::createSamplingMessage(
         QPromise<CreateMessageResult> p;
         p.start();
         p.setException(std::make_exception_ptr(
-            McpProtocolError(QStringLiteral("Server not initialized"))));
+            Rpc::ProtocolError(QStringLiteral("Server not initialized"))));
         p.finish();
         return p.future();
     }
     if (!m_clientCapabilities.sampling.has_value()) {
         QPromise<CreateMessageResult> p;
         p.start();
-        p.setException(std::make_exception_ptr(McpProtocolError(
+        p.setException(std::make_exception_ptr(Rpc::ProtocolError(
             QStringLiteral("Client did not advertise the `sampling` capability"))));
         p.finish();
         return p.future();
@@ -560,14 +560,14 @@ QFuture<ElicitResult> McpServer::createElicitation(
         QPromise<ElicitResult> p;
         p.start();
         p.setException(std::make_exception_ptr(
-            McpProtocolError(QStringLiteral("Server not initialized"))));
+            Rpc::ProtocolError(QStringLiteral("Server not initialized"))));
         p.finish();
         return p.future();
     }
     if (!m_clientCapabilities.elicitation.has_value()) {
         QPromise<ElicitResult> p;
         p.start();
-        p.setException(std::make_exception_ptr(McpProtocolError(
+        p.setException(std::make_exception_ptr(Rpc::ProtocolError(
             QStringLiteral("Client did not advertise the `elicitation` capability"))));
         p.finish();
         return p.future();

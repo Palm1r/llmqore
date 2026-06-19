@@ -19,18 +19,18 @@
 #include <QString>
 
 #include <LLMQore/LLMQore_global.h>
-#include <LLMQore/McpTransport.hpp>
+#include <LLMQore/RpcTransport.hpp>
 
 class QTimer;
 
-namespace LLMQore::Mcp {
+namespace LLMQore::Rpc {
 
-class LLMQORE_EXPORT McpSession : public QObject
+class LLMQORE_EXPORT JsonRpcSession : public QObject
 {
     Q_OBJECT
 public:
-    explicit McpSession(McpTransport *transport, QObject *parent = nullptr);
-    ~McpSession() override;
+    explicit JsonRpcSession(Transport *transport, QObject *parent = nullptr);
+    ~JsonRpcSession() override;
 
     QFuture<QJsonValue> sendRequest(
         const QString &method,
@@ -72,7 +72,7 @@ public:
 
     bool isRequestCancelled(const QString &requestId) const;
 
-    McpTransport *transport() const noexcept { return m_transport; }
+    Transport *transport() const noexcept { return m_transport; }
 
     void abortPending(const QString &reason);
 
@@ -110,7 +110,7 @@ private:
         QString progressToken;
     };
 
-    QPointer<McpTransport> m_transport;
+    QPointer<Transport> m_transport;
     QAtomicInteger<quint64> m_nextId{1};
     QHash<QString, Pending> m_pending;
     QHash<QString, RequestHandler> m_requestHandlers;
@@ -122,4 +122,4 @@ private:
     QString m_currentProgressToken;
 };
 
-} // namespace LLMQore::Mcp
+} // namespace LLMQore::Rpc

@@ -5,7 +5,7 @@
 
 #include <LLMQore/Log.hpp>
 
-#include "McpLineFramer.hpp"
+#include "../rpc/RpcLineFramer.hpp"
 
 #include <QDateTime>
 #include <QFile>
@@ -95,7 +95,7 @@ protected:
     void run() override
     {
         StdioTrace::instance().note(QStringLiteral("reader thread started"));
-        McpLineFramer framer;
+        Rpc::LineFramer framer;
         char buf[4096];
 #ifdef Q_OS_WIN
         const int fd = _fileno(stdin);
@@ -167,7 +167,7 @@ struct McpStdioServerTransport::Impl
 };
 
 McpStdioServerTransport::McpStdioServerTransport(QObject *parent)
-    : McpTransport(parent)
+    : Rpc::Transport(parent)
     , m_impl(std::make_unique<Impl>())
 {}
 

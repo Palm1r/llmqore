@@ -25,6 +25,7 @@
 
 #include <LLMQore/Mcp>
 
+using namespace LLMQore;
 using namespace LLMQore::Mcp;
 
 namespace {
@@ -98,7 +99,7 @@ int main(int argc, char *argv[])
     QObject::connect(client, &McpClient::errorOccurred, &app, [](const QString &err) {
         die(QString("client error: %1").arg(err), 2);
     });
-    QObject::connect(transport, &McpTransport::errorOccurred, &app, [](const QString &err) {
+    QObject::connect(transport, &Rpc::Transport::errorOccurred, &app, [](const QString &err) {
         qWarning().noquote() << "transport error:" << err;
     });
 

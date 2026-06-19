@@ -101,6 +101,77 @@ Client and server implementation of the MCP 2025-11-25 spec:
 
 See [MCP Protocol Coverage](docs/mcp/mcp_protocol_coverage.md) for the full spec-conformance matrix.
 
+## ACP (Agent Client Protocol)
+
+Host/client implementation of Zed's Agent Client Protocol — drive an external coding
+agent (Claude Code, Gemini CLI, Codex, …) over stdio. LLMQore launches the agent, runs the session, streams its output as Qt
+signals, and services the agent's callbacks (permission, file system, terminal).
+
+```cpp
+using namespace LLMQore::Acp;
+
+// Agents are data, not code: load a catalogue from JSON (file or :/qrc).
+AcpAgentRegistry registry;
+registry.loadFromFile("agents.json");
+auto cfg = registry.config("claude", QDir::currentPath()).value();
+
+auto *client = new AcpClient(cfg.createTransport(this), {}, this);
+client->setFileSystemProvider(new DefaultFileSystemProvider(this));
+client->setTerminalProvider(new TerminalManager(this));
+
+connect(client, &AcpClient::agentMessageChunk,
+    this, [](const QString &sessionId, const ContentBlock &c){ /* render c.text */ });
+
+client->connectAndInitialize();   // then newSession() -> prompt()
+```
+
+```json
+// agents.json — the host ships its own catalogue; override with LLMQORE_ACP_AGENTS
+{ "agents": [
+  { "id": "claude", "name": "Claude Code", "command": "npx",
+    "args": ["-y", "@agentclientprotocol/claude-agent-acp"] }
+]}
+```
+
+**Giving the agent MCP tools** — list MCP servers in `newSession`; the agent connects to
+them and runs their tools itself, so you just watch the tool calls stream by (the agent owns
+the model + tool loop, you don't register tools on the host):
+
+```cpp
+LLMQore::compat(client->connectAndInitialize())
+    .then(client, [client](const InitializeResult &) {
+        NewSessionParams params;
+        params.cwd = QDir::currentPath();
+        params.mcpServers = {
+            { .name = "filesystem", .command = "npx",
+              .args = {"-y", "@modelcontextprotocol/server-filesystem", QDir::currentPath()} },
+        };
+        return client->newSession(params);            // hands the MCP servers to the agent
+    })
+    .unwrap()
+    .then(client, [client](const NewSessionResult &ns) {
+        client->prompt(ns.sessionId, {ContentBlock::makeText("List the files in this repo.")});
+    });
+
+// Surface the agent's tool calls (filesystem/github/...) in the UI as they happen.
+connect(client, &AcpClient::toolCallStarted,
+    client, [](const QString &, const ToolCall &t) { /* t.title, t.kind, t.status */ });
+```
+
+> `McpServer` is stdio-only (`command`/`args`/`env`). To expose your **own** tools, run an
+> LLMQore [`McpServer`](include/LLMQore/McpServer.hpp) over `McpStdioServerTransport` and point
+> the agent at that binary in `mcpServers` — HTTP/SSE servers can't be passed this way.
+
+- **Outgoing**: initialize, authenticate, session new/load/prompt/cancel/set_mode
+- **Incoming**: streaming `session/update`, `session/request_permission`, `fs/*`, `terminal/*`
+- **Providers**: `AcpPermissionProvider`, `AcpFileSystemProvider`, `AcpTerminalProvider`
+  (with `DefaultFileSystemProvider`, `TerminalManager`, `CallbackPermissionProvider` defaults)
+- **Agents**: `AcpAgentRegistry` loads named agents from external JSON ([`example/agents.json`](example/agents.json))
+
+The GUI [`example-chat`](example/Main.qml) drives all of this — pick the **Claude Code (ACP)**
+provider to launch and chat with a real agent. See the
+[ACP implementation notes](docs/acp/implementation-notes.md) for the method-coverage matrix.
+
 ## Requirements
 
 - C++20
@@ -113,6 +184,7 @@ See [MCP Protocol Coverage](docs/mcp/mcp_protocol_coverage.md) for the full spec
 - [Integration](docs/integration.md) — FetchContent and installed setup
 - [MCP Bridge](docs/mcp-bridge.md) — aggregate stdio MCP servers behind one HTTP/SSE endpoint
 - [MCP Protocol Coverage](docs/mcp/mcp_protocol_coverage.md) — spec-conformance matrix
+- [ACP Host](docs/acp/architecture.md) — drive external ACP agents ([as-built notes](docs/acp/implementation-notes.md))
 - [Architecture](docs/architecture.md) — internals, for contributors
 
 ## Support

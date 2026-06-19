@@ -44,6 +44,11 @@ if(QT_VERSION_MAJOR GREATER_EQUAL 6)
             qml/ToolsDrawer.qml
     )
 
+    qt_add_resources(example-chat "acpagents"
+        PREFIX "/"
+        FILES agents.json
+    )
+
     target_link_libraries(example-chat
         PRIVATE
         LLMQore::LLMQore
@@ -53,9 +58,6 @@ if(QT_VERSION_MAJOR GREATER_EQUAL 6)
         Qt${QT_VERSION_MAJOR}::Quick
     )
 
-    # On Windows, run windeployqt so the example-chat binary ships with its
-    # platform plugin, QML modules, and Qt DLLs. Without this the exe cannot
-    # start when launched outside a Qt-aware shell environment.
     if(WIN32 AND EXISTS "${_windeployqt}")
         add_custom_command(
             TARGET example-chat POST_BUILD
@@ -71,7 +73,6 @@ if(QT_VERSION_MAJOR GREATER_EQUAL 6)
     endif()
 endif()
 
-# MCP server demo: publish local BaseTools over stdio, launchable from Claude Desktop.
 add_executable(example-mcp-server
     mcp-server-demo/main.cpp
     ExampleTools.hpp
@@ -106,7 +107,6 @@ if(WIN32 AND EXISTS "${_windeployqt}")
     )
 endif()
 
-# Smoke-test utility for McpHttpTransport (both legacy and streamable paths).
 add_executable(example-mcp-http-probe
     mcp-http-probe/main.cpp
 )

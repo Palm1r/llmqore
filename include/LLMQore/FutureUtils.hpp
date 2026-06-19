@@ -14,7 +14,7 @@
 #include <QPromise>
 
 #include <LLMQore/HttpTransportError.hpp>
-#include <LLMQore/McpExceptions.hpp>
+#include <LLMQore/RpcExceptions.hpp>
 
 namespace LLMQore {
 
@@ -135,7 +135,7 @@ void resolveFailure(
     } catch (const HttpTransportError &e) {
         if (invokeFailureHandler(promise, fn, e))
             return;
-    } catch (const Mcp::McpException &e) {
+    } catch (const Rpc::JsonRpcException &e) {
         if (invokeFailureHandler(promise, fn, e))
             return;
     } catch (const std::exception &e) {

@@ -22,10 +22,10 @@
 #include <LLMQore/BaseRootsProvider.hpp>
 #include <LLMQore/BaseTool.hpp>
 #include <LLMQore/McpClient.hpp>
-#include <LLMQore/McpExceptions.hpp>
-#include <LLMQore/McpPipeTransport.hpp>
+#include <LLMQore/RpcExceptions.hpp>
+#include <LLMQore/RpcPipeTransport.hpp>
 #include <LLMQore/McpServer.hpp>
-#include <LLMQore/McpSession.hpp>
+#include <LLMQore/JsonRpcSession.hpp>
 #include <LLMQore/ToolSchemaFormat.hpp>
 #include <LLMQore/ToolsManager.hpp>
 
@@ -218,8 +218,8 @@ public:
         auto promise = std::make_shared<QPromise<PromptGetResult>>();
         promise->start();
         if (name != "greet") {
-            promise->setException(std::make_exception_ptr(McpRemoteError(
-                ErrorCode::InvalidParams, QString("Unknown prompt: %1").arg(name))));
+            promise->setException(std::make_exception_ptr(Rpc::RemoteError(
+                Rpc::ErrorCode::InvalidParams, QString("Unknown prompt: %1").arg(name))));
             promise->finish();
             return promise->future();
         }
@@ -426,7 +426,7 @@ public:
         auto promise = std::make_shared<QPromise<ElicitResult>>();
         promise->start();
         promise->setException(std::make_exception_ptr(
-            McpRemoteError(ErrorCode::InvalidParams, QStringLiteral("Denied by user"))));
+            Rpc::RemoteError(Rpc::ErrorCode::InvalidParams, QStringLiteral("Denied by user"))));
         promise->finish();
         return promise->future();
     }
@@ -478,7 +478,7 @@ public:
     {
         const int steps = input.value("steps").toInt(3);
         const QString token = m_server->session()->currentProgressToken();
-        Mcp::McpSession *session = m_server->session();
+        Rpc::JsonRpcSession *session = m_server->session();
         return QtConcurrent::run([steps, token, session]() -> LLMQore::ToolResult {
             for (int i = 1; i <= steps; ++i) {
                 QThread::msleep(5);
@@ -527,7 +527,7 @@ protected:
 
 TEST_F(McpLoopbackTest, FullHandshakeListAndCallTool)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
 
     McpServerConfig cfg;
     cfg.serverInfo = {"loopback-server", "0.0.1"};
@@ -560,7 +560,7 @@ TEST_F(McpLoopbackTest, FullHandshakeListAndCallTool)
 
 TEST_F(McpLoopbackTest, AddMcpClientRegistersToolsInToolsManager)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
 
     McpServer server(serverTransport, McpServerConfig{});
     server.addTool(new EchoTool(&server));
@@ -596,7 +596,7 @@ TEST_F(McpLoopbackTest, AddMcpClientRegistersToolsInToolsManager)
 
 TEST_F(McpLoopbackTest, ToolsChangedNotificationRefreshesTools)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
 
     McpServer server(serverTransport, McpServerConfig{});
     server.addTool(new EchoTool(&server));
@@ -659,7 +659,7 @@ TEST_F(McpLoopbackTest, ToolsChangedNotificationRefreshesTools)
 
 TEST_F(McpLoopbackTest, PingRoundTrips)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
     McpServer server(serverTransport, McpServerConfig{});
     McpClient client(clientTransport);
     server.start();
@@ -673,7 +673,7 @@ TEST_F(McpLoopbackTest, PingRoundTrips)
 
 TEST_F(McpLoopbackTest, SetLogLevelIsRecordedOnServer)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
     McpServer server(serverTransport, McpServerConfig{});
     McpClient client(clientTransport);
     server.start();
@@ -689,7 +689,7 @@ TEST_F(McpLoopbackTest, SetLogLevelIsRecordedOnServer)
 
 TEST_F(McpLoopbackTest, LogMessageNotificationFromServerToClient)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
     McpServer server(serverTransport, McpServerConfig{});
     McpClient client(clientTransport);
 
@@ -718,7 +718,7 @@ TEST_F(McpLoopbackTest, LogMessageNotificationFromServerToClient)
 
 TEST_F(McpLoopbackTest, ResourceTemplatesListRoundTrips)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
     McpServer server(serverTransport, McpServerConfig{});
     auto *provider = new MemoryResourceProvider(&server);
     provider->addTemplate("mem://log/{date}", "logs");
@@ -739,7 +739,7 @@ TEST_F(McpLoopbackTest, ResourceTemplatesListRoundTrips)
 
 TEST_F(McpLoopbackTest, PromptsListAndGet)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
     McpServer server(serverTransport, McpServerConfig{});
     server.addPromptProvider(new MemoryPromptProvider(&server));
 
@@ -767,7 +767,7 @@ TEST_F(McpLoopbackTest, PromptsListAndGet)
 
 TEST_F(McpLoopbackTest, CompletionCapabilityAdvertisedWithProviders)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
     McpServer server(serverTransport, McpServerConfig{});
     server.addPromptProvider(new MemoryPromptProvider(&server));
 
@@ -784,7 +784,7 @@ TEST_F(McpLoopbackTest, CompletionCapabilityAdvertisedWithProviders)
 
 TEST_F(McpLoopbackTest, CompletionForPromptArgumentReturnsFilteredSuggestions)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
     McpServer server(serverTransport, McpServerConfig{});
     server.addPromptProvider(new MemoryPromptProvider(&server));
 
@@ -817,7 +817,7 @@ TEST_F(McpLoopbackTest, CompletionForPromptArgumentReturnsFilteredSuggestions)
 
 TEST_F(McpLoopbackTest, CompletionForResourceTemplatePlaceholder)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
     McpServer server(serverTransport, McpServerConfig{});
     auto *provider = new MemoryResourceProvider(&server);
     provider->addTemplate("file:///logs/{date}.log", "daily_logs");
@@ -854,7 +854,7 @@ TEST_F(McpLoopbackTest, CompletionDefaultProviderReturnsEmptyList)
 {
     // A provider that does NOT override completeArgument must silently
     // return an empty list via the base-class default — never an error.
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
     McpServer server(serverTransport, McpServerConfig{});
     server.addPromptProvider(new PlainPromptProvider(&server));
 
@@ -874,7 +874,7 @@ TEST_F(McpLoopbackTest, CompletionDefaultProviderReturnsEmptyList)
 
 TEST_F(McpLoopbackTest, RootsListRoundTripsFromServerToClient)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
     McpServer server(serverTransport, McpServerConfig{});
     McpClient client(clientTransport);
 
@@ -899,7 +899,7 @@ TEST_F(McpLoopbackTest, RootsListRoundTripsFromServerToClient)
 
 TEST_F(McpLoopbackTest, ProgressNotificationsDeliveredToCallback)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
     McpServer server(serverTransport, McpServerConfig{});
     auto *tool = new ProgressiveTool(&server, &server);
     server.addTool(tool);
@@ -943,7 +943,7 @@ TEST_F(McpLoopbackTest, ProgressNotificationsDeliveredToCallback)
 
 TEST_F(McpLoopbackTest, CancelRequestAbortsOutstandingCall)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
     McpServer server(serverTransport, McpServerConfig{});
 
     // Tool that never completes on its own (parks on a promise we never finish).
@@ -994,9 +994,9 @@ TEST_F(McpLoopbackTest, CancelRequestAbortsOutstandingCall)
     bool threw = false;
     try {
         (void) call.future.result();
-    } catch (const McpCancelledError &) {
+    } catch (const Rpc::CancelledError &) {
         threw = true;
-    } catch (const McpException &) {
+    } catch (const Rpc::JsonRpcException &) {
         threw = true;
     } catch (...) {
         threw = true;
@@ -1013,7 +1013,7 @@ TEST_F(McpLoopbackTest, CancelRequestAbortsOutstandingCall)
 
 TEST_F(McpLoopbackTest, ResourcesListAndRead)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
 
     McpServer server(serverTransport, McpServerConfig{});
     auto *provider = new MemoryResourceProvider(&server);
@@ -1057,7 +1057,7 @@ QJsonObject passthroughBuilder(const CreateMessageParams &p)
 
 TEST_F(McpLoopbackTest, SamplingRoundTripsFromServerToClient)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
 
     McpServer server(serverTransport, McpServerConfig{});
 
@@ -1108,7 +1108,7 @@ TEST_F(McpLoopbackTest, SamplingRoundTripsFromServerToClient)
 
 TEST_F(McpLoopbackTest, SamplingWithoutClientFailsCapabilityGuard)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
 
     McpServer server(serverTransport, McpServerConfig{});
     McpClient client(clientTransport); // no sampling client wired up
@@ -1125,12 +1125,12 @@ TEST_F(McpLoopbackTest, SamplingWithoutClientFailsCapabilityGuard)
 
     // Without a sampling client the McpClient never declares the
     // `sampling` capability during initialize, so the server-side guard
-    // short-circuits with McpProtocolError before the request ever
+    // short-circuits with Rpc::ProtocolError before the request ever
     // reaches the wire.
     try {
         waitForFuture(server.createSamplingMessage(params, std::chrono::seconds(2)));
-        FAIL() << "Expected McpProtocolError";
-    } catch (const McpProtocolError &) {
+        FAIL() << "Expected Rpc::ProtocolError";
+    } catch (const Rpc::ProtocolError &) {
         SUCCEED();
     } catch (const std::exception &e) {
         FAIL() << "Wrong exception type: " << e.what();
@@ -1142,14 +1142,14 @@ TEST_F(McpLoopbackTest, SamplingWithoutClientFailsCapabilityGuard)
 
 TEST_F(McpLoopbackTest, SamplingClientErrorPropagatesAsRemoteError)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
 
     McpServer server(serverTransport, McpServerConfig{});
 
     McpClient client(clientTransport);
     FakeSamplingClient fakeClient;
     // FakeSamplingClient fires onFailed instead of onFinalized when
-    // cannedError is set. That maps to McpRemoteError(InternalError) on
+    // cannedError is set. That maps to Rpc::RemoteError(InternalError) on
     // the wire, which surfaces as an exception on the server side.
     fakeClient.cannedError = "Upstream LLM refused";
     client.setSamplingClient(&fakeClient, &passthroughBuilder);
@@ -1166,9 +1166,9 @@ TEST_F(McpLoopbackTest, SamplingClientErrorPropagatesAsRemoteError)
 
     try {
         waitForFuture(server.createSamplingMessage(params, std::chrono::seconds(5)));
-        FAIL() << "Expected McpRemoteError";
-    } catch (const McpRemoteError &e) {
-        EXPECT_EQ(e.code(), ErrorCode::InternalError);
+        FAIL() << "Expected Rpc::RemoteError";
+    } catch (const Rpc::RemoteError &e) {
+        EXPECT_EQ(e.code(), Rpc::ErrorCode::InternalError);
         EXPECT_EQ(e.remoteMessage(), "Upstream LLM refused");
     } catch (const std::exception &e) {
         FAIL() << "Wrong exception type: " << e.what();
@@ -1182,7 +1182,7 @@ TEST_F(McpLoopbackTest, SamplingClientErrorPropagatesAsRemoteError)
 
 TEST_F(McpLoopbackTest, ElicitationRoundTripsFromServerToClient)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
 
     McpServer server(serverTransport, McpServerConfig{});
 
@@ -1229,7 +1229,7 @@ TEST_F(McpLoopbackTest, ElicitationRoundTripsFromServerToClient)
 
 TEST_F(McpLoopbackTest, ElicitationWithoutClientProviderFailsCapabilityGuard)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
 
     McpServer server(serverTransport, McpServerConfig{});
     McpClient client(clientTransport); // no elicitation provider
@@ -1243,12 +1243,12 @@ TEST_F(McpLoopbackTest, ElicitationWithoutClientProviderFailsCapabilityGuard)
 
     // Without a client-side provider the client never declares the
     // `elicitation` capability, so the server-side guard catches the call
-    // before it reaches the wire and raises McpProtocolError — exactly
+    // before it reaches the wire and raises Rpc::ProtocolError — exactly
     // the same contract as sampling above.
     try {
         waitForFuture(server.createElicitation(params, std::chrono::seconds(2)));
-        FAIL() << "Expected McpProtocolError";
-    } catch (const McpProtocolError &) {
+        FAIL() << "Expected Rpc::ProtocolError";
+    } catch (const Rpc::ProtocolError &) {
         SUCCEED();
     } catch (const std::exception &e) {
         FAIL() << "Wrong exception type: " << e.what();
@@ -1260,7 +1260,7 @@ TEST_F(McpLoopbackTest, ElicitationWithoutClientProviderFailsCapabilityGuard)
 
 TEST_F(McpLoopbackTest, ElicitationProviderRefusalPropagatesAsRemoteError)
 {
-    auto [serverTransport, clientTransport] = McpPipeTransport::createPair();
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
 
     McpServer server(serverTransport, McpServerConfig{});
 
@@ -1277,9 +1277,9 @@ TEST_F(McpLoopbackTest, ElicitationProviderRefusalPropagatesAsRemoteError)
 
     try {
         waitForFuture(server.createElicitation(params, std::chrono::seconds(5)));
-        FAIL() << "Expected McpRemoteError";
-    } catch (const McpRemoteError &e) {
-        EXPECT_EQ(e.code(), ErrorCode::InvalidParams);
+        FAIL() << "Expected Rpc::RemoteError";
+    } catch (const Rpc::RemoteError &e) {
+        EXPECT_EQ(e.code(), Rpc::ErrorCode::InvalidParams);
         EXPECT_EQ(e.remoteMessage(), "Denied by user");
     } catch (const std::exception &e) {
         FAIL() << "Wrong exception type: " << e.what();

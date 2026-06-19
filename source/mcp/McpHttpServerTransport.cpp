@@ -335,7 +335,7 @@ struct McpHttpServerTransport::Impl
 };
 
 McpHttpServerTransport::McpHttpServerTransport(HttpServerConfig config, QObject *parent)
-    : McpTransport(parent)
+    : Rpc::Transport(parent)
     , m_impl(std::make_unique<Impl>())
 {
     m_impl->q = this;

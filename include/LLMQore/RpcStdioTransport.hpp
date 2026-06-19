@@ -11,9 +11,9 @@
 #include <QStringList>
 
 #include <LLMQore/LLMQore_global.h>
-#include <LLMQore/McpTransport.hpp>
+#include <LLMQore/RpcTransport.hpp>
 
-namespace LLMQore::Mcp {
+namespace LLMQore::Rpc {
 
 struct LLMQORE_EXPORT StdioLaunchConfig
 {
@@ -26,12 +26,12 @@ struct LLMQORE_EXPORT StdioLaunchConfig
     int killTimeoutMs = 1000;
 };
 
-class LLMQORE_EXPORT McpStdioClientTransport : public McpTransport
+class LLMQORE_EXPORT StdioClientTransport : public Transport
 {
     Q_OBJECT
 public:
-    explicit McpStdioClientTransport(StdioLaunchConfig config, QObject *parent = nullptr);
-    ~McpStdioClientTransport() override;
+    explicit StdioClientTransport(Rpc::StdioLaunchConfig config, QObject *parent = nullptr);
+    ~StdioClientTransport() override;
 
     void start() override;
     void stop() override;
@@ -47,11 +47,11 @@ private slots:
     void onProcessFinished(int exitCode, QProcess::ExitStatus status);
 
 private:
-    StdioLaunchConfig m_config;
+    Rpc::StdioLaunchConfig m_config;
     QProcess *m_process = nullptr;
 
     struct Impl;
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace LLMQore::Mcp
+} // namespace LLMQore::Rpc

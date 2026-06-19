@@ -7,7 +7,7 @@
 #include <LLMQore/McpClient.hpp>
 #include <LLMQore/McpHttpTransport.hpp>
 #include <LLMQore/McpRemoteTool.hpp>
-#include <LLMQore/McpStdioTransport.hpp>
+#include <LLMQore/RpcStdioTransport.hpp>
 #include <LLMQore/ToolsManager.hpp>
 #include <LLMQore/Version.hpp>
 #include <QSet>
@@ -86,7 +86,7 @@ void ToolsManager::removeAllTools()
 
 void ToolsManager::addMcpServer(const McpServerEntry &entry)
 {
-    Mcp::McpTransport *transport = nullptr;
+    Rpc::Transport *transport = nullptr;
 
     if (entry.url.isValid()) {
         Mcp::HttpTransportConfig cfg;
@@ -96,12 +96,12 @@ void ToolsManager::addMcpServer(const McpServerEntry &entry)
             cfg.spec = Mcp::McpHttpSpec::V2024_11_05;
         transport = new Mcp::McpHttpTransport(cfg, nullptr, this);
     } else if (!entry.command.isEmpty()) {
-        Mcp::StdioLaunchConfig cfg;
+        Rpc::StdioLaunchConfig cfg;
         cfg.program = entry.command;
         cfg.arguments = entry.arguments;
         cfg.environment = entry.env;
         cfg.workingDirectory = entry.workingDirectory;
-        transport = new Mcp::McpStdioClientTransport(cfg, this);
+        transport = new Rpc::StdioClientTransport(cfg, this);
     } else {
         qCWarning(llmToolsLog).noquote()
             << QString("McpServerEntry '%1': no command or url specified").arg(entry.name);

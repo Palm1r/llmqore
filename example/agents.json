@@ -1,0 +1,25 @@
+{
+  "agents": [
+    {
+      "id": "claude",
+      "name": "Claude Code (ACP)",
+      "description": "Anthropic Claude Code via its ACP adapter",
+      "command": "npx",
+      "args": ["-y", "@agentclientprotocol/claude-agent-acp"]
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini CLI (ACP)",
+      "description": "Google Gemini CLI in experimental ACP mode",
+      "command": "gemini",
+      "args": ["--experimental-acp"]
+    },
+    {
+      "id": "codex",
+      "name": "Codex (ACP)",
+      "description": "OpenAI Codex via its ACP adapter",
+      "command": "npx",
+      "args": ["-y", "@zed-industries/codex-acp"]
+    }
+  ]
+}

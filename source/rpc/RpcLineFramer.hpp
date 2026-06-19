@@ -6,9 +6,9 @@
 #include <QByteArray>
 #include <QByteArrayList>
 
-namespace LLMQore::Mcp {
+namespace LLMQore::Rpc {
 
-class McpLineFramer
+class LineFramer
 {
 public:
     QByteArrayList append(const QByteArray &data)
@@ -46,4 +46,4 @@ private:
     QByteArray m_buffer;
 };
 
-} // namespace LLMQore::Mcp
+} // namespace LLMQore::Rpc
