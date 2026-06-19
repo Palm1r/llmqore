@@ -12,8 +12,10 @@
 #include <QPointer>
 #include <QString>
 
+#include <LLMQore/JsonRpcSession.hpp>
 #include <LLMQore/LLMQore_global.h>
 #include <LLMQore/McpTypes.hpp>
+#include <LLMQore/RpcTransport.hpp>
 #include <LLMQore/Version.hpp>
 
 namespace LLMQore {
@@ -23,8 +25,6 @@ class ToolRegistry;
 
 namespace LLMQore::Mcp {
 
-class McpTransport;
-class McpSession;
 class BaseResourceProvider;
 class BasePromptProvider;
 
@@ -40,7 +40,7 @@ class LLMQORE_EXPORT McpServer : public QObject
     Q_OBJECT
 public:
     McpServer(
-        McpTransport *transport, McpServerConfig config, QObject *parent = nullptr);
+        Rpc::Transport *transport, McpServerConfig config, QObject *parent = nullptr);
     ~McpServer() override;
 
     void setToolRegistry(LLMQore::ToolRegistry *registry);
@@ -72,8 +72,8 @@ public:
     void start();
     void stop();
 
-    McpTransport *transport() const { return m_transport; }
-    McpSession *session() const { return m_session; }
+    Rpc::Transport *transport() const { return m_transport; }
+    Rpc::JsonRpcSession *session() const { return m_session; }
 
 signals:
     void clientInitialized(const LLMQore::Mcp::Implementation &clientInfo);
@@ -88,8 +88,8 @@ private:
     QList<LLMQore::BaseTool *> collectTools() const;
     LLMQore::BaseTool *findTool(const QString &name) const;
 
-    QPointer<McpTransport> m_transport;
-    McpSession *m_session = nullptr;
+    QPointer<Rpc::Transport> m_transport;
+    Rpc::JsonRpcSession *m_session = nullptr;
     McpServerConfig m_config;
 
     QPointer<LLMQore::ToolRegistry> m_toolRegistry;

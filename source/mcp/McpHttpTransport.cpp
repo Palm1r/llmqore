@@ -219,7 +219,7 @@ struct McpHttpTransport::Impl
 
 McpHttpTransport::McpHttpTransport(
     HttpTransportConfig config, LLMQore::HttpClient *httpClient, QObject *parent)
-    : McpTransport(parent)
+    : Rpc::Transport(parent)
     , m_impl(std::make_unique<Impl>())
 {
     m_impl->q = this;

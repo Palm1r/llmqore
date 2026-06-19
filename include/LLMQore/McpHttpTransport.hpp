@@ -10,7 +10,7 @@
 #include <QUrl>
 
 #include <LLMQore/LLMQore_global.h>
-#include <LLMQore/McpTransport.hpp>
+#include <LLMQore/RpcTransport.hpp>
 
 namespace LLMQore {
 class HttpClient;
@@ -32,7 +32,7 @@ struct LLMQORE_EXPORT HttpTransportConfig
     int requestTimeoutMs = 120000;
 };
 
-class LLMQORE_EXPORT McpHttpTransport : public McpTransport
+class LLMQORE_EXPORT McpHttpTransport : public Rpc::Transport
 {
     Q_OBJECT
 public:

@@ -11,13 +11,17 @@ import "qml"
 ApplicationWindow {
     id: root
 
-    readonly property var providers: [
+    readonly property var llmProviders: [
         { name: "Claude",    url: "https://api.anthropic.com",                       needsKey: true  },
         { name: "OpenAI",    url: "https://api.openai.com",                          needsKey: true  },
         { name: "Ollama",    url: "http://localhost:11434",                          needsKey: false },
         { name: "Google AI", url: "https://generativelanguage.googleapis.com",       needsKey: true  },
         { name: "LlamaCpp",  url: "http://localhost:8080",                           needsKey: false },
     ]
+
+    // Add acp agents from registry
+    readonly property var providers: llmProviders.concat(
+        controller.acpAgentNames.map(n => ({ name: n, url: "", needsKey: false })))
 
     width: 800
     height: 600

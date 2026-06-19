@@ -16,21 +16,20 @@
 #include <LLMQore/BaseClient.hpp>
 #include <LLMQore/BaseElicitationProvider.hpp>
 #include <LLMQore/BaseRootsProvider.hpp>
+#include <LLMQore/JsonRpcSession.hpp>
 #include <LLMQore/LLMQore_global.h>
-#include <LLMQore/McpTransport.hpp>
 #include <LLMQore/McpTypes.hpp>
+#include <LLMQore/RpcTransport.hpp>
 #include <LLMQore/ToolResult.hpp>
 
 namespace LLMQore::Mcp {
-
-class McpSession;
 
 class LLMQORE_EXPORT McpClient : public QObject
 {
     Q_OBJECT
 public:
     explicit McpClient(
-        McpTransport *transport,
+        Rpc::Transport *transport,
         Implementation clientInfo = {"LLMQore", "0.1.0"},
         QObject *parent = nullptr);
     ~McpClient() override;
@@ -97,8 +96,8 @@ public:
     const InitializeResult &serverInfo() const { return m_initResult; }
     const QList<ToolInfo> &cachedTools() const { return m_cachedTools; }
 
-    McpTransport *transport() const { return m_transport; }
-    McpSession *session() const { return m_session; }
+    Rpc::Transport *transport() const { return m_transport; }
+    Rpc::JsonRpcSession *session() const { return m_session; }
 
     void shutdown();
 
@@ -122,8 +121,8 @@ private:
     QFuture<QJsonValue> sendInitialized(
         const QString &method, const QJsonObject &params = {});
 
-    QPointer<McpTransport> m_transport;
-    McpSession *m_session = nullptr;
+    QPointer<Rpc::Transport> m_transport;
+    Rpc::JsonRpcSession *m_session = nullptr;
     Implementation m_clientInfo;
     InitializeResult m_initResult;
     QList<ToolInfo> m_cachedTools;

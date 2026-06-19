@@ -69,6 +69,25 @@ flowchart TD
 | [`mcp/architecture/elicitation.md`](mcp/architecture/elicitation.md) | `elicitation/create` flow. |
 | [`mcp/architecture/exceptions.md`](mcp/architecture/exceptions.md) | `McpException` hierarchy. |
 
+### ACP host stack
+
+LLMQore as an Agent Client Protocol *host* (like Qt Creator 20's "ACP Client"):
+launches an external coding agent over stdio and drives it. Reuses the MCP stack's
+JSON-RPC transport/session layer; does **not** use `BaseClient`. Implemented in
+namespace `LLMQore::Acp` (`AcpClient`, `AcpTypes`, the provider interfaces, and
+`AcpAgentConfig`).
+
+| Doc | When to read |
+|---|---|
+| [`acp/implementation-notes.md`](acp/implementation-notes.md) | **As-built**: file map, method coverage, deviations from the design below. Start here. |
+| [`acp/architecture.md`](acp/architecture.md) | ACP host overview, layered view, invariants, per-subsystem index. |
+| [`acp/architecture/classes.md`](acp/architecture/classes.md) | ACP class diagram + ownership rules. |
+| [`acp/architecture/connection-and-session.md`](acp/architecture/connection-and-session.md) | `initialize` handshake + `session/new` · `session/load` lifecycle. |
+| [`acp/architecture/prompt-turn.md`](acp/architecture/prompt-turn.md) | `session/prompt` → streaming `session/update` → agent callbacks → `stopReason`. |
+| [`acp/architecture/client-capabilities.md`](acp/architecture/client-capabilities.md) | Host-provided `session/request_permission`, `fs/*`, `terminal/*`. |
+| [`acp/architecture/transport-and-session.md`](acp/architecture/transport-and-session.md) | Extracting shared `Rpc::JsonRpcSession` + transport from the MCP stack. |
+| [`acp/architecture/types.md`](acp/architecture/types.md) | ACP wire types + `toJson`/`fromJson` idiom. |
+
 ---
 
 ## Directory layout
@@ -87,10 +106,14 @@ docs/
 │   └── networking.md
 ├── quick-start.md                ← usage walk-through
 ├── integration.md                ← CMake integration
-└── mcp/
-    ├── architecture.md           ← MCP-specific architecture entry
-    ├── architecture/             ← MCP-specific architecture notes
-    └── mcp_protocol_coverage.md
+├── mcp/
+│   ├── architecture.md           ← MCP-specific architecture entry
+│   ├── architecture/             ← MCP-specific architecture notes
+│   └── mcp_protocol_coverage.md
+└── acp/                          ← ACP host stack
+    ├── architecture.md           ← ACP host architecture entry
+    ├── implementation-notes.md   ← as-built file map + method coverage
+    └── architecture/             ← ACP-specific architecture notes
 ```
 
 ---
@@ -102,3 +125,4 @@ docs/
 - **Requests hanging / SSE issues** → [`architecture/networking.md`](architecture/networking.md) + [`architecture/request-lifecycle.md`](architecture/request-lifecycle.md).
 - **Add a new content block type** → [`architecture/messages-and-content.md`](architecture/messages-and-content.md) + [`mcp/architecture/content-types.md`](mcp/architecture/content-types.md).
 - **MCP internals** → [`mcp/architecture.md`](mcp/architecture.md).
+- **Embed an external ACP agent (host side)** → [`acp/architecture.md`](acp/architecture.md).

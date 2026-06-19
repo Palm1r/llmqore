@@ -6,11 +6,11 @@
 #include <memory>
 
 #include <LLMQore/LLMQore_global.h>
-#include <LLMQore/McpTransport.hpp>
+#include <LLMQore/RpcTransport.hpp>
 
 namespace LLMQore::Mcp {
 
-class LLMQORE_EXPORT McpStdioServerTransport : public McpTransport
+class LLMQORE_EXPORT McpStdioServerTransport : public Rpc::Transport
 {
     Q_OBJECT
 public:

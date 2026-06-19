@@ -31,7 +31,7 @@ private:
     struct Upstream
     {
         QString name;
-        LLMQore::Mcp::McpTransport *transport = nullptr;
+        LLMQore::Rpc::Transport *transport = nullptr;
         LLMQore::Mcp::McpClient *client = nullptr;
         QList<LLMQore::Mcp::McpRemoteTool *> tools;
         bool reconnectPending = false;
@@ -47,7 +47,7 @@ private:
     void checkAllReady();
 
     BridgeConfig m_config;
-    LLMQore::Mcp::McpTransport *m_serverTransport = nullptr;
+    LLMQore::Rpc::Transport *m_serverTransport = nullptr;
     LLMQore::Mcp::McpHttpServerTransport *m_httpTransport = nullptr;
     LLMQore::Mcp::McpServer *m_server = nullptr;
     QList<Upstream> m_upstreams;

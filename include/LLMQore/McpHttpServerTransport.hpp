@@ -10,7 +10,7 @@
 #include <QString>
 
 #include <LLMQore/LLMQore_global.h>
-#include <LLMQore/McpTransport.hpp>
+#include <LLMQore/RpcTransport.hpp>
 
 namespace LLMQore::Mcp {
 
@@ -27,7 +27,7 @@ struct LLMQORE_EXPORT HttpServerConfig
     int maxQueuedServerMessages = 1024;
 };
 
-class LLMQORE_EXPORT McpHttpServerTransport : public McpTransport
+class LLMQORE_EXPORT McpHttpServerTransport : public Rpc::Transport
 {
     Q_OBJECT
 public:

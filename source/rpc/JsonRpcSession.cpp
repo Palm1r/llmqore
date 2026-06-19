@@ -1,16 +1,15 @@
 // Copyright (C) 2026 Petr Mironychev
 // SPDX-License-Identifier: MIT
 
-#include <LLMQore/McpSession.hpp>
+#include <LLMQore/JsonRpcSession.hpp>
 
 #include <LLMQore/Log.hpp>
-#include <LLMQore/McpExceptions.hpp>
-#include <LLMQore/McpTypes.hpp>
+#include <LLMQore/RpcExceptions.hpp>
 
 #include <QFutureWatcher>
 #include <QTimer>
 
-namespace LLMQore::Mcp {
+namespace LLMQore::Rpc {
 
 namespace {
 
@@ -25,17 +24,17 @@ QJsonObject withProgressToken(const QJsonObject &params, const QString &progress
 
 } // namespace
 
-McpSession::McpSession(McpTransport *transport, QObject *parent)
+JsonRpcSession::JsonRpcSession(Transport *transport, QObject *parent)
     : QObject(parent)
     , m_transport(transport)
 {
     if (m_transport) {
         connect(
             m_transport,
-            &McpTransport::messageReceived,
+            &Transport::messageReceived,
             this,
-            &McpSession::onMessageReceived);
-        connect(m_transport, &McpTransport::closed, this, &McpSession::onTransportClosed);
+            &JsonRpcSession::onMessageReceived);
+        connect(m_transport, &Transport::closed, this, &JsonRpcSession::onTransportClosed);
     }
 
     setNotificationHandler(
@@ -63,7 +62,7 @@ McpSession::McpSession(McpTransport *transport, QObject *parent)
                 if (!it->progressToken.isEmpty())
                     clearProgressHandler(it->progressToken);
                 m_pending.erase(it);
-                p->setException(std::make_exception_ptr(McpCancelledError(
+                p->setException(std::make_exception_ptr(CancelledError(
                     reason.isEmpty() ? QStringLiteral("Cancelled by peer") : reason)));
                 p->finish();
             }
@@ -94,17 +93,17 @@ McpSession::McpSession(McpTransport *transport, QObject *parent)
         });
 }
 
-McpSession::~McpSession()
+JsonRpcSession::~JsonRpcSession()
 {
     abortPending(QStringLiteral("Session destroyed"));
 }
 
-QString McpSession::allocateId()
+QString JsonRpcSession::allocateId()
 {
     return QString::number(m_nextId.fetchAndAddRelaxed(1));
 }
 
-McpSession::CancellableRequest McpSession::sendRequestImpl(
+JsonRpcSession::CancellableRequest JsonRpcSession::sendRequestImpl(
     const QString &method,
     const QJsonObject &params,
     std::chrono::milliseconds timeout,
@@ -117,7 +116,7 @@ McpSession::CancellableRequest McpSession::sendRequestImpl(
 
     if (!m_transport || !m_transport->isOpen()) {
         promise->setException(
-            std::make_exception_ptr(McpTransportError(QStringLiteral("Transport is not open"))));
+            std::make_exception_ptr(TransportError(QStringLiteral("Transport is not open"))));
         promise->finish();
         out.future = promise->future();
         return out;
@@ -145,7 +144,7 @@ McpSession::CancellableRequest McpSession::sendRequestImpl(
         m_pending.erase(it);
         qCWarning(llmMcpLog).noquote() << QString("Request %1 timed out").arg(id);
         p->setException(
-            std::make_exception_ptr(McpTimeoutError(QString("Request %1 timed out").arg(id))));
+            std::make_exception_ptr(TimeoutError(QString("Request %1 timed out").arg(id))));
         p->finish();
     });
     timer->start();
@@ -171,19 +170,19 @@ McpSession::CancellableRequest McpSession::sendRequestImpl(
     return out;
 }
 
-QFuture<QJsonValue> McpSession::sendRequest(
+QFuture<QJsonValue> JsonRpcSession::sendRequest(
     const QString &method, const QJsonObject &params, std::chrono::milliseconds timeout)
 {
     return sendRequestImpl(method, params, timeout, /*trackProgressToken=*/false).future;
 }
 
-McpSession::CancellableRequest McpSession::sendCancellableRequest(
+JsonRpcSession::CancellableRequest JsonRpcSession::sendCancellableRequest(
     const QString &method, const QJsonObject &params, std::chrono::milliseconds timeout)
 {
     return sendRequestImpl(method, params, timeout, /*trackProgressToken=*/true);
 }
 
-void McpSession::cancelRequest(const QString &id, const QString &reason)
+void JsonRpcSession::cancelRequest(const QString &id, const QString &reason)
 {
     auto it = m_pending.find(id);
     if (it == m_pending.end())
@@ -202,12 +201,12 @@ void McpSession::cancelRequest(const QString &id, const QString &reason)
     if (!it->progressToken.isEmpty())
         clearProgressHandler(it->progressToken);
     m_pending.erase(it);
-    p->setException(std::make_exception_ptr(McpCancelledError(
+    p->setException(std::make_exception_ptr(CancelledError(
         reason.isEmpty() ? QStringLiteral("Cancelled by caller") : reason)));
     p->finish();
 }
 
-void McpSession::sendNotification(const QString &method, const QJsonObject &params)
+void JsonRpcSession::sendNotification(const QString &method, const QJsonObject &params)
 {
     if (!m_transport || !m_transport->isOpen()) {
         qCWarning(llmMcpLog).noquote()
@@ -226,7 +225,7 @@ void McpSession::sendNotification(const QString &method, const QJsonObject &para
     m_transport->send(message);
 }
 
-void McpSession::setRequestHandler(const QString &method, RequestHandler handler)
+void JsonRpcSession::setRequestHandler(const QString &method, RequestHandler handler)
 {
     if (handler)
         m_requestHandlers.insert(method, std::move(handler));
@@ -234,7 +233,7 @@ void McpSession::setRequestHandler(const QString &method, RequestHandler handler
         m_requestHandlers.remove(method);
 }
 
-void McpSession::setNotificationHandler(const QString &method, NotifyHandler handler)
+void JsonRpcSession::setNotificationHandler(const QString &method, NotifyHandler handler)
 {
     if (handler)
         m_notifyHandlers.insert(method, std::move(handler));
@@ -242,7 +241,7 @@ void McpSession::setNotificationHandler(const QString &method, NotifyHandler han
         m_notifyHandlers.remove(method);
 }
 
-void McpSession::setProgressHandler(const QString &progressToken, ProgressHandler handler)
+void JsonRpcSession::setProgressHandler(const QString &progressToken, ProgressHandler handler)
 {
     if (handler)
         m_progressHandlers.insert(progressToken, std::move(handler));
@@ -250,12 +249,12 @@ void McpSession::setProgressHandler(const QString &progressToken, ProgressHandle
         m_progressHandlers.remove(progressToken);
 }
 
-void McpSession::clearProgressHandler(const QString &progressToken)
+void JsonRpcSession::clearProgressHandler(const QString &progressToken)
 {
     m_progressHandlers.remove(progressToken);
 }
 
-void McpSession::sendProgress(
+void JsonRpcSession::sendProgress(
     const QString &progressToken, double progress, double total, const QString &message)
 {
     if (progressToken.isEmpty())
@@ -271,12 +270,12 @@ void McpSession::sendProgress(
     sendNotification(QStringLiteral("notifications/progress"), params);
 }
 
-bool McpSession::isRequestCancelled(const QString &requestId) const
+bool JsonRpcSession::isRequestCancelled(const QString &requestId) const
 {
     return m_cancelledIncomingIds.contains(requestId);
 }
 
-void McpSession::abortPending(const QString &reason)
+void JsonRpcSession::abortPending(const QString &reason)
 {
     for (auto it = m_pending.begin(); it != m_pending.end();) {
         if (it->timer) {
@@ -285,13 +284,13 @@ void McpSession::abortPending(const QString &reason)
         }
         if (!it->progressToken.isEmpty())
             clearProgressHandler(it->progressToken);
-        it->promise->setException(std::make_exception_ptr(McpTransportError(reason)));
+        it->promise->setException(std::make_exception_ptr(TransportError(reason)));
         it->promise->finish();
         it = m_pending.erase(it);
     }
 }
 
-void McpSession::onMessageReceived(const QJsonObject &message)
+void JsonRpcSession::onMessageReceived(const QJsonObject &message)
 {
     const QString jsonrpc = message.value("jsonrpc").toString();
     if (jsonrpc != QLatin1String("2.0")) {
@@ -317,7 +316,7 @@ void McpSession::onMessageReceived(const QJsonObject &message)
     }
 }
 
-void McpSession::dispatchRequest(const QJsonObject &message)
+void JsonRpcSession::dispatchRequest(const QJsonObject &message)
 {
     const QJsonValue idValue = message.value("id");
     QString idStr;
@@ -348,39 +347,39 @@ void McpSession::dispatchRequest(const QJsonObject &message)
     if (it == m_requestHandlers.end()) {
         m_currentProgressToken.clear();
         m_inFlightIncomingIds.remove(idStr);
-        sendError(idValue, ErrorCode::MethodNotFound, QString("Method not found: %1").arg(method));
+        sendError(idValue, Rpc::ErrorCode::MethodNotFound, QString("Method not found: %1").arg(method));
         return;
     }
 
     QFuture<QJsonValue> future;
     try {
         future = (*it)(params);
-    } catch (const McpRemoteError &e) {
+    } catch (const RemoteError &e) {
         m_currentProgressToken.clear();
         m_inFlightIncomingIds.remove(idStr);
         sendError(idValue, e.code(), e.remoteMessage(), e.data());
         return;
-    } catch (const McpException &e) {
+    } catch (const JsonRpcException &e) {
         m_currentProgressToken.clear();
         m_inFlightIncomingIds.remove(idStr);
-        sendError(idValue, ErrorCode::InternalError, e.message());
+        sendError(idValue, Rpc::ErrorCode::InternalError, e.message());
         return;
     } catch (const std::exception &e) {
         m_currentProgressToken.clear();
         m_inFlightIncomingIds.remove(idStr);
-        sendError(idValue, ErrorCode::InternalError, QString::fromUtf8(e.what()));
+        sendError(idValue, Rpc::ErrorCode::InternalError, QString::fromUtf8(e.what()));
         return;
     } catch (...) {
         m_currentProgressToken.clear();
         m_inFlightIncomingIds.remove(idStr);
-        sendError(idValue, ErrorCode::InternalError, QStringLiteral("Unknown exception"));
+        sendError(idValue, Rpc::ErrorCode::InternalError, QStringLiteral("Unknown exception"));
         return;
     }
 
     m_currentProgressToken.clear();
 
     auto *watcher = new QFutureWatcher<QJsonValue>(this);
-    QPointer<McpSession> guard(this);
+    QPointer<JsonRpcSession> guard(this);
     connect(
         watcher, &QFutureWatcher<QJsonValue>::finished, this, [guard, watcher, idValue, idStr]() {
             watcher->deleteLater();
@@ -396,21 +395,21 @@ void McpSession::dispatchRequest(const QJsonObject &message)
 
             QJsonValue result;
             bool ok = true;
-            int errCode = ErrorCode::InternalError;
+            int errCode = Rpc::ErrorCode::InternalError;
             QString errMsg;
             QJsonValue errData;
             try {
                 result = watcher->result();
-            } catch (const McpRemoteError &e) {
+            } catch (const RemoteError &e) {
                 ok = false;
                 errCode = e.code();
                 errMsg = e.remoteMessage();
                 errData = e.data();
-            } catch (const McpCancelledError &e) {
+            } catch (const CancelledError &e) {
                 ok = false;
-                errCode = ErrorCode::RequestCancelled;
+                errCode = Rpc::ErrorCode::RequestCancelled;
                 errMsg = e.message();
-            } catch (const McpException &e) {
+            } catch (const JsonRpcException &e) {
                 ok = false;
                 errMsg = e.message();
             } catch (const std::exception &e) {
@@ -428,7 +427,7 @@ void McpSession::dispatchRequest(const QJsonObject &message)
     watcher->setFuture(future);
 }
 
-void McpSession::dispatchResponse(const QJsonObject &message)
+void JsonRpcSession::dispatchResponse(const QJsonObject &message)
 {
     const QJsonValue idValue = message.value("id");
     QString id;
@@ -437,11 +436,6 @@ void McpSession::dispatchResponse(const QJsonObject &message)
     } else if (idValue.isDouble()) {
         id = QString::number(static_cast<qint64>(idValue.toDouble()));
     } else {
-        // JSON-RPC 2.0 forbids a response with a null id unless it is an
-        // error reply to an unparseable request, but some non-compliant
-        // servers (notably the Qt Creator MCP server 19.0.0) emit such
-        // "responses" after notifications. They carry no useful payload for
-        // us — silently drop and move on rather than cluttering logs.
         qCDebug(llmMcpLog).noquote()
             << "Dropping response with null/missing id (non-spec-compliant server)";
         return;
@@ -470,7 +464,7 @@ void McpSession::dispatchResponse(const QJsonObject &message)
         const QJsonValue data = err.value("data");
         qCDebug(llmMcpLog).noquote()
             << QString("<-- response id=%1 error=%2").arg(id).arg(msg);
-        promise->setException(std::make_exception_ptr(McpRemoteError(code, msg, data)));
+        promise->setException(std::make_exception_ptr(RemoteError(code, msg, data)));
     } else {
         qCDebug(llmMcpLog).noquote() << QString("<-- response id=%1 ok").arg(id);
         promise->addResult(message.value("result"));
@@ -478,7 +472,7 @@ void McpSession::dispatchResponse(const QJsonObject &message)
     promise->finish();
 }
 
-void McpSession::dispatchNotification(const QJsonObject &message)
+void JsonRpcSession::dispatchNotification(const QJsonObject &message)
 {
     const QString method = message.value("method").toString();
     const QJsonObject params = message.value("params").toObject();
@@ -497,7 +491,7 @@ void McpSession::dispatchNotification(const QJsonObject &message)
     emit notificationReceived(method, params);
 }
 
-void McpSession::sendResponse(const QJsonValue &id, const QJsonValue &result)
+void JsonRpcSession::sendResponse(const QJsonValue &id, const QJsonValue &result)
 {
     if (!m_transport || !m_transport->isOpen())
         return;
@@ -509,7 +503,7 @@ void McpSession::sendResponse(const QJsonValue &id, const QJsonValue &result)
     m_transport->send(msg);
 }
 
-void McpSession::sendError(
+void JsonRpcSession::sendError(
     const QJsonValue &id, int code, const QString &message, const QJsonValue &data)
 {
     if (!m_transport || !m_transport->isOpen())
@@ -528,9 +522,9 @@ void McpSession::sendError(
     m_transport->send(msg);
 }
 
-void McpSession::onTransportClosed()
+void JsonRpcSession::onTransportClosed()
 {
     abortPending(QStringLiteral("Transport closed"));
 }
 
-} // namespace LLMQore::Mcp
+} // namespace LLMQore::Rpc

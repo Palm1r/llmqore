@@ -9,17 +9,17 @@
 
 #include <LLMQore/LLMQore_global.h>
 
-namespace LLMQore::Mcp {
+namespace LLMQore::Rpc {
 
-class LLMQORE_EXPORT McpTransport : public QObject
+class LLMQORE_EXPORT Transport : public QObject
 {
     Q_OBJECT
 public:
     enum class State { Disconnected, Connecting, Connected, Failed };
     Q_ENUM(State)
 
-    explicit McpTransport(QObject *parent = nullptr);
-    ~McpTransport() override = default;
+    explicit Transport(QObject *parent = nullptr);
+    ~Transport() override = default;
 
     virtual void start() = 0;
     virtual void stop() = 0;
@@ -30,7 +30,7 @@ public:
 
 signals:
     void messageReceived(const QJsonObject &message);
-    void stateChanged(LLMQore::Mcp::McpTransport::State newState);
+    void stateChanged(LLMQore::Rpc::Transport::State newState);
     void errorOccurred(const QString &reason);
     void closed();
     void stderrLine(const QString &line);
@@ -42,4 +42,4 @@ private:
     State m_state = State::Disconnected;
 };
 
-} // namespace LLMQore::Mcp
+} // namespace LLMQore::Rpc

@@ -162,7 +162,7 @@ TEST(SSEParser, FlushOnEmptyParserReturnsNothing)
 TEST(SSEParser, ClearResets)
 {
     SSEParser p;
-    p.append("event: x\ndata: partial");
+    (void)p.append("event: x\ndata: partial");
     EXPECT_TRUE(p.hasIncompleteData());
     p.clear();
     EXPECT_FALSE(p.hasIncompleteData());

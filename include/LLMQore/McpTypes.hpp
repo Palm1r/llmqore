@@ -14,6 +14,7 @@
 #include <QStringList>
 
 #include <LLMQore/LLMQore_global.h>
+#include <LLMQore/RpcExceptions.hpp>
 
 namespace LLMQore::Mcp {
 
@@ -30,17 +31,6 @@ inline constexpr const char *kKnownProtocolVersions[] = {
     kProtocolVersion2025_03_26,
     kProtocolVersion2024_11_05,
 };
-
-namespace ErrorCode {
-inline constexpr int ParseError           = -32700;
-inline constexpr int InvalidRequest       = -32600;
-inline constexpr int MethodNotFound       = -32601;
-inline constexpr int InvalidParams        = -32602;
-inline constexpr int InternalError        = -32603;
-inline constexpr int ServerNotInitialized = -32002;
-inline constexpr int RequestCancelled     = -32800;
-inline constexpr int ContentTooLarge      = -32801;
-} // namespace ErrorCode
 
 struct LLMQORE_EXPORT IconInfo
 {

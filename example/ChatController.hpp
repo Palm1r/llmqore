@@ -10,10 +10,15 @@
 #include <QQmlEngine>
 #include <QString>
 
+#include <LLMQore/AcpAgentRegistry.hpp>
 #include <LLMQore/Core>
 
 #include "MessageModel.hpp"
 #include <QtQmlIntegration>
+
+namespace LLMQore::Acp {
+class AcpClient;
+}
 
 class ChatController : public QObject
 {
@@ -26,6 +31,7 @@ class ChatController : public QObject
     Q_PROPERTY(bool loadingModels READ loadingModels NOTIFY loadingModelsChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QStringList toolNames READ toolNames NOTIFY toolNamesChanged)
+    Q_PROPERTY(QStringList acpAgentNames READ acpAgentNames CONSTANT)
 
 public:
     explicit ChatController(QObject *parent = nullptr);
@@ -36,6 +42,7 @@ public:
     bool loadingModels() const { return m_loadingModels; }
     QString status() const { return m_status; }
     QStringList toolNames() const { return m_toolNames; }
+    QStringList acpAgentNames() const;
 
     Q_INVOKABLE void setupProvider(
         const QString &provider, const QString &url, const QString &apiKey);
@@ -53,6 +60,8 @@ signals:
 
 private:
     void createClient(const QString &provider, const QString &url, const QString &apiKey);
+    void setupAcpAgent(const QString &provider);
+    void teardownClients();
     void fetchModels();
     void registerTools();
     void refreshToolListUi();
@@ -75,4 +84,9 @@ private:
     QStringList m_toolNames;
     QString m_currentProvider;
     LLMQore::RequestID m_currentRequest;
+
+    LLMQore::Acp::AcpAgentRegistry m_acpRegistry;
+    LLMQore::Acp::AcpClient *m_acpClient = nullptr;
+    QString m_acpSessionId;
+    bool m_acpMode = false;
 };

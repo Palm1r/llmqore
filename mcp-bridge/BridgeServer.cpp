@@ -8,6 +8,7 @@
 
 #include <LLMQore/FutureUtils.hpp>
 
+using namespace LLMQore;
 using namespace LLMQore::Mcp;
 
 namespace {
@@ -55,7 +56,7 @@ BridgeServer::BridgeServer(const BridgeConfig &config, QObject *parent)
 void BridgeServer::start()
 {
     for (const UpstreamEntry &entry : m_config.upstreams) {
-        McpTransport *transport = nullptr;
+        Rpc::Transport *transport = nullptr;
 
         if (entry.type == UpstreamType::Sse) {
             HttpTransportConfig httpCfg;
@@ -64,11 +65,11 @@ void BridgeServer::start()
             httpCfg.headers = entry.headers;
             transport = new McpHttpTransport(httpCfg, nullptr, this);
         } else {
-            StdioLaunchConfig launchCfg;
+            Rpc::StdioLaunchConfig launchCfg;
             launchCfg.program = entry.command;
             launchCfg.arguments = entry.args;
             launchCfg.environment = entry.env;
-            transport = new McpStdioClientTransport(launchCfg, this);
+            transport = new Rpc::StdioClientTransport(launchCfg, this);
         }
 
         auto *client = new McpClient(

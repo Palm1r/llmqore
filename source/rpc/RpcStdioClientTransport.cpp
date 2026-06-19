@@ -1,35 +1,35 @@
 // Copyright (C) 2026 Petr Mironychev
 // SPDX-License-Identifier: MIT
 
-#include <LLMQore/McpStdioTransport.hpp>
+#include <LLMQore/RpcStdioTransport.hpp>
 
 #include <LLMQore/Log.hpp>
 
-#include "McpLineFramer.hpp"
+#include "RpcLineFramer.hpp"
 
 #include <QFileInfo>
 #include <QJsonDocument>
 
-namespace LLMQore::Mcp {
+namespace LLMQore::Rpc {
 
-struct McpStdioClientTransport::Impl
+struct StdioClientTransport::Impl
 {
-    McpLineFramer stdoutFramer;
+    LineFramer stdoutFramer;
     QByteArray stderrBuffer;
 };
 
-McpStdioClientTransport::McpStdioClientTransport(StdioLaunchConfig config, QObject *parent)
-    : McpTransport(parent)
+StdioClientTransport::StdioClientTransport(Rpc::StdioLaunchConfig config, QObject *parent)
+    : Transport(parent)
     , m_config(std::move(config))
     , m_impl(std::make_unique<Impl>())
 {}
 
-McpStdioClientTransport::~McpStdioClientTransport()
+StdioClientTransport::~StdioClientTransport()
 {
     stop();
 }
 
-void McpStdioClientTransport::start()
+void StdioClientTransport::start()
 {
     if (m_process)
         return;
@@ -40,14 +40,14 @@ void McpStdioClientTransport::start()
         m_process->setWorkingDirectory(m_config.workingDirectory);
     m_process->setProcessChannelMode(QProcess::SeparateChannels);
 
-    connect(m_process, &QProcess::readyReadStandardOutput, this, &McpStdioClientTransport::onReadyReadStdout);
-    connect(m_process, &QProcess::readyReadStandardError, this, &McpStdioClientTransport::onReadyReadStderr);
-    connect(m_process, &QProcess::errorOccurred, this, &McpStdioClientTransport::onProcessErrorOccurred);
+    connect(m_process, &QProcess::readyReadStandardOutput, this, &StdioClientTransport::onReadyReadStdout);
+    connect(m_process, &QProcess::readyReadStandardError, this, &StdioClientTransport::onReadyReadStderr);
+    connect(m_process, &QProcess::errorOccurred, this, &StdioClientTransport::onProcessErrorOccurred);
     connect(
         m_process,
         QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
         this,
-        &McpStdioClientTransport::onProcessFinished);
+        &StdioClientTransport::onProcessFinished);
 
     setState(State::Connecting);
 
@@ -55,10 +55,6 @@ void McpStdioClientTransport::start()
     QStringList arguments = m_config.arguments;
 
 #ifdef Q_OS_WIN
-    // On Windows, batch files (.cmd/.bat) cannot be launched directly by QProcess.
-    // Wrap them via cmd.exe /c when the program name ends with such an extension,
-    // OR when the program name is a well-known wrapper (npx, npm, pnpm, yarn, uvx)
-    // that is usually installed as a .cmd shim.
     const QString lower = program.toLower();
     const bool isBatchExt = lower.endsWith(".cmd") || lower.endsWith(".bat");
     const bool isKnownWrapper
@@ -74,7 +70,7 @@ void McpStdioClientTransport::start()
 #endif
 
     qCInfo(llmMcpLog).noquote()
-        << QString("Starting MCP server: %1 %2").arg(program, arguments.join(' '));
+        << QString("Starting child process: %1 %2").arg(program, arguments.join(' '));
     m_process->start(program, arguments);
 
     if (!m_process->waitForStarted(m_config.startupTimeoutMs)) {
@@ -89,7 +85,7 @@ void McpStdioClientTransport::start()
     setState(State::Connected);
 }
 
-void McpStdioClientTransport::stop()
+void StdioClientTransport::stop()
 {
     if (!m_process)
         return;
@@ -111,13 +107,13 @@ void McpStdioClientTransport::stop()
     emit closed();
 }
 
-bool McpStdioClientTransport::isOpen() const
+bool StdioClientTransport::isOpen() const
 {
     return m_process && m_process->state() == QProcess::Running
         && state() == State::Connected;
 }
 
-void McpStdioClientTransport::send(const QJsonObject &message)
+void StdioClientTransport::send(const QJsonObject &message)
 {
     if (!isOpen()) {
         emit errorOccurred(QStringLiteral("Transport not open"));
@@ -128,7 +124,7 @@ void McpStdioClientTransport::send(const QJsonObject &message)
     m_process->write("\n", 1);
 }
 
-void McpStdioClientTransport::onReadyReadStdout()
+void StdioClientTransport::onReadyReadStdout()
 {
     if (!m_process)
         return;
@@ -146,7 +142,7 @@ void McpStdioClientTransport::onReadyReadStdout()
     }
 }
 
-void McpStdioClientTransport::onReadyReadStderr()
+void StdioClientTransport::onReadyReadStderr()
 {
     if (!m_process)
         return;
@@ -165,7 +161,7 @@ void McpStdioClientTransport::onReadyReadStderr()
     }
 }
 
-void McpStdioClientTransport::onProcessErrorOccurred(QProcess::ProcessError error)
+void StdioClientTransport::onProcessErrorOccurred(QProcess::ProcessError error)
 {
     const QString reason = QString("QProcess error %1: %2")
                                .arg(static_cast<int>(error))
@@ -174,13 +170,13 @@ void McpStdioClientTransport::onProcessErrorOccurred(QProcess::ProcessError erro
     emit errorOccurred(reason);
 }
 
-void McpStdioClientTransport::onProcessFinished(int exitCode, QProcess::ExitStatus status)
+void StdioClientTransport::onProcessFinished(int exitCode, QProcess::ExitStatus status)
 {
-    qCInfo(llmMcpLog).noquote() << QString("MCP server exited code=%1 status=%2")
+    qCInfo(llmMcpLog).noquote() << QString("child process exited code=%1 status=%2")
                                        .arg(exitCode)
                                        .arg(static_cast<int>(status));
     setState(State::Disconnected);
     emit closed();
 }
 
-} // namespace LLMQore::Mcp
+} // namespace LLMQore::Rpc

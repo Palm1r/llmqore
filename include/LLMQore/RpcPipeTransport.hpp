@@ -8,18 +8,17 @@
 #include <QPointer>
 
 #include <LLMQore/LLMQore_global.h>
-#include <LLMQore/McpTransport.hpp>
+#include <LLMQore/RpcTransport.hpp>
 
-namespace LLMQore::Mcp {
+namespace LLMQore::Rpc {
 
-class LLMQORE_EXPORT McpPipeTransport : public McpTransport
+class LLMQORE_EXPORT PipeTransport : public Transport
 {
     Q_OBJECT
 public:
-    ~McpPipeTransport() override;
+    ~PipeTransport() override;
 
-    static std::pair<McpPipeTransport *, McpPipeTransport *> createPair(
-        QObject *parent = nullptr);
+    static std::pair<PipeTransport *, PipeTransport *> createPair(QObject *parent = nullptr);
 
     void start() override;
     void stop() override;
@@ -30,10 +29,10 @@ private slots:
     void deliver(const QJsonObject &message);
 
 private:
-    explicit McpPipeTransport(QObject *parent = nullptr);
+    explicit PipeTransport(QObject *parent = nullptr);
 
-    QPointer<McpPipeTransport> m_peer;
+    QPointer<PipeTransport> m_peer;
     bool m_open = false;
 };
 
-} // namespace LLMQore::Mcp
+} // namespace LLMQore::Rpc
