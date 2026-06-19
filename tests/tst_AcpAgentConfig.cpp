@@ -15,7 +15,7 @@ TEST(AcpAgentConfig, ToLaunchConfigMapsFieldsAndEnv)
 {
     AcpAgentConfig c;
     c.command = "myagent";
-    c.args = {"--acp"};
+    c.args = QStringList{"--acp"};
     c.cwd = "/proj";
     c.env.append(EnvVariable{"API_KEY", "secret"});
 
@@ -31,7 +31,7 @@ TEST(AcpAgentConfig, JsonRoundTrip)
 {
     AcpAgentConfig c;
     c.command = "npx";
-    c.args = {"-y", "@scope/agent-acp"};
+    c.args = QStringList{"-y", "@scope/agent-acp"};
     c.cwd = "/home/user";
     c.env.append(EnvVariable{"TOKEN", "abc"});
 
@@ -49,7 +49,7 @@ TEST(AcpAgentConfig, CreateTransportReturnsUnstartedTransport)
 {
     AcpAgentConfig c;
     c.command = "gemini";
-    c.args = {"--experimental-acp"};
+    c.args = QStringList{"--experimental-acp"};
     auto *transport = c.createTransport();
     ASSERT_NE(transport, nullptr);
     EXPECT_FALSE(transport->isOpen()); // not started yet

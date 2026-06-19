@@ -157,10 +157,10 @@ TEST_F(AcpProvidersTest, TerminalRunsCommandAndReportsExit)
     p.sessionId = "s";
 #ifdef Q_OS_WIN
     p.command = "cmd";
-    p.args = {"/c", "echo hello"};
+    p.args = QStringList{"/c", "echo hello"};
 #else
     p.command = "/bin/echo";
-    p.args = {"hello"};
+    p.args = QStringList{"hello"};
 #endif
 
     const CreateTerminalResult created = waitForFuture(tm.createTerminal(p));

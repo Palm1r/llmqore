@@ -69,10 +69,10 @@ TEST(AcpTypes, NewSessionParamsCarriesMcpServers)
     McpServer s;
     s.name = "filesystem";
     s.command = "npx";
-    s.args = {"-y", "@modelcontextprotocol/server-filesystem", "/home/user"};
+    s.args = QStringList{"-y", "@modelcontextprotocol/server-filesystem", "/home/user"};
     s.env.append(EnvVariable{"TOKEN", "abc"});
     p.mcpServers.append(s);
-    p.additionalDirectories = {"/tmp"};
+    p.additionalDirectories = QStringList{"/tmp"};
 
     const NewSessionParams back = NewSessionParams::fromJson(p.toJson());
     EXPECT_EQ(back.cwd, "/home/user/project");
@@ -290,7 +290,7 @@ TEST(AcpTypes, TerminalParamsAndExitStatus)
     CreateTerminalParams c;
     c.sessionId = "s";
     c.command = "ls";
-    c.args = {"-la"};
+    c.args = QStringList{"-la"};
     c.cwd = "/tmp";
     c.env.append(EnvVariable{"FOO", "bar"});
     c.outputByteLimit = 1024;

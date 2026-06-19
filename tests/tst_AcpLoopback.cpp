@@ -188,7 +188,7 @@ TEST_F(AcpLoopbackTest, StreamingPromptDeliversChunksThenStopReason)
 {
     auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
     FakeAgent agent(serverTransport);
-    agent.agentChunks = {"Hello, ", "world", "!"};
+    agent.agentChunks = QStringList{"Hello, ", "world", "!"};
     agent.stopReason = QString::fromLatin1(StopReason::EndTurn);
     serverTransport->start();
 
