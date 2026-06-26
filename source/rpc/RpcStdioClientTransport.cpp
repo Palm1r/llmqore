@@ -69,13 +69,13 @@ void StdioClientTransport::start()
     }
 #endif
 
-    qCInfo(llmMcpLog).noquote()
+    qCInfo(llmRpcLog).noquote()
         << QString("Starting child process: %1 %2").arg(program, arguments.join(' '));
     m_process->start(program, arguments);
 
     if (!m_process->waitForStarted(m_config.startupTimeoutMs)) {
         const QString reason = QString("Failed to start '%1': %2").arg(program, m_process->errorString());
-        qCWarning(llmMcpLog).noquote() << reason;
+        qCWarning(llmRpcLog).noquote() << reason;
         setState(State::Failed);
         emit errorOccurred(reason);
         emit closed();
@@ -134,7 +134,7 @@ void StdioClientTransport::onReadyReadStdout()
         QJsonParseError err{};
         const QJsonDocument doc = QJsonDocument::fromJson(line, &err);
         if (err.error != QJsonParseError::NoError || !doc.isObject()) {
-            qCWarning(llmMcpLog).noquote()
+            qCWarning(llmRpcLog).noquote()
                 << QString("Dropping invalid JSON line: %1").arg(QString::fromUtf8(line));
             continue;
         }
@@ -156,7 +156,7 @@ void StdioClientTransport::onReadyReadStderr()
         if (line.isEmpty())
             continue;
         const QString text = QString::fromUtf8(line);
-        qCInfo(llmMcpLog).noquote() << "stderr:" << text;
+        qCInfo(llmRpcLog).noquote() << "stderr:" << text;
         emit stderrLine(text);
     }
 }
@@ -166,13 +166,13 @@ void StdioClientTransport::onProcessErrorOccurred(QProcess::ProcessError error)
     const QString reason = QString("QProcess error %1: %2")
                                .arg(static_cast<int>(error))
                                .arg(m_process ? m_process->errorString() : QString());
-    qCWarning(llmMcpLog).noquote() << reason;
+    qCWarning(llmRpcLog).noquote() << reason;
     emit errorOccurred(reason);
 }
 
 void StdioClientTransport::onProcessFinished(int exitCode, QProcess::ExitStatus status)
 {
-    qCInfo(llmMcpLog).noquote() << QString("child process exited code=%1 status=%2")
+    qCInfo(llmRpcLog).noquote() << QString("child process exited code=%1 status=%2")
                                        .arg(exitCode)
                                        .arg(static_cast<int>(status));
     setState(State::Disconnected);

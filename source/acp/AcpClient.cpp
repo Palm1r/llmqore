@@ -257,7 +257,7 @@ void AcpClient::handleSessionUpdate(const QJsonObject &params)
     } else if (kind == QLatin1String(SessionUpdateKind::UsageUpdate)) {
         emit usageUpdated(sid, params.value("update").toObject());
     } else {
-        qCDebug(llmMcpLog).noquote() << "ACP: unknown session/update kind:" << kind;
+        qCDebug(llmAcpLog).noquote() << "ACP: unknown session/update kind:" << kind;
     }
 }
 

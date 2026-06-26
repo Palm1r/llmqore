@@ -49,6 +49,7 @@ but is otherwise independent:
 | Client capabilities (permission / fs / terminal) | [`architecture/client-capabilities.md`](architecture/client-capabilities.md) |
 | Wire types + serialization idiom | [`architecture/types.md`](architecture/types.md) |
 | Shared JSON-RPC session + transport | [`architecture/transport-and-session.md`](architecture/transport-and-session.md) |
+| Agent authentication (tokens / Keychain) | [`authentication.md`](authentication.md) |
 
 ---
 

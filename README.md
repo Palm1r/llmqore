@@ -167,6 +167,9 @@ connect(client, &AcpClient::toolCallStarted,
 - **Providers**: `AcpPermissionProvider`, `AcpFileSystemProvider`, `AcpTerminalProvider`
   (with `DefaultFileSystemProvider`, `TerminalManager`, `CallbackPermissionProvider` defaults)
 - **Agents**: `AcpAgentRegistry` loads named agents from external JSON ([`example/agents.json`](example/agents.json))
+- **Auth**: agents authenticate themselves — no API key in the protocol. For Claude Code,
+  set `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) in the agent's `env`; see
+  [ACP authentication](docs/acp/authentication.md)
 
 The GUI [`example-chat`](example/Main.qml) drives all of this — pick the **Claude Code (ACP)**
 provider to launch and chat with a real agent. See the

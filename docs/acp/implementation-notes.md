@@ -103,6 +103,10 @@ Two corrections came out of that run and are folded in:
   implied. `StopReason::*` and the loopback tests now use these.
 - **`usage_update`** is a real `session/update` variant (token accounting), surfaced via
   the `AcpClient::usageUpdated(sessionId, rawJson)` signal.
+- **Auth is the agent's job.** Claude's adapter advertises no `authMethods` and reads its
+  credential from the environment (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`) or the
+  macOS Keychain. A GUI-launched host must pass a token explicitly — see
+  [`authentication.md`](authentication.md).
 
 ## Still unvalidated (no live trigger yet)
 

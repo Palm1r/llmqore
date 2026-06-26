@@ -86,7 +86,7 @@ JsonRpcSession::JsonRpcSession(Transport *transport, QObject *parent)
                 try {
                     it.value()(progress, total, message);
                 } catch (const std::exception &e) {
-                    qCWarning(llmMcpLog).noquote()
+                    qCWarning(llmRpcLog).noquote()
                         << QString("Progress handler for %1 threw: %2").arg(token, e.what());
                 }
             }
@@ -142,7 +142,7 @@ JsonRpcSession::CancellableRequest JsonRpcSession::sendRequestImpl(
         if (!it->progressToken.isEmpty())
             clearProgressHandler(it->progressToken);
         m_pending.erase(it);
-        qCWarning(llmMcpLog).noquote() << QString("Request %1 timed out").arg(id);
+        qCWarning(llmRpcLog).noquote() << QString("Request %1 timed out").arg(id);
         p->setException(
             std::make_exception_ptr(TimeoutError(QString("Request %1 timed out").arg(id))));
         p->finish();
@@ -159,7 +159,7 @@ JsonRpcSession::CancellableRequest JsonRpcSession::sendRequestImpl(
     if (!outgoing.isEmpty())
         message.insert("params", outgoing);
 
-    qCDebug(llmMcpLog).noquote()
+    qCDebug(llmRpcLog).noquote()
         << QString("--> request id=%1 method=%2%3")
                .arg(id,
                     method,
@@ -209,7 +209,7 @@ void JsonRpcSession::cancelRequest(const QString &id, const QString &reason)
 void JsonRpcSession::sendNotification(const QString &method, const QJsonObject &params)
 {
     if (!m_transport || !m_transport->isOpen()) {
-        qCWarning(llmMcpLog).noquote()
+        qCWarning(llmRpcLog).noquote()
             << QString("Dropping notification %1: transport not open").arg(method);
         return;
     }
@@ -221,7 +221,7 @@ void JsonRpcSession::sendNotification(const QString &method, const QJsonObject &
     if (!params.isEmpty())
         message.insert("params", params);
 
-    qCDebug(llmMcpLog).noquote() << QString("--> notify method=%1").arg(method);
+    qCDebug(llmRpcLog).noquote() << QString("--> notify method=%1").arg(method);
     m_transport->send(message);
 }
 
@@ -294,7 +294,7 @@ void JsonRpcSession::onMessageReceived(const QJsonObject &message)
 {
     const QString jsonrpc = message.value("jsonrpc").toString();
     if (jsonrpc != QLatin1String("2.0")) {
-        qCWarning(llmMcpLog).noquote()
+        qCWarning(llmRpcLog).noquote()
             << QString("Dropping message with unexpected jsonrpc field: %1").arg(jsonrpc);
         emit protocolError(QStringLiteral("Invalid jsonrpc field"));
         return;
@@ -311,7 +311,7 @@ void JsonRpcSession::onMessageReceived(const QJsonObject &message)
     } else if (hasResultOrError) {
         dispatchResponse(message);
     } else {
-        qCWarning(llmMcpLog).noquote() << "Dropping unclassifiable JSON-RPC message";
+        qCWarning(llmRpcLog).noquote() << "Dropping unclassifiable JSON-RPC message";
         emit protocolError(QStringLiteral("Unclassifiable JSON-RPC message"));
     }
 }
@@ -340,7 +340,7 @@ void JsonRpcSession::dispatchRequest(const QJsonObject &message)
     if (!idStr.isEmpty())
         m_inFlightIncomingIds.insert(idStr);
 
-    qCDebug(llmMcpLog).noquote() << QString("<-- request method=%1").arg(method);
+    qCDebug(llmRpcLog).noquote() << QString("<-- request method=%1").arg(method);
     emit incomingRequest(method);
 
     auto it = m_requestHandlers.find(method);
@@ -436,14 +436,14 @@ void JsonRpcSession::dispatchResponse(const QJsonObject &message)
     } else if (idValue.isDouble()) {
         id = QString::number(static_cast<qint64>(idValue.toDouble()));
     } else {
-        qCDebug(llmMcpLog).noquote()
+        qCDebug(llmRpcLog).noquote()
             << "Dropping response with null/missing id (non-spec-compliant server)";
         return;
     }
 
     auto it = m_pending.find(id);
     if (it == m_pending.end()) {
-        qCWarning(llmMcpLog).noquote()
+        qCWarning(llmRpcLog).noquote()
             << QString("Received response for unknown id: %1").arg(id);
         return;
     }
@@ -462,11 +462,11 @@ void JsonRpcSession::dispatchResponse(const QJsonObject &message)
         const int code = err.value("code").toInt();
         const QString msg = err.value("message").toString();
         const QJsonValue data = err.value("data");
-        qCDebug(llmMcpLog).noquote()
+        qCDebug(llmRpcLog).noquote()
             << QString("<-- response id=%1 error=%2").arg(id).arg(msg);
         promise->setException(std::make_exception_ptr(RemoteError(code, msg, data)));
     } else {
-        qCDebug(llmMcpLog).noquote() << QString("<-- response id=%1 ok").arg(id);
+        qCDebug(llmRpcLog).noquote() << QString("<-- response id=%1 ok").arg(id);
         promise->addResult(message.value("result"));
     }
     promise->finish();
@@ -477,14 +477,14 @@ void JsonRpcSession::dispatchNotification(const QJsonObject &message)
     const QString method = message.value("method").toString();
     const QJsonObject params = message.value("params").toObject();
 
-    qCDebug(llmMcpLog).noquote() << QString("<-- notify method=%1").arg(method);
+    qCDebug(llmRpcLog).noquote() << QString("<-- notify method=%1").arg(method);
 
     auto it = m_notifyHandlers.find(method);
     if (it != m_notifyHandlers.end()) {
         try {
             (*it)(params);
         } catch (const std::exception &e) {
-            qCWarning(llmMcpLog).noquote()
+            qCWarning(llmRpcLog).noquote()
                 << QString("Notification handler for %1 threw: %2").arg(method, e.what());
         }
     }

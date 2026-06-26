@@ -68,14 +68,14 @@ bool AcpAgentRegistry::loadFromFile(const QString &path)
 {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qCWarning(llmMcpLog).noquote()
+        qCWarning(llmAcpLog).noquote()
             << QString("AcpAgentRegistry: cannot open %1: %2").arg(path, file.errorString());
         return false;
     }
     QJsonParseError err{};
     const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &err);
     if (err.error != QJsonParseError::NoError || !doc.isObject()) {
-        qCWarning(llmMcpLog).noquote()
+        qCWarning(llmAcpLog).noquote()
             << QString("AcpAgentRegistry: cannot parse %1: %2").arg(path, err.errorString());
         return false;
     }
