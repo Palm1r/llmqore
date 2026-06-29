@@ -103,7 +103,7 @@ public:
     virtual RequestID ask(
         const QString &prompt, RequestMode mode = RequestMode::Streaming)
         = 0;
-    virtual QFuture<QList<QString>> listModels() = 0;
+    virtual QFuture<QList<QString>> listModels(const QString &endpoint = {}) = 0;
     void cancelRequest(const RequestID &requestId);
 
     QString url() const;

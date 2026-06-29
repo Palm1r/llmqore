@@ -60,9 +60,10 @@ RequestID OpenAIResponsesClient::ask(const QString &prompt, RequestMode mode)
     return sendMessage(payload, {}, mode);
 }
 
-QFuture<QList<QString>> OpenAIResponsesClient::listModels()
+QFuture<QList<QString>> OpenAIResponsesClient::listModels(const QString &endpoint)
 {
-    QUrl url(m_url + "/models");
+    const QString resolved = endpoint.isEmpty() ? QStringLiteral("/models") : endpoint;
+    QUrl url(m_url + resolved);
     QNetworkRequest request = prepareNetworkRequest(url);
 
     return LLMQore::compat(httpClient()->send(request, QByteArrayView("GET")))

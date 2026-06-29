@@ -71,9 +71,10 @@ RequestID GoogleAIClient::ask(const QString &prompt, RequestMode mode)
     return sendMessage(payload, {}, mode);
 }
 
-QFuture<QList<QString>> GoogleAIClient::listModels()
+QFuture<QList<QString>> GoogleAIClient::listModels(const QString &endpoint)
 {
-    QUrl url(QString("%1/models").arg(m_url));
+    const QString resolved = endpoint.isEmpty() ? QStringLiteral("/models") : endpoint;
+    QUrl url(m_url + resolved);
     QNetworkRequest request = prepareNetworkRequest(url);
 
     return LLMQore::compat(httpClient()->send(request, QByteArrayView("GET")))

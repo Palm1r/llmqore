@@ -46,7 +46,7 @@ public:
         return {};
     }
     RequestID ask(const QString &, RequestMode) override { return {}; }
-    QFuture<QList<QString>> listModels() override { return {}; }
+    QFuture<QList<QString>> listModels(const QString & = {}) override { return {}; }
 
 protected:
     ToolSchemaFormat toolSchemaFormat() const override { return ToolSchemaFormat::OpenAI; }

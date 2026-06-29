@@ -43,9 +43,10 @@ RequestID MistralClient::sendMessage(
     return id;
 }
 
-QFuture<QList<QString>> MistralClient::listModels()
+QFuture<QList<QString>> MistralClient::listModels(const QString &endpoint)
 {
-    QUrl url(m_url + "/v1/models");
+    const QString resolved = endpoint.isEmpty() ? QStringLiteral("/v1/models") : endpoint;
+    QUrl url(m_url + resolved);
     QNetworkRequest request = prepareNetworkRequest(url);
 
     return LLMQore::compat(httpClient()->send(request, QByteArrayView("GET")))
