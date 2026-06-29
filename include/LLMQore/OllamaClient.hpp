@@ -31,7 +31,7 @@ public:
         const QString &prompt, RequestMode mode = RequestMode::Streaming) override;
     ToolSchemaFormat toolSchemaFormat() const override { return ToolSchemaFormat::Ollama; }
 
-    QFuture<QList<QString>> listModels() override;
+    QFuture<QList<QString>> listModels(const QString &endpoint = {}) override;
 
 protected:
     QNetworkRequest prepareNetworkRequest(const QUrl &url) const override;

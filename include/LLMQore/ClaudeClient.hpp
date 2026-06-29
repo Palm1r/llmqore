@@ -30,7 +30,7 @@ public:
         const QString &prompt, RequestMode mode = RequestMode::Streaming) override;
     ToolSchemaFormat toolSchemaFormat() const override { return ToolSchemaFormat::Claude; }
 
-    QFuture<QList<QString>> listModels() override;
+    QFuture<QList<QString>> listModels(const QString &endpoint = {}) override;
 
     void setUseExtendedCacheTTL(bool enabled);
     bool useExtendedCacheTTL() const noexcept;

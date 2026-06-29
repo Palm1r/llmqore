@@ -354,7 +354,7 @@ public:
         return sendMessage(QJsonObject{{"prompt", prompt}}, {}, mode);
     }
 
-    QFuture<QList<QString>> listModels() override
+    QFuture<QList<QString>> listModels(const QString & = {}) override
     {
         QPromise<QList<QString>> p;
         p.start();
