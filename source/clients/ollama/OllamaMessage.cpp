@@ -137,7 +137,8 @@ void OllamaMessage::handleStopReason(bool done, const QString &doneReason)
             }
         }
 
-        updateStateFromDone();
+        static const StopReasonMap kMap{{}, {}, {}, {}, MessageState::Final, true};
+        m_state = resolveState(m_doneReason, kMap);
     }
 }
 bool OllamaMessage::tryParseToolCall()
@@ -310,46 +311,12 @@ bool OllamaMessage::isAccumulatingToolCall() const
     return !m_contentAddedToTextBlock && m_accumulatedContent.trimmed().startsWith('{');
 }
 
-void OllamaMessage::startNewContinuation()
+void OllamaMessage::clearDerivedCaches()
 {
-    qCDebug(llmOllamaLog).noquote() << "Starting new continuation";
-
-    BaseMessage::startNewContinuation();
     m_accumulatedContent.clear();
     m_done = false;
     m_doneReason.clear();
     m_contentAddedToTextBlock = false;
-    m_currentThinkingIndex = -1;
-}
-
-void OllamaMessage::updateStateFromDone()
-{
-    if (!currentToolUseContent().empty()) {
-        m_state = MessageState::RequiresToolExecution;
-        qCDebug(llmOllamaLog).noquote()
-            << QString("State set to RequiresToolExecution, tools count=%1")
-                   .arg(currentToolUseContent().size());
-    } else {
-        m_state = MessageState::Final;
-        qCDebug(llmOllamaLog).noquote() << "State set to Final";
-    }
-}
-
-int OllamaMessage::getOrCreateThinkingContentIndex()
-{
-    if (m_currentThinkingIndex >= 0)
-        return m_currentThinkingIndex;
-
-    for (int i = 0; i < m_currentBlocks.size(); ++i) {
-        if (std::holds_alternative<ThinkingContent>(m_currentBlocks[i])) {
-            m_currentThinkingIndex = i;
-            return m_currentThinkingIndex;
-        }
-    }
-
-    m_currentThinkingIndex = addCurrentContent(ThinkingContent{});
-    qCDebug(llmOllamaLog).noquote() << "Created new ThinkingContent block";
-    return m_currentThinkingIndex;
 }
 
 } // namespace LLMQore

@@ -34,21 +34,18 @@ public:
 
     bool isAccumulatingToolCall() const;
 
-    void startNewContinuation() override;
-
 private:
+    void clearDerivedCaches() override;
+
     bool m_done = false;
     QString m_doneReason;
     QString m_accumulatedContent;
     bool m_contentAddedToTextBlock = false;
-    int m_currentThinkingIndex = -1;
     quint64 m_toolCallSequence = 0;
 
     QString makeToolCallId(const QString &name);
-    void updateStateFromDone();
     bool tryParseToolCall();
     QString stripMarkdownCodeFence(const QString &content) const;
-    int getOrCreateThinkingContentIndex();
 };
 
 } // namespace LLMQore

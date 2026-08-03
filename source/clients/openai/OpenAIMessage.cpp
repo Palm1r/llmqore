@@ -99,48 +99,36 @@ void OpenAIMessage::handleToolCallStart(int index, const QString &id, const QStr
     qCDebug(llmOpenAILog).noquote()
         << QString("handleToolCallStart index=%1, id=%2, name=%3").arg(index).arg(id, name);
 
-    m_toolCallByIndex[index] = addCurrentContent(ToolUseContent{id, name, {}});
-    m_pendingToolArguments[index] = "";
+    m_toolCalls.start(index, addCurrentContent(ToolUseContent{id, name, {}}));
 }
 
 void OpenAIMessage::handleToolCallDelta(int index, const QString &argumentsDelta)
 {
-    if (m_pendingToolArguments.contains(index)) {
-        m_pendingToolArguments[index] += argumentsDelta;
-    }
+    m_toolCalls.delta(index, argumentsDelta);
 }
 
 void OpenAIMessage::handleToolCallComplete(int index)
 {
-    if (!m_pendingToolArguments.contains(index))
-        return;
-
-    QString jsonArgs = m_pendingToolArguments.take(index);
-    QJsonObject argsObject;
-
-    if (!jsonArgs.isEmpty()) {
-        QJsonDocument doc = QJsonDocument::fromJson(jsonArgs.toUtf8());
-        if (doc.isObject())
-            argsObject = doc.object();
-    }
-
-    if (auto *toolContent = blockAt<ToolUseContent>(m_toolCallByIndex.value(index, -1)))
-        toolContent->input = argsObject;
-
-    m_toolCallByIndex.remove(index);
+    completeToolCall(m_toolCalls, index);
 }
 
 void OpenAIMessage::completeAllPendingToolCalls()
 {
-    const auto indices = m_pendingToolArguments.keys();
-    for (int index : indices)
-        handleToolCallComplete(index);
+    completeAllToolCalls(m_toolCalls);
 }
 
 void OpenAIMessage::handleStopReason(const QString &finishReason)
 {
+    static const StopReasonMap kMap{
+        {QStringLiteral("tool_calls")},
+        {},
+        {QStringLiteral("stop")},
+        {},
+        MessageState::Complete,
+        false};
+
     m_finishReason = finishReason;
-    updateStateFromFinishReason();
+    m_state = resolveState(m_finishReason, kMap);
 }
 
 QJsonObject OpenAIMessage::serializeTurn(TurnRole role, const QList<TurnContent> &blocks)
@@ -231,43 +219,10 @@ QJsonArray OpenAIMessage::createToolResultMessages(
         });
 }
 
-void OpenAIMessage::startNewContinuation()
+void OpenAIMessage::clearDerivedCaches()
 {
-    qCDebug(llmOpenAILog).noquote() << "Starting new continuation";
-
-    m_toolCallByIndex.clear();
-
-    BaseMessage::startNewContinuation();
-    m_pendingToolArguments.clear();
+    m_toolCalls.clear();
     m_finishReason.clear();
-    m_currentThinkingIndex = -1;
-}
-
-int OpenAIMessage::getOrCreateThinkingContentIndex()
-{
-    if (m_currentThinkingIndex >= 0)
-        return m_currentThinkingIndex;
-
-    for (int i = 0; i < m_currentBlocks.size(); ++i) {
-        if (std::holds_alternative<ThinkingContent>(m_currentBlocks[i])) {
-            m_currentThinkingIndex = i;
-            return m_currentThinkingIndex;
-        }
-    }
-
-    m_currentThinkingIndex = addCurrentContent(ThinkingContent{});
-    return m_currentThinkingIndex;
-}
-
-void OpenAIMessage::updateStateFromFinishReason()
-{
-    if (m_finishReason == "tool_calls" && !currentToolUseContent().empty()) {
-        m_state = MessageState::RequiresToolExecution;
-    } else if (m_finishReason == "stop") {
-        m_state = MessageState::Final;
-    } else {
-        m_state = MessageState::Complete;
-    }
 }
 
 } // namespace LLMQore

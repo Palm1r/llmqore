@@ -26,7 +26,18 @@ A `BaseMessage` moves through four states during its lifetime:
 
 The message exposes its current block list, and provides filtered accessors for tool-use blocks and thinking blocks. It also carries a raw stop-reason string that varies by provider -- each provider's message subclass sets it from the wire format. `BaseClient` captures this string before the message is cleaned up.
 
-When a continuation turn begins, the message deletes all current blocks, empties its list, and resets to the Building state. Providers can override this reset to preserve cross-continuation state (for example, tracking how many thinking blocks have already been emitted).
+When a continuation turn begins, the message deletes all current blocks, empties its list, and resets to the Building state.
+
+`startNewContinuation()` is **not** virtual, and that is the point. Every cache a translator keeps -- an index into the block list, a pending-arguments buffer, an item-id table -- points at blocks the base is about to delete, so it has to be dropped *first*. When the reset was an override, that ordering was a convention two of five translators got wrong, and the resulting bug (a thinking block reattached across a tool round) was caught in production, not review. The base now calls `clearDerivedCaches()` and only then deletes: a translator that forgets to override it loses nothing, and a translator that overrides it cannot run too late.
+
+### Shared translator machinery
+
+Four things every translator needed, so `BaseMessage` owns them:
+
+- **`ToolCallAccumulator<Key>`** -- open a call, append argument fragments, close it. The key type is the provider's (`int` index for Claude and OpenAI Chat, `QString` call id for Responses); the tail -- parse the accumulated JSON and write it into the block -- is `completeToolCall`, which exists once. It deliberately leaves the block alone when nothing was accumulated: a buffered turn arrives with its arguments already complete, and overwriting them with an empty parse is exactly how the buffered path used to lose them.
+- **`StopReasonMap`** -- the stop-reason automaton as provider data (`toolReasons`, `completeReasons`, `finalReasons`, `openReasons`, a fallback state, and a flag for providers whose terminal event carries no reason at all). `resolveState` is the one implementation. Same trick as `UsageSchema`.
+- **`renderToolContent(block, naming)`** -- one renderer for MCP-shaped tool results. Only two things vary: the provider's word for a text block, and the image shape, which is a callback because the two shapes share no structure.
+- **`getOrCreateThinkingContentIndex()`** -- next to `getOrCreateTextContentIndex()`, with the cached index living in the base so the reset above can clear it.
 
 ---
 

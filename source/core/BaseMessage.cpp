@@ -81,8 +81,79 @@ void BaseMessage::clearBlocks()
 
 void BaseMessage::startNewContinuation()
 {
+    clearDerivedCaches();
+    m_currentThinkingIndex = -1;
     clearBlocks();
     m_state = MessageState::Building;
+}
+
+void BaseMessage::clearDerivedCaches() {}
+
+QJsonObject BaseMessage::parseToolArguments(const QString &json)
+{
+    if (json.isEmpty())
+        return {};
+
+    const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
+    return doc.isObject() ? doc.object() : QJsonObject{};
+}
+
+MessageState BaseMessage::resolveState(const QString &reason, const StopReasonMap &map) const
+{
+    const bool hasToolCalls = !currentToolUseContent().isEmpty();
+    if (hasToolCalls && (map.toolsOverrideReason || map.toolReasons.contains(reason)))
+        return MessageState::RequiresToolExecution;
+
+    if (map.completeReasons.contains(reason))
+        return MessageState::Complete;
+    if (map.finalReasons.contains(reason))
+        return MessageState::Final;
+    if (map.openReasons.contains(reason))
+        return MessageState::Building;
+
+    return map.fallback;
+}
+
+QJsonObject renderToolContent(const ToolContent &block, const ToolContentNaming &naming)
+{
+    const auto asText = [&naming](const QString &text) {
+        return QJsonObject{{"type", naming.textType}, {"text", text}};
+    };
+
+    return std::visit(
+        detail::overloaded{
+            [&](const TextContent &c) -> QJsonObject { return asText(c.text); },
+            [&](const ImageContent &c) -> QJsonObject { return naming.renderImage(c); },
+            [&](const AudioContent &c) -> QJsonObject {
+                return asText(
+                    QString("[audio: %1]")
+                        .arg(c.mimeType.isEmpty() ? QStringLiteral("unknown") : c.mimeType));
+            },
+            [&](const ResourceContent &c) -> QJsonObject {
+                if (!c.isBlob() && !c.text().isEmpty())
+                    return asText(c.text());
+                return asText(QString("[resource: %1]").arg(c.uri));
+            },
+            [&](const ResourceLinkContent &c) -> QJsonObject {
+                return asText(QString("[resource link: %1]").arg(c.uri));
+            }},
+        block);
+}
+
+int BaseMessage::getOrCreateThinkingContentIndex()
+{
+    if (m_currentThinkingIndex >= 0)
+        return m_currentThinkingIndex;
+
+    for (int i = 0; i < m_currentBlocks.size(); ++i) {
+        if (std::holds_alternative<ThinkingContent>(m_currentBlocks[i])) {
+            m_currentThinkingIndex = i;
+            return m_currentThinkingIndex;
+        }
+    }
+
+    m_currentThinkingIndex = addCurrentContent(ThinkingContent{});
+    return m_currentThinkingIndex;
 }
 
 int BaseMessage::getOrCreateTextContentIndex()

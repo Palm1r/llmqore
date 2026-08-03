@@ -125,9 +125,11 @@ void ClaudeMessage::beginBlock(int index, const QJsonObject &data)
         }
 
     } else if (blockType == "tool_use") {
-        addCurrentContent(ToolUseContent{
-            data["id"].toString(), data["name"].toString(), data["input"].toObject()});
-        m_pendingToolInputs[index] = "";
+        m_toolCalls.start(
+            index,
+            addCurrentContent(
+                ToolUseContent{
+                    data["id"].toString(), data["name"].toString(), data["input"].toObject()}));
 
     } else if (blockType == "thinking") {
         const QString signature = data["signature"].toString();
@@ -158,10 +160,7 @@ void ClaudeMessage::applyDelta(int index, const QJsonObject &delta)
             textContent->text += delta["text"].toString();
 
     } else if (deltaType == "input_json_delta") {
-        QString partialJson = delta["partial_json"].toString();
-        if (m_pendingToolInputs.contains(index)) {
-            m_pendingToolInputs[index] += partialJson;
-        }
+        m_toolCalls.delta(index, delta["partial_json"].toString());
 
     } else if (deltaType == "thinking_delta") {
         if (auto *thinkingContent = blockAt<ThinkingContent>(index))
@@ -187,65 +186,42 @@ void ClaudeMessage::applyDelta(int index, const QJsonObject &delta)
 
 void ClaudeMessage::endBlock(int index)
 {
-    if (!m_pendingToolInputs.contains(index))
-        return;
-
-    const QString accumulated = m_pendingToolInputs.take(index);
-    if (accumulated.isEmpty())
-        return;
-
-    const QJsonDocument doc = QJsonDocument::fromJson(accumulated.toUtf8());
-    if (auto *toolContent = blockAt<ToolUseContent>(index))
-        toolContent->input = doc.isObject() ? doc.object() : QJsonObject{};
+    completeToolCall(m_toolCalls, index);
 }
 
 void ClaudeMessage::handleStopReason(const QString &stopReason)
 {
+    static const StopReasonMap kMap{
+        {QStringLiteral("tool_use")},
+        {},
+        {QStringLiteral("end_turn")},
+        {},
+        MessageState::Complete,
+        false};
+
     m_stopReason = stopReason;
-    updateStateFromStopReason();
+    m_state = resolveState(m_stopReason, kMap);
 }
 
 namespace {
 
 QJsonObject toClaudeInnerBlock(const ToolContent &block)
 {
-    return std::visit(
-        detail::overloaded{
-            [](const TextContent &c) -> QJsonObject {
-                return QJsonObject{{"type", "text"}, {"text", c.text}};
-            },
-            [](const ImageContent &c) -> QJsonObject {
-                if (c.isUrl()) {
-                    return QJsonObject{
-                        {"type", "image"},
-                        {"source", QJsonObject{{"type", "url"}, {"url", c.url().toString()}}}};
-                }
-                const QString mime = c.mimeType.isEmpty() ? QStringLiteral("image/png")
-                                                          : c.mimeType;
+    static const ToolContentNaming kNaming{
+        QLatin1String("text"), [](const ImageContent &c) -> QJsonObject {
+            if (c.isUrl()) {
                 return QJsonObject{
                     {"type", "image"},
-                    {"source",
-                     QJsonObject{
-                         {"type", "base64"}, {"media_type", mime}, {"data", c.base64()}}}};
-            },
-            [](const AudioContent &c) -> QJsonObject {
-                return QJsonObject{
-                    {"type", "text"},
-                    {"text",
-                     QString("[audio: %1]")
-                         .arg(c.mimeType.isEmpty() ? QStringLiteral("unknown") : c.mimeType)}};
-            },
-            [](const ResourceContent &c) -> QJsonObject {
-                if (!c.isBlob() && !c.text().isEmpty())
-                    return QJsonObject{{"type", "text"}, {"text", c.text()}};
-                return QJsonObject{
-                    {"type", "text"}, {"text", QString("[resource: %1]").arg(c.uri)}};
-            },
-            [](const ResourceLinkContent &c) -> QJsonObject {
-                return QJsonObject{
-                    {"type", "text"}, {"text", QString("[resource link: %1]").arg(c.uri)}};
-            }},
-        block);
+                    {"source", QJsonObject{{"type", "url"}, {"url", c.url().toString()}}}};
+            }
+            const QString mime = c.mimeType.isEmpty() ? QStringLiteral("image/png") : c.mimeType;
+            return QJsonObject{
+                {"type", "image"},
+                {"source",
+                 QJsonObject{{"type", "base64"}, {"media_type", mime}, {"data", c.base64()}}}};
+        }};
+
+    return renderToolContent(block, kNaming);
 }
 
 QJsonValue buildClaudeToolResultContent(const ToolResult &r)
@@ -366,24 +342,10 @@ QList<RedactedThinkingContent> ClaudeMessage::currentRedactedThinkingContent() c
     return redactedBlocks;
 }
 
-void ClaudeMessage::startNewContinuation()
+void ClaudeMessage::clearDerivedCaches()
 {
-    qCDebug(llmClaudeLog).noquote() << "Starting new continuation";
-
-    BaseMessage::startNewContinuation();
-    m_pendingToolInputs.clear();
+    m_toolCalls.clear();
     m_stopReason.clear();
-}
-
-void ClaudeMessage::updateStateFromStopReason()
-{
-    if (m_stopReason == "tool_use" && !currentToolUseContent().empty()) {
-        m_state = MessageState::RequiresToolExecution;
-    } else if (m_stopReason == "end_turn") {
-        m_state = MessageState::Final;
-    } else {
-        m_state = MessageState::Complete;
-    }
 }
 
 } // namespace LLMQore

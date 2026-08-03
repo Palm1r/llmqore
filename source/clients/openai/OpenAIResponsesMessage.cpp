@@ -43,45 +43,23 @@ OpenAIResponsesMessage::OpenAIResponsesMessage(QObject *parent)
 
 void OpenAIResponsesMessage::handleContentDelta(const QString &text)
 {
-    if (!text.isEmpty()) {
-        const int index = getOrCreateTextItemIndex();
-        if (auto *textItem = blockAt<TextContent>(index))
-            textItem->text += text;
-    }
+    appendTextDelta(text);
 }
 
 void OpenAIResponsesMessage::handleToolCallStart(const QString &callId, const QString &name)
 {
-    m_toolCalls[callId] = addCurrentContent(ToolUseContent{callId, name, {}});
-    m_pendingToolArguments[callId] = "";
+    m_toolCalls.start(callId, addCurrentContent(ToolUseContent{callId, name, {}}));
 }
 
 void OpenAIResponsesMessage::handleToolCallDelta(const QString &callId, const QString &argumentsDelta)
 {
-    if (m_pendingToolArguments.contains(callId)) {
-        m_pendingToolArguments[callId] += argumentsDelta;
-    }
+    m_toolCalls.delta(callId, argumentsDelta);
 }
 
 void OpenAIResponsesMessage::handleToolCallComplete(
     const QString &callId, const QString &finalArguments)
 {
-    if (m_pendingToolArguments.contains(callId) && m_toolCalls.contains(callId)) {
-        const QString jsonArgs = !finalArguments.isEmpty() ? finalArguments
-                                                           : m_pendingToolArguments[callId];
-        QJsonObject argsObject;
-
-        if (!jsonArgs.isEmpty()) {
-            QJsonDocument doc = QJsonDocument::fromJson(jsonArgs.toUtf8());
-            if (doc.isObject()) {
-                argsObject = doc.object();
-            }
-        }
-
-        if (auto *toolContent = blockAt<ToolUseContent>(m_toolCalls.value(callId, -1)))
-            toolContent->input = argsObject;
-        m_pendingToolArguments.remove(callId);
-    }
+    completeToolCall(m_toolCalls, callId, finalArguments);
 }
 
 void OpenAIResponsesMessage::handleReasoningStart(const QString &itemId)
@@ -118,8 +96,16 @@ void OpenAIResponsesMessage::handleReasoningDelta(const QString &itemId, const Q
 
 void OpenAIResponsesMessage::handleStopReason(const QString &status)
 {
+    static const StopReasonMap kMap{
+        {QStringLiteral("completed")},
+        {QStringLiteral("completed")},
+        {QStringLiteral("failed"), QStringLiteral("cancelled"), QStringLiteral("incomplete")},
+        {QStringLiteral("in_progress")},
+        MessageState::Building,
+        false};
+
     m_status = status;
-    updateStateFromStatus();
+    m_state = resolveState(m_status, kMap);
 }
 
 namespace {
@@ -426,43 +412,20 @@ QList<QJsonObject> OpenAIResponsesMessage::serializeTurn(
 
 QJsonObject OpenAIResponsesMessage::toResponsesInnerBlock(const ToolContent &block)
 {
-    return std::visit(
-        detail::overloaded{
-            [](const TextContent &c) -> QJsonObject {
-                return QJsonObject{{"type", "input_text"}, {"text", c.text}};
-            },
-            [](const ImageContent &c) -> QJsonObject {
-                if (c.isUrl()) {
-                    return QJsonObject{
-                        {"type", "input_image"},
-                        {"image_url", c.url().toString()},
-                        {"detail", "auto"}};
-                }
-                const QString mime = c.mimeType.isEmpty() ? QStringLiteral("image/png")
-                                                          : c.mimeType;
+    static const ToolContentNaming kNaming{
+        QLatin1String("input_text"), [](const ImageContent &c) -> QJsonObject {
+            if (c.isUrl()) {
                 return QJsonObject{
-                    {"type", "input_image"},
-                    {"image_url", QStringLiteral("data:%1;base64,%2").arg(mime, c.base64())},
-                    {"detail", "auto"}};
-            },
-            [](const AudioContent &c) -> QJsonObject {
-                return QJsonObject{
-                    {"type", "input_text"},
-                    {"text",
-                     QString("[audio: %1]")
-                         .arg(c.mimeType.isEmpty() ? QStringLiteral("unknown") : c.mimeType)}};
-            },
-            [](const ResourceContent &c) -> QJsonObject {
-                if (!c.isBlob() && !c.text().isEmpty())
-                    return QJsonObject{{"type", "input_text"}, {"text", c.text()}};
-                return QJsonObject{
-                    {"type", "input_text"}, {"text", QString("[resource: %1]").arg(c.uri)}};
-            },
-            [](const ResourceLinkContent &c) -> QJsonObject {
-                return QJsonObject{
-                    {"type", "input_text"}, {"text", QString("[resource link: %1]").arg(c.uri)}};
-            }},
-        block);
+                    {"type", "input_image"}, {"image_url", c.url().toString()}, {"detail", "auto"}};
+            }
+            const QString mime = c.mimeType.isEmpty() ? QStringLiteral("image/png") : c.mimeType;
+            return QJsonObject{
+                {"type", "input_image"},
+                {"image_url", QStringLiteral("data:%1;base64,%2").arg(mime, c.base64())},
+                {"detail", "auto"}};
+        }};
+
+    return renderToolContent(block, kNaming);
 }
 
 
@@ -498,37 +461,11 @@ QString OpenAIResponsesMessage::accumulatedText() const
     return text;
 }
 
-void OpenAIResponsesMessage::updateStateFromStatus()
-{
-    if (m_status == "completed") {
-        if (!currentToolUseContent().isEmpty()) {
-            m_state = MessageState::RequiresToolExecution;
-        } else {
-            m_state = MessageState::Complete;
-        }
-    } else if (m_status == "in_progress") {
-        m_state = MessageState::Building;
-    } else if (m_status == "failed" || m_status == "cancelled" || m_status == "incomplete") {
-        m_state = MessageState::Final;
-    } else {
-        m_state = MessageState::Building;
-    }
-}
-
-int OpenAIResponsesMessage::getOrCreateTextItemIndex()
-{
-    return getOrCreateTextContentIndex();
-}
-
-void OpenAIResponsesMessage::startNewContinuation()
+void OpenAIResponsesMessage::clearDerivedCaches()
 {
     m_toolCalls.clear();
     m_thinkingBlocks.clear();
     m_itemIdToCallId.clear();
-
-    BaseMessage::startNewContinuation();
-
-    m_pendingToolArguments.clear();
     m_status.clear();
 }
 

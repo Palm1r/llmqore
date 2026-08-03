@@ -44,16 +44,11 @@ public:
     QJsonObject toProviderFormat() const;
     QJsonArray createToolResultMessages(const QHash<QString, ToolResult> &toolResults) const;
 
-    void startNewContinuation() override;
-
 private:
-    QString m_finishReason;
-    QHash<int, QString> m_pendingToolArguments;
-    QHash<int, int> m_toolCallByIndex;
-    int m_currentThinkingIndex = -1;
+    void clearDerivedCaches() override;
 
-    void updateStateFromFinishReason();
-    int getOrCreateThinkingContentIndex();
+    QString m_finishReason;
+    ToolCallAccumulator<int> m_toolCalls;
 };
 
 } // namespace LLMQore

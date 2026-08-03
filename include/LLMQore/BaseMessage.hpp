@@ -7,8 +7,10 @@
 
 #include <QHash>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QObject>
 #include <QSet>
+#include <QStringList>
 
 #include <LLMQore/LLMQore_global.h>
 
@@ -33,6 +35,25 @@ struct LLMQORE_EXPORT MessageEffects
     bool toolsReady = false;
 };
 
+struct LLMQORE_EXPORT StopReasonMap
+{
+    QStringList toolReasons;
+    QStringList completeReasons;
+    QStringList finalReasons;
+    QStringList openReasons;
+    MessageState fallback = MessageState::Complete;
+    bool toolsOverrideReason = false;
+};
+
+struct LLMQORE_EXPORT ToolContentNaming
+{
+    QLatin1String textType;
+    std::function<QJsonObject(const ImageContent &)> renderImage;
+};
+
+[[nodiscard]] LLMQORE_EXPORT QJsonObject
+renderToolContent(const ToolContent &block, const ToolContentNaming &naming);
+
 class LLMQORE_EXPORT BaseMessage : public QObject
 {
     Q_OBJECT
@@ -50,9 +71,72 @@ public:
 
     QList<PendingThinkingNotification> takePendingThinkingNotifications();
 
-    virtual void startNewContinuation();
+    void startNewContinuation();
 
 protected:
+    virtual void clearDerivedCaches();
+
+    template<typename Key>
+    struct ToolCallAccumulator
+    {
+        QHash<Key, int> blockIndex;
+        QHash<Key, QString> pending;
+
+        void start(const Key &key, int index)
+        {
+            blockIndex[key] = index;
+            pending[key] = QString();
+        }
+
+        void delta(const Key &key, const QString &fragment)
+        {
+            auto it = pending.find(key);
+            if (it != pending.end())
+                *it += fragment;
+        }
+
+        [[nodiscard]] bool isOpen(const Key &key) const { return pending.contains(key); }
+
+        void clear()
+        {
+            blockIndex.clear();
+            pending.clear();
+        }
+    };
+
+    [[nodiscard]] static QJsonObject parseToolArguments(const QString &json);
+
+    template<typename Key>
+    void completeToolCall(
+        ToolCallAccumulator<Key> &accumulator, const Key &key, const QString &finalArguments = {})
+    {
+        auto it = accumulator.pending.find(key);
+        if (it == accumulator.pending.end())
+            return;
+
+        const QString json = finalArguments.isEmpty() ? *it : finalArguments;
+        accumulator.pending.erase(it);
+        const int index = accumulator.blockIndex.take(key);
+
+        // Nothing was streamed for this call: whatever the opening event carried is
+        // already the complete input, and overwriting it would empty a buffered turn.
+        if (json.isEmpty())
+            return;
+
+        if (auto *tool = blockAt<ToolUseContent>(index))
+            tool->input = parseToolArguments(json);
+    }
+
+    template<typename Key>
+    void completeAllToolCalls(ToolCallAccumulator<Key> &accumulator)
+    {
+        const QList<Key> open = accumulator.pending.keys();
+        for (const Key &key : open)
+            completeToolCall(accumulator, key);
+    }
+
+    [[nodiscard]] MessageState resolveState(const QString &reason, const StopReasonMap &map) const;
+
     using ToolResultEmitter
         = std::function<void(const ToolUseContent &, const ToolResult &, QJsonArray &)>;
     [[nodiscard]] QJsonArray mapToolResults(
@@ -62,7 +146,10 @@ protected:
     QList<TurnContent> m_currentBlocks;
 
     int getOrCreateTextContentIndex();
+    int getOrCreateThinkingContentIndex();
     void appendTextDelta(const QString &delta);
+
+    int m_currentThinkingIndex = -1;
 
     void removeBlocksIf(const std::function<bool(const TurnContent &)> &predicate);
     void clearBlocks();

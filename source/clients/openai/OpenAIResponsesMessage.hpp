@@ -32,12 +32,12 @@ public:
 
     QString accumulatedText() const;
 
-    bool hasToolCalls() const noexcept { return !m_toolCalls.isEmpty(); }
-    bool hasThinkingContent() const noexcept { return !m_thinkingBlocks.isEmpty(); }
-
-    void startNewContinuation() override;
+    bool hasToolCalls() const { return !currentToolUseContent().isEmpty(); }
+    bool hasThinkingContent() const { return !currentThinkingContent().isEmpty(); }
 
 private:
+    void clearDerivedCaches() override;
+
     void handleContentDelta(const QString &text);
     void handleToolCallStart(const QString &callId, const QString &name);
     void handleToolCallDelta(const QString &callId, const QString &argumentsDelta);
@@ -58,13 +58,9 @@ private:
     static QString reasoningTextOf(const QJsonObject &item);
 
     QString m_status;
-    QHash<QString, QString> m_pendingToolArguments;
-    QHash<QString, int> m_toolCalls;
+    ToolCallAccumulator<QString> m_toolCalls;
     QHash<QString, int> m_thinkingBlocks;
     QHash<QString, QString> m_itemIdToCallId;
-
-    void updateStateFromStatus();
-    int getOrCreateTextItemIndex();
 };
 
 } // namespace LLMQore

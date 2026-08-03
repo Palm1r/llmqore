@@ -139,16 +139,9 @@ void GoogleMessage::handleToolCallComplete()
         return;
     }
 
-    QJsonObject args;
-    if (!m_pendingFunctionArgs.isEmpty()) {
-        QJsonDocument doc = QJsonDocument::fromJson(m_pendingFunctionArgs.toUtf8());
-        if (doc.isObject()) {
-            args = doc.object();
-        }
-    }
-
-    QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    addCurrentContent(ToolUseContent{id, m_currentFunctionName, args});
+    const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    addCurrentContent(
+        ToolUseContent{id, m_currentFunctionName, parseToolArguments(m_pendingFunctionArgs)});
 
     m_currentFunctionName.clear();
     m_pendingFunctionArgs.clear();
@@ -156,8 +149,16 @@ void GoogleMessage::handleToolCallComplete()
 
 void GoogleMessage::handleStopReason(const QString &reason)
 {
+    static const StopReasonMap kMap{
+        {QStringLiteral("STOP"), QStringLiteral("MAX_TOKENS")},
+        {},
+        {},
+        {},
+        MessageState::Complete,
+        false};
+
     m_finishReason = reason;
-    updateStateFromFinishReason();
+    m_state = resolveState(m_finishReason, kMap);
 }
 
 QJsonObject GoogleMessage::toProviderFormat() const
@@ -347,11 +348,8 @@ QString GoogleMessage::toolResultTurnRole(const QJsonArray &parts)
     return QStringLiteral("function");
 }
 
-void GoogleMessage::startNewContinuation()
+void GoogleMessage::clearDerivedCaches()
 {
-    qCDebug(llmGoogleLog).noquote() << "Starting new continuation";
-
-    BaseMessage::startNewContinuation();
     m_pendingFunctionArgs.clear();
     m_currentFunctionName.clear();
     m_finishReason.clear();
@@ -381,16 +379,6 @@ QString GoogleMessage::getErrorMessage() const
         return "Request failed due to an unknown reason";
     }
     return QString();
-}
-
-void GoogleMessage::updateStateFromFinishReason()
-{
-    if (m_finishReason == "STOP" || m_finishReason == "MAX_TOKENS") {
-        m_state = currentToolUseContent().isEmpty() ? MessageState::Complete
-                                                       : MessageState::RequiresToolExecution;
-    } else {
-        m_state = MessageState::Complete;
-    }
 }
 
 } // namespace LLMQore

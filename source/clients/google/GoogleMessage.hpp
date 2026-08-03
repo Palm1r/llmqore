@@ -37,10 +37,9 @@ public:
     QString stopReason() const override { return m_finishReason; }
     bool isErrorFinishReason() const;
     QString getErrorMessage() const;
-    void startNewContinuation() override;
 
 private:
-    void updateStateFromFinishReason();
+    void clearDerivedCaches() override;
 
     QString m_pendingFunctionArgs;
     QString m_currentFunctionName;
