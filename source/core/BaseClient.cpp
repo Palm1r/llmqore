@@ -563,6 +563,26 @@ QString BaseClient::parseHttpError(const HttpResponse &response) const
     return QString("HTTP %1: %2").arg(response.statusCode).arg(message);
 }
 
+void BaseClient::applyEffects(const RequestID &id, const MessageEffects &effects)
+{
+    if (!effects.fullText.isEmpty())
+        setResponseContent(id, effects.fullText);
+    else if (!effects.fallbackText.isEmpty() && responseContent(id).isEmpty())
+        setResponseContent(id, effects.fallbackText);
+
+    if (effects.thinkingCompleted)
+        notifyPendingThinkingBlocks(id);
+
+    if (!effects.chunk.isEmpty())
+        addChunk(id, effects.chunk);
+
+    if (!effects.usage.isEmpty())
+        applyUsage(id, effects.usage);
+
+    if (effects.toolsReady)
+        executeToolsFromMessage(id);
+}
+
 void BaseClient::processBufferedResponse(const RequestID &id, const QByteArray &data)
 {
     const QJsonDocument doc = QJsonDocument::fromJson(data);

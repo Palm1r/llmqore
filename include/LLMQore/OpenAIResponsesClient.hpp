@@ -53,7 +53,6 @@ protected:
     void processSseEvent(
         const RequestID &id, const SSEEvent &event, const QJsonObject &json) override;
     void processBufferedBody(const RequestID &id, const QJsonObject &body) override;
-    void cleanupDerivedData(const RequestID &id) override;
     QJsonObject buildContinuationPayload(
         const QJsonObject &originalPayload,
         BaseMessage *message,
@@ -61,10 +60,6 @@ protected:
     [[nodiscard]] QList<ErrorAnnotation> errorAnnotations() const override;
 
 private:
-    static QString extractAggregatedText(const QJsonObject &responseObj);
-    static QString extractReasoningText(const QJsonObject &item);
-
-    QHash<RequestID, QHash<QString, QString>> m_itemIdToCallId;
     ReasoningPersistence m_reasoningPersistence = ReasoningPersistence::Off;
 };
 

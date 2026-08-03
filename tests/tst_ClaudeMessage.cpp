@@ -90,7 +90,7 @@ TEST(ClaudeMessage, MessageStartCarriesUsageAndResetsTheTurn)
     msg.applyEvent(messageDelta("end_turn"));
     ASSERT_EQ(msg.state(), MessageState::Final);
 
-    const ClaudeMessage::Effects effects = msg.applyEvent(messageStart());
+    const MessageEffects effects = msg.applyEvent(messageStart());
 
     EXPECT_EQ(msg.state(), MessageState::Building);
     EXPECT_TRUE(msg.currentBlocks().isEmpty());
@@ -103,9 +103,9 @@ TEST(ClaudeMessage, TextDeltasAccumulateAndAreHandedBackAsChunks)
     ClaudeMessage msg;
     msg.applyEvent(blockStart(0, textBlock()));
 
-    const ClaudeMessage::Effects first = msg.applyEvent(
+    const MessageEffects first = msg.applyEvent(
         blockDelta(0, QJsonObject{{"type", "text_delta"}, {"text", "Hello "}}));
-    const ClaudeMessage::Effects second = msg.applyEvent(
+    const MessageEffects second = msg.applyEvent(
         blockDelta(0, QJsonObject{{"type", "text_delta"}, {"text", "world"}}));
 
     EXPECT_EQ(first.chunk, "Hello ");
@@ -123,7 +123,7 @@ TEST(ClaudeMessage, NonTextDeltasProduceNoChunk)
     msg.applyEvent(
         blockStart(0, QJsonObject{{"type", "thinking"}, {"thinking", ""}, {"signature", ""}}));
 
-    const ClaudeMessage::Effects effects = msg.applyEvent(
+    const MessageEffects effects = msg.applyEvent(
         blockDelta(0, QJsonObject{{"type", "thinking_delta"}, {"thinking", "hm"}}));
 
     EXPECT_TRUE(effects.chunk.isEmpty()) << "thinking never reaches chunkReceived";
@@ -200,7 +200,7 @@ TEST(ClaudeMessage, StopReasonEndTurnIsFinal)
     ClaudeMessage msg;
     startText(msg, 0, "hi");
 
-    const ClaudeMessage::Effects effects = msg.applyEvent(messageDelta("end_turn"));
+    const MessageEffects effects = msg.applyEvent(messageDelta("end_turn"));
 
     EXPECT_EQ(msg.state(), MessageState::Final);
     EXPECT_EQ(msg.stopReason(), "end_turn");
@@ -237,7 +237,7 @@ TEST(ClaudeMessage, StopReasonMaxTokensIsComplete)
 TEST(ClaudeMessage, MessageDeltaWithoutAStopReasonStillCarriesUsage)
 {
     ClaudeMessage msg;
-    const ClaudeMessage::Effects effects = msg.applyEvent(
+    const MessageEffects effects = msg.applyEvent(
         QJsonObject{
             {"type", "message_delta"},
             {"delta", QJsonObject{}},
@@ -251,7 +251,7 @@ TEST(ClaudeMessage, MessageDeltaWithoutAStopReasonStillCarriesUsage)
 TEST(ClaudeMessage, UnknownEventTypesAreIgnored)
 {
     ClaudeMessage msg;
-    const ClaudeMessage::Effects effects = msg.applyEvent(QJsonObject{{"type", "ping"}});
+    const MessageEffects effects = msg.applyEvent(QJsonObject{{"type", "ping"}});
 
     EXPECT_TRUE(effects.chunk.isEmpty());
     EXPECT_TRUE(effects.usage.isEmpty());
@@ -283,7 +283,7 @@ TEST(ClaudeMessage, BufferedResponseCollectsTextIntoOneChunk)
 {
     ClaudeMessage msg;
 
-    const ClaudeMessage::Effects effects = msg.applyResponse(
+    const MessageEffects effects = msg.applyResponse(
         QJsonObject{
             {"content", QJsonArray{textBlock("Hello "), textBlock("world")}},
             {"stop_reason", "end_turn"},
@@ -316,7 +316,7 @@ TEST(ClaudeMessage, BufferedThinkingIsNotReplayedTwice)
 {
     ClaudeMessage msg;
 
-    const ClaudeMessage::Effects effects = msg.applyResponse(
+    const MessageEffects effects = msg.applyResponse(
         QJsonObject{
             {"content",
              QJsonArray{
@@ -336,7 +336,7 @@ TEST(ClaudeMessage, BufferedResponseWithoutAStopReasonLeavesTheTurnOpen)
 {
     ClaudeMessage msg;
 
-    const ClaudeMessage::Effects effects = msg.applyResponse(
+    const MessageEffects effects = msg.applyResponse(
         QJsonObject{{"content", QJsonArray{textBlock("partial")}}});
 
     EXPECT_FALSE(effects.toolsReady);

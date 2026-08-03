@@ -18,16 +18,8 @@ public:
     // How this provider spells tool schemas on the way out.
     static const ToolDialect &toolDialect();
 
-    struct Effects
-    {
-        QString chunk;
-        QJsonObject usage;
-        bool thinkingCompleted = false;
-        bool toolsReady = false;
-    };
-
-    Effects applyEvent(const QJsonObject &event);
-    Effects applyResponse(const QJsonObject &response);
+    MessageEffects applyEvent(const QJsonObject &event);
+    MessageEffects applyResponse(const QJsonObject &response);
 
     QString stopReason() const override { return m_stopReason; }
 

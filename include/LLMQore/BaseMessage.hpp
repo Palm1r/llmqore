@@ -23,6 +23,16 @@ struct LLMQORE_EXPORT PendingThinkingNotification
     QString signature;
 };
 
+struct LLMQORE_EXPORT MessageEffects
+{
+    QString chunk;
+    QString fullText;
+    QString fallbackText;
+    QJsonObject usage;
+    bool thinkingCompleted = false;
+    bool toolsReady = false;
+};
+
 class LLMQORE_EXPORT BaseMessage : public QObject
 {
     Q_OBJECT

@@ -39,9 +39,9 @@ ClaudeMessage::ClaudeMessage(QObject *parent)
     : BaseMessage(parent)
 {}
 
-ClaudeMessage::Effects ClaudeMessage::applyEvent(const QJsonObject &event)
+MessageEffects ClaudeMessage::applyEvent(const QJsonObject &event)
 {
-    Effects effects;
+    MessageEffects effects;
     const QString type = event["type"].toString();
 
     if (type == "message_start") {
@@ -73,9 +73,9 @@ ClaudeMessage::Effects ClaudeMessage::applyEvent(const QJsonObject &event)
     return effects;
 }
 
-ClaudeMessage::Effects ClaudeMessage::applyResponse(const QJsonObject &response)
+MessageEffects ClaudeMessage::applyResponse(const QJsonObject &response)
 {
-    Effects effects;
+    MessageEffects effects;
     startNewContinuation();
 
     const QJsonArray content = response["content"].toArray();

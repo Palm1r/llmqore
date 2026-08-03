@@ -116,15 +116,228 @@ void OpenAIResponsesMessage::handleReasoningDelta(const QString &itemId, const Q
         thinking->thinking += text;
 }
 
-void OpenAIResponsesMessage::handleReasoningComplete(const QString &itemId)
-{
-    Q_UNUSED(itemId);
-}
-
 void OpenAIResponsesMessage::handleStatus(const QString &status)
 {
     m_status = status;
     updateStateFromStatus();
+}
+
+namespace {
+
+const QLatin1String kStreamingReasoningPlaceholder(
+    "[Reasoning process completed, but detailed thinking is not available in streaming mode.]");
+
+} // namespace
+
+MessageEffects OpenAIResponsesMessage::applyEvent(const QString &eventType, const QJsonObject &data)
+{
+    MessageEffects effects;
+
+    if (eventType == "response.output_text.delta") {
+        const QString delta = data["delta"].toString();
+        if (!delta.isEmpty()) {
+            handleContentDelta(delta);
+            effects.chunk = delta;
+        }
+
+    } else if (eventType == "response.output_text.done") {
+        effects.fullText = data["text"].toString();
+
+    } else if (eventType == "response.output_item.added") {
+        const QJsonObject item = data["item"].toObject();
+        const QString itemType = item["type"].toString();
+
+        if (itemType == "function_call") {
+            const QString callId = item["call_id"].toString();
+            const QString name = item["name"].toString();
+            if (!callId.isEmpty() && !name.isEmpty()) {
+                m_itemIdToCallId[item["id"].toString()] = callId;
+                handleToolCallStart(callId, name);
+            }
+        } else if (itemType == "reasoning") {
+            const QString itemId = item["id"].toString();
+            if (!itemId.isEmpty()) {
+                handleReasoningStart(itemId);
+                handleReasoningEncryptedContent(itemId, item["encrypted_content"].toString());
+            }
+        }
+
+    } else if (eventType == "response.reasoning_content.delta") {
+        handleReasoningDelta(data["item_id"].toString(), data["delta"].toString());
+
+    } else if (eventType == "response.reasoning_content.done") {
+        if (!data["item_id"].toString().isEmpty())
+            effects.thinkingCompleted = true;
+
+    } else if (eventType == "response.function_call_arguments.delta") {
+        const QString callId = m_itemIdToCallId.value(data["item_id"].toString());
+        const QString delta = data["delta"].toString();
+        if (!callId.isEmpty() && !delta.isEmpty())
+            handleToolCallDelta(callId, delta);
+
+    } else if (
+        eventType == "response.function_call_arguments.done"
+        || eventType == "response.output_item.done") {
+        applyItemDone(data, effects);
+
+    } else if (eventType == "response.completed") {
+        applyTerminal(data["response"].toObject(), {}, effects);
+
+    } else if (eventType == "response.incomplete") {
+        applyTerminal(data["response"].toObject(), QStringLiteral("incomplete"), effects);
+    }
+
+    return effects;
+}
+
+MessageEffects OpenAIResponsesMessage::applyResponse(const QJsonObject &response)
+{
+    MessageEffects effects;
+
+    const QJsonArray output = response["output"].toArray();
+    for (const QJsonValue &item : output)
+        applyOutputItem(item.toObject(), effects);
+
+    effects.thinkingCompleted = true;
+
+    const QString status = response["status"].toString();
+    if (!status.isEmpty()) {
+        handleStatus(status);
+        effects.toolsReady = true;
+    }
+
+    effects.usage = response;
+    return effects;
+}
+
+void OpenAIResponsesMessage::applyOutputItem(const QJsonObject &item, MessageEffects &effects)
+{
+    const QString itemType = item["type"].toString();
+
+    if (itemType == "reasoning") {
+        applyReasoningItem(item["id"].toString(), item, {});
+
+    } else if (itemType == "message") {
+        const QJsonArray content = item["content"].toArray();
+        for (const QJsonValue &part : content) {
+            const QJsonObject partObject = part.toObject();
+            if (partObject["type"].toString() != QLatin1String("output_text"))
+                continue;
+            const QString text = partObject["text"].toString();
+            if (text.isEmpty())
+                continue;
+            handleContentDelta(text);
+            effects.chunk += text;
+        }
+
+    } else if (itemType == "function_call") {
+        const QString callId = item["call_id"].toString();
+        const QString name = item["name"].toString();
+        if (!callId.isEmpty() && !name.isEmpty()) {
+            handleToolCallStart(callId, name);
+            handleToolCallComplete(callId, item["arguments"].toString());
+        }
+    }
+}
+
+void OpenAIResponsesMessage::applyItemDone(const QJsonObject &data, MessageEffects &effects)
+{
+    const QString itemId = data["item_id"].toString();
+    const QJsonObject item = data["item"].toObject();
+    const QString itemType = item["type"].toString();
+
+    if (!item.isEmpty() && itemType == "reasoning") {
+        const QString finalItemId = itemId.isEmpty() ? item["id"].toString() : itemId;
+        applyReasoningItem(finalItemId, item, kStreamingReasoningPlaceholder);
+        if (!finalItemId.isEmpty())
+            effects.thinkingCompleted = true;
+
+    } else if (item.isEmpty() && !itemId.isEmpty()) {
+        const QString callId = m_itemIdToCallId.value(itemId);
+        if (!callId.isEmpty())
+            handleToolCallComplete(callId, data["arguments"].toString());
+
+    } else if (!item.isEmpty() && itemType == "function_call") {
+        const QString callId = item["call_id"].toString();
+        if (!callId.isEmpty())
+            handleToolCallComplete(callId, item["arguments"].toString());
+    }
+}
+
+void OpenAIResponsesMessage::applyReasoningItem(
+    const QString &itemId, const QJsonObject &item, const QString &placeholder)
+{
+    if (itemId.isEmpty())
+        return;
+
+    QString text = reasoningTextOf(item);
+    if (text.isEmpty())
+        text = placeholder;
+
+    const QString encrypted = item["encrypted_content"].toString();
+    if (text.isEmpty() && encrypted.isEmpty())
+        return;
+
+    handleReasoningDelta(itemId, text);
+    handleReasoningEncryptedContent(itemId, encrypted);
+}
+
+void OpenAIResponsesMessage::applyTerminal(
+    const QJsonObject &response, const QString &fallbackStatus, MessageEffects &effects)
+{
+    if (response.isEmpty()) {
+        handleStatus(fallbackStatus);
+    } else {
+        effects.fallbackText = aggregatedTextOf(response);
+        handleStatus(response["status"].toString());
+        effects.usage = response;
+    }
+
+    effects.thinkingCompleted = true;
+    effects.toolsReady = true;
+}
+
+QString OpenAIResponsesMessage::aggregatedTextOf(const QJsonObject &response)
+{
+    if (response.contains("output_text")) {
+        const QString outputText = response["output_text"].toString();
+        if (!outputText.isEmpty())
+            return outputText;
+    }
+
+    QString aggregated;
+    const QJsonArray output = response["output"].toArray();
+    for (const QJsonValue &item : output) {
+        const QJsonObject itemObject = item.toObject();
+        if (itemObject["type"].toString() != QLatin1String("message"))
+            continue;
+        const QJsonArray content = itemObject["content"].toArray();
+        for (const QJsonValue &part : content) {
+            const QJsonObject partObject = part.toObject();
+            if (partObject["type"].toString() == QLatin1String("output_text"))
+                aggregated += partObject["text"].toString();
+        }
+    }
+    return aggregated;
+}
+
+QString OpenAIResponsesMessage::reasoningTextOf(const QJsonObject &item)
+{
+    const QJsonArray summary = item["summary"].toArray();
+    for (const QJsonValue &entry : summary) {
+        const QJsonObject entryObject = entry.toObject();
+        if (entryObject["type"].toString() == QLatin1String("summary_text"))
+            return entryObject["text"].toString();
+    }
+
+    QStringList texts;
+    const QJsonArray content = item["content"].toArray();
+    for (const QJsonValue &entry : content) {
+        const QJsonObject entryObject = entry.toObject();
+        if (entryObject["type"].toString() == QLatin1String("reasoning_text"))
+            texts.append(entryObject["text"].toString());
+    }
+    return texts.join(QLatin1Char('\n'));
 }
 
 QList<QJsonObject> OpenAIResponsesMessage::toItemsFormat(ReasoningPersistence reasoning) const
@@ -311,6 +524,7 @@ void OpenAIResponsesMessage::startNewContinuation()
 {
     m_toolCalls.clear();
     m_thinkingBlocks.clear();
+    m_itemIdToCallId.clear();
 
     BaseMessage::startNewContinuation();
 
