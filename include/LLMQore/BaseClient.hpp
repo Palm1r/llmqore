@@ -175,6 +175,8 @@ signals:
         const QString &result);
 
 protected:
+    [[nodiscard]] QJsonObject attachToolDefinitions(QJsonObject payload) const;
+
     virtual const ToolDialect &toolDialect() const = 0;
 
     virtual const UsageSchema &usageSchema() const = 0;

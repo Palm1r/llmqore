@@ -10,7 +10,12 @@
 #include <QSignalSpy>
 
 #include <LLMQore/BaseTool.hpp>
+#include <LLMQore/ClaudeClient.hpp>
+#include <LLMQore/Conversation.hpp>
+#include <LLMQore/GoogleAIClient.hpp>
+#include <LLMQore/OllamaClient.hpp>
 #include <LLMQore/OpenAIClient.hpp>
+#include <LLMQore/OpenAIResponsesClient.hpp>
 #include <LLMQore/ToolsManager.hpp>
 
 #include "FakeHttpTransport.hpp"
@@ -56,22 +61,22 @@ public:
 QByteArray toolCallTurn(const QByteArray &toolId)
 {
     return "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"" + toolId
-        + "\",\"function\":{\"name\":\"echo\",\"arguments\":\"{}\"}}]}}]}\n\n"
-          "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
-          "data: [DONE]\n\n";
+           + "\",\"function\":{\"name\":\"echo\",\"arguments\":\"{}\"}}]}}]}\n\n"
+             "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
+             "data: [DONE]\n\n";
 }
 
 QByteArray twoToolCallTurn(const QByteArray &firstName, const QByteArray &secondName)
 {
     return "data: {\"choices\":[{\"delta\":{\"tool_calls\":["
            "{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\""
-        + firstName
-        + "\",\"arguments\":\"{}\"}},"
-          "{\"index\":1,\"id\":\"call_2\",\"function\":{\"name\":\""
-        + secondName
-        + "\",\"arguments\":\"{}\"}}]}}]}\n\n"
-          "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
-          "data: [DONE]\n\n";
+           + firstName
+           + "\",\"arguments\":\"{}\"}},"
+             "{\"index\":1,\"id\":\"call_2\",\"function\":{\"name\":\""
+           + secondName
+           + "\",\"arguments\":\"{}\"}}]}}]}\n\n"
+             "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
+             "data: [DONE]\n\n";
 }
 
 QStringList toolCallIdsOf(const QJsonObject &payload)
@@ -88,9 +93,10 @@ QStringList toolCallIdsOf(const QJsonObject &payload)
 
 QByteArray finalTurn(const QByteArray &text)
 {
-    return "data: {\"choices\":[{\"delta\":{\"content\":\"" + text + "\"}}]}\n\n"
-           "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
-           "data: [DONE]\n\n";
+    return "data: {\"choices\":[{\"delta\":{\"content\":\"" + text
+           + "\"}}]}\n\n"
+             "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+             "data: [DONE]\n\n";
 }
 
 // Tool completion reaches the loop through a queued QFutureWatcher signal, so
@@ -294,8 +300,7 @@ TEST(ToolRounds, AnUnknownToolBesideAValidOneStillClosesOneRound)
     ASSERT_TRUE(LLMQoreTest::waitForStreams(transport, 2)) << "the round never continued";
     pump();
 
-    EXPECT_EQ(transport.streamCount(), 2)
-        << "one model turn must produce exactly one continuation";
+    EXPECT_EQ(transport.streamCount(), 2) << "one model turn must produce exactly one continuation";
     EXPECT_EQ(client.toolRounds(id), 1);
 
     const QStringList ids = toolCallIdsOf(transport.streamRequest(1).payload());
@@ -318,8 +323,7 @@ TEST(ToolRounds, TwoValidToolsCloseOneRound)
     EXPECT_EQ(transport.streamCount(), 2);
     EXPECT_EQ(client.toolRounds(id), 1);
     EXPECT_EQ(tool->calls, 2);
-    EXPECT_EQ(toolCallIdsOf(transport.streamRequest(1).payload()),
-              (QStringList{"call_1", "call_2"}));
+    EXPECT_EQ(toolCallIdsOf(transport.streamRequest(1).payload()), (QStringList{"call_1", "call_2"}));
 }
 
 TEST(ToolRounds, CancelClearsTheLedger)
@@ -369,4 +373,143 @@ TEST(ToolRounds, ContinuationDeltaWithEmptyIdDoesNotStartAPhantomCall)
     transport.lastStream()->sendAll(finalTurn("done"));
     pump();
     EXPECT_EQ(completed.count(), 1);
+}
+
+namespace {
+
+Conversation oneUserTurn(const QString &text)
+{
+    Conversation conversation;
+    conversation.addUser(text);
+    return conversation;
+}
+
+QJsonObject firstStreamPayload(const FakeHttpTransport &transport)
+{
+    return transport.streamRequest(0).payload();
+}
+
+} // namespace
+
+TEST(ToolDefinitions, ClaudeAskCarriesTheRegisteredDefinition)
+{
+    FakeHttpTransport transport;
+    ClaudeClient client("http://fake.local", "sk-test", "claude-test", &transport);
+    client.tools()->addTool(new CountingTool(&client));
+
+    client.ask(oneUserTurn(QStringLiteral("go")));
+    ASSERT_EQ(transport.streamCount(), 1);
+
+    const QJsonArray tools = firstStreamPayload(transport).value("tools").toArray();
+    ASSERT_EQ(tools.size(), 1);
+    EXPECT_EQ(tools[0].toObject().value("name").toString(), QStringLiteral("echo"));
+    EXPECT_TRUE(tools[0].toObject().contains("input_schema"));
+}
+
+TEST(ToolDefinitions, OpenAIAskCarriesTheRegisteredDefinition)
+{
+    FakeHttpTransport transport;
+    OpenAIClient client("http://fake.local/v1", "sk-test", "gpt-test", &transport);
+    client.tools()->addTool(new CountingTool(&client));
+
+    client.ask(oneUserTurn(QStringLiteral("go")));
+    ASSERT_EQ(transport.streamCount(), 1);
+
+    const QJsonArray tools = firstStreamPayload(transport).value("tools").toArray();
+    ASSERT_EQ(tools.size(), 1);
+    EXPECT_EQ(tools[0].toObject().value("type").toString(), QStringLiteral("function"));
+    EXPECT_EQ(
+        tools[0].toObject().value("function").toObject().value("name").toString(),
+        QStringLiteral("echo"));
+}
+
+TEST(ToolDefinitions, GoogleAskCarriesTheRegisteredDefinition)
+{
+    FakeHttpTransport transport;
+    GoogleAIClient client("http://fake.local", "key", "gemini-test", &transport);
+    client.tools()->addTool(new CountingTool(&client));
+
+    client.ask(oneUserTurn(QStringLiteral("go")));
+    ASSERT_EQ(transport.streamCount(), 1);
+
+    const QJsonArray tools = firstStreamPayload(transport).value("tools").toArray();
+    ASSERT_EQ(tools.size(), 1);
+    const QJsonArray declarations = tools[0].toObject().value("function_declarations").toArray();
+    ASSERT_EQ(declarations.size(), 1);
+    EXPECT_EQ(declarations[0].toObject().value("name").toString(), QStringLiteral("echo"));
+}
+
+TEST(ToolDefinitions, ResponsesAskCarriesTheRegisteredDefinition)
+{
+    FakeHttpTransport transport;
+    OpenAIResponsesClient client("http://fake.local/v1", "sk-test", "gpt-test", &transport);
+    client.tools()->addTool(new CountingTool(&client));
+
+    client.ask(oneUserTurn(QStringLiteral("go")));
+    ASSERT_EQ(transport.streamCount(), 1);
+
+    const QJsonArray tools = firstStreamPayload(transport).value("tools").toArray();
+    ASSERT_EQ(tools.size(), 1);
+    const QJsonObject definition = tools[0].toObject();
+    EXPECT_EQ(definition.value("type").toString(), QStringLiteral("function"));
+    EXPECT_EQ(definition.value("name").toString(), QStringLiteral("echo"));
+    EXPECT_FALSE(definition.contains("function"));
+}
+
+TEST(ToolDefinitions, OllamaAskCarriesTheRegisteredDefinition)
+{
+    FakeHttpTransport transport;
+    OllamaClient client("http://fake.local", {}, "llama-test", &transport);
+    client.tools()->addTool(new CountingTool(&client));
+
+    client.ask(oneUserTurn(QStringLiteral("go")));
+    ASSERT_EQ(transport.streamCount(), 1);
+
+    const QJsonArray tools = firstStreamPayload(transport).value("tools").toArray();
+    ASSERT_EQ(tools.size(), 1);
+    EXPECT_EQ(
+        tools[0].toObject().value("function").toObject().value("name").toString(),
+        QStringLiteral("echo"));
+}
+
+TEST(ToolDefinitions, EmptyRegistryOmitsTheKeyEntirely)
+{
+    FakeHttpTransport transport;
+    OpenAIClient client("http://fake.local/v1", "sk-test", "gpt-test", &transport);
+    client.tools();
+
+    client.ask(oneUserTurn(QStringLiteral("go")));
+    ASSERT_EQ(transport.streamCount(), 1);
+
+    EXPECT_FALSE(firstStreamPayload(transport).contains(QStringLiteral("tools")))
+        << "an empty registry must not send \"tools\": [] -- providers differ on it";
+}
+
+TEST(ToolDefinitions, ExtraOverridesTheAttachedDefinitions)
+{
+    FakeHttpTransport transport;
+    OpenAIClient client("http://fake.local/v1", "sk-test", "gpt-test", &transport);
+    client.tools()->addTool(new CountingTool(&client));
+
+    client.ask(oneUserTurn(QStringLiteral("go")), QJsonObject{{"tools", QJsonArray{}}});
+    ASSERT_EQ(transport.streamCount(), 1);
+
+    EXPECT_TRUE(firstStreamPayload(transport).value("tools").toArray().isEmpty())
+        << "a host that names \"tools\" in extra still wins";
+}
+
+TEST(ToolDefinitions, DefinitionsSurviveIntoTheContinuationRequest)
+{
+    FakeHttpTransport transport;
+    OpenAIClient client("http://fake.local/v1", "sk-test", "gpt-test", &transport);
+    client.tools()->addTool(new CountingTool(&client));
+
+    client.ask(oneUserTurn(QStringLiteral("go")));
+    ASSERT_EQ(transport.streamCount(), 1);
+
+    transport.lastStream()->sendAll(toolCallTurn("call_1"));
+    ASSERT_TRUE(LLMQoreTest::waitForStreams(transport, 2));
+
+    const QJsonArray tools = transport.streamRequest(1).payload().value("tools").toArray();
+    EXPECT_EQ(tools.size(), 1) << "the continuation is built from the original payload";
 }

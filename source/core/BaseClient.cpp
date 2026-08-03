@@ -734,13 +734,25 @@ void BaseClient::addChunk(const RequestID &id, const QString &chunk)
     emit accumulatedReceived(id, accumulated);
 }
 
+QJsonObject BaseClient::attachToolDefinitions(QJsonObject payload) const
+{
+    if (!m_impl->toolsManager)
+        return payload;
+
+    const QJsonArray definitions = m_impl->toolsManager->getToolsDefinitions();
+    if (!definitions.isEmpty())
+        payload.insert(QStringLiteral("tools"), definitions);
+
+    return payload;
+}
+
 RequestID BaseClient::ask(
     const Conversation &conversation, const QJsonObject &extra, RequestMode mode)
 {
     Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
                "BaseClient::ask called from non-owning thread");
 
-    QJsonObject payload = buildConversationPayload(conversation);
+    QJsonObject payload = attachToolDefinitions(buildConversationPayload(conversation));
     for (auto it = extra.constBegin(); it != extra.constEnd(); ++it)
         payload.insert(it.key(), it.value());
 

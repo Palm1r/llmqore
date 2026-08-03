@@ -12,10 +12,11 @@
 #include <QTimer>
 
 #include <LLMQore/ClaudeClient.hpp>
+#include <LLMQore/Conversation.hpp>
 #include <LLMQore/McpClient.hpp>
-#include <LLMQore/RpcPipeTransport.hpp>
 #include <LLMQore/McpServer.hpp>
 #include <LLMQore/McpTypes.hpp>
+#include <LLMQore/RpcPipeTransport.hpp>
 #include <LLMQore/ToolsManager.hpp>
 
 using namespace LLMQore;
@@ -117,26 +118,20 @@ TEST_F(ClaudeMcpIntegrationTest, ClaudeCallsMcpEchoTool)
     QEventLoop loop;
     wireLoggingSignals(claude.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["max_tokens"] = 500;
-    payload["stream"] = true;
-    payload["tools"] = claude->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content",
-         "Use the echo tool to echo exactly the message 'mcp loopback ok'. "
-         "Then tell me what the tool returned."}}};
+    Conversation conversation;
+    conversation.addUser(
+        "Use the echo tool to echo exactly the message 'mcp loopback ok'. "
+        "Then tell me what the tool returned.");
 
-    claude->sendMessage(payload);
+    claude->ask(conversation, QJsonObject{{"max_tokens", 500}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
     EXPECT_FALSE(result.failed) << result.diagnostics();
-    EXPECT_FALSE(result.toolCalls.isEmpty())
-        << "Model did not invoke the MCP-backed echo tool\n" << result.diagnostics();
+    EXPECT_FALSE(result.toolCalls.isEmpty()) << "Model did not invoke the MCP-backed echo tool\n"
+                                             << result.diagnostics();
 
     // Check that at least one observed tool call mentions the echo tool.
     bool sawEcho = false;
@@ -156,17 +151,10 @@ TEST_F(ClaudeMcpIntegrationTest, ClaudeCallsMcpCalculatorTool)
     QEventLoop loop;
     wireLoggingSignals(claude.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["max_tokens"] = 500;
-    payload["stream"] = true;
-    payload["tools"] = claude->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content",
-         "Use the calculator tool to multiply 13 by 17. Report the numeric result."}}};
+    Conversation conversation;
+    conversation.addUser("Use the calculator tool to multiply 13 by 17. Report the numeric result.");
 
-    claude->sendMessage(payload);
+    claude->ask(conversation, QJsonObject{{"max_tokens", 500}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -174,6 +162,6 @@ TEST_F(ClaudeMcpIntegrationTest, ClaudeCallsMcpCalculatorTool)
     EXPECT_TRUE(result.completed) << result.diagnostics();
     EXPECT_FALSE(result.failed) << result.diagnostics();
     EXPECT_FALSE(result.toolCalls.isEmpty()) << result.diagnostics();
-    EXPECT_TRUE(result.fullText.contains("221"))
-        << "Expected 13*17=221 in the final answer\n" << result.diagnostics();
+    EXPECT_TRUE(result.fullText.contains("221")) << "Expected 13*17=221 in the final answer\n"
+                                                 << result.diagnostics();
 }

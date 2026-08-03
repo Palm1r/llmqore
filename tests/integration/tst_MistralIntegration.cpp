@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "IntegrationTestHelpers.hpp"
+#include <LLMQore/Conversation.hpp>
 #include <LLMQore/MistralClient.hpp>
 
 using namespace LLMQore;
@@ -92,8 +93,7 @@ TEST_F(MistralIntegrationTest, StreamingChunks)
     payload["max_tokens"] = 500;
     payload["stream"] = true;
     payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content", "Count from 1 to 30, one number per line, no other text."}}};
+        {"role", "user"}, {"content", "Count from 1 to 30, one number per line, no other text."}}};
 
     client->sendMessage(payload);
 
@@ -114,17 +114,11 @@ TEST_F(MistralIntegrationTest, ToolUse_EchoTool)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["max_tokens"] = 300;
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content",
-         "Use the echo tool to echo 'integration test works'. Then tell me the result."}}};
+    Conversation conversation;
+    conversation.addUser(
+        "Use the echo tool to echo 'integration test works'. Then tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation, QJsonObject{{"max_tokens", 300}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -145,16 +139,10 @@ TEST_F(MistralIntegrationTest, ToolUse_Calculator)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["max_tokens"] = 300;
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content", "Use the calculator to multiply 7 by 8. Tell me the result."}}};
+    Conversation conversation;
+    conversation.addUser("Use the calculator to multiply 7 by 8. Tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation, QJsonObject{{"max_tokens", 300}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "IntegrationTestHelpers.hpp"
+#include <LLMQore/Conversation.hpp>
 #include <LLMQore/OpenAIClient.hpp>
 
 using namespace LLMQore;
@@ -85,8 +86,8 @@ TEST_F(QwenIntegrationTest, BufferedTextResponse)
 
     QJsonObject payload;
     payload["model"] = m_model;
-    payload["messages"]
-        = QJsonArray{QJsonObject{{"role", "user"}, {"content", "Reply with exactly: buffered"}}};
+    payload["messages"] = QJsonArray{
+        QJsonObject{{"role", "user"}, {"content", "Reply with exactly: buffered"}}};
 
     client->sendMessage(payload, {}, RequestMode::Buffered);
 
@@ -94,9 +95,8 @@ TEST_F(QwenIntegrationTest, BufferedTextResponse)
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
-    EXPECT_LE(result.chunks.size(), 1)
-        << "Buffered mode delivers the answer in one piece\n"
-        << result.diagnostics();
+    EXPECT_LE(result.chunks.size(), 1) << "Buffered mode delivers the answer in one piece\n"
+                                       << result.diagnostics();
     EXPECT_FALSE(result.fullText.isEmpty()) << result.diagnostics();
 }
 
@@ -109,13 +109,10 @@ TEST_F(QwenIntegrationTest, ToolUse_Calculator)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["messages"] = QJsonArray{
-        QJsonObject{{"role", "user"}, {"content", "Use the calculator tool to compute 2+2."}}};
-    payload["tools"] = client->tools()->getToolsDefinitions();
+    Conversation conversation;
+    conversation.addUser("Use the calculator tool to compute 2+2.");
 
-    client->sendMessage(payload);
+    client->ask(conversation);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 

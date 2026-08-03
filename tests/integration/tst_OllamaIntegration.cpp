@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "IntegrationTestHelpers.hpp"
+#include <LLMQore/Conversation.hpp>
 #include <LLMQore/OllamaClient.hpp>
 
 #include <QTcpSocket>
@@ -32,8 +33,7 @@ protected:
 
     std::unique_ptr<OllamaClient> createClient()
     {
-        return std::make_unique<OllamaClient>(
-            m_url, QString(), m_model);
+        return std::make_unique<OllamaClient>(m_url, QString(), m_model);
     }
 
     QString m_url;
@@ -98,8 +98,7 @@ TEST_F(OllamaIntegrationTest, StreamingChunks)
     // a single chunk — counting to 30 gives ~90 characters, which always
     // streams as multiple chunks.
     payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content", "Count from 1 to 30, one number per line, no other text."}}};
+        {"role", "user"}, {"content", "Count from 1 to 30, one number per line, no other text."}}};
 
     client->sendMessage(payload);
 
@@ -120,15 +119,10 @@ TEST_F(OllamaIntegrationTest, ToolUse_EchoTool)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content", "Use the echo tool to echo 'ollama test works'. Then tell me the result."}}};
+    Conversation conversation;
+    conversation.addUser("Use the echo tool to echo 'ollama test works'. Then tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
 
@@ -147,14 +141,10 @@ TEST_F(OllamaIntegrationTest, ToolUse_Calculator)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"}, {"content", "Use the calculator to add 15 and 27. Tell me the result."}}};
+    Conversation conversation;
+    conversation.addUser("Use the calculator to add 15 and 27. Tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
 

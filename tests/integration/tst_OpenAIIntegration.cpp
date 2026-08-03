@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "IntegrationTestHelpers.hpp"
+#include <LLMQore/Conversation.hpp>
 #include <LLMQore/OpenAIClient.hpp>
 
 using namespace LLMQore;
@@ -21,8 +22,7 @@ protected:
 
     std::unique_ptr<OpenAIClient> createClient()
     {
-        return std::make_unique<OpenAIClient>(
-            m_url, m_apiKey, m_model);
+        return std::make_unique<OpenAIClient>(m_url, m_apiKey, m_model);
     }
 
     QString m_apiKey;
@@ -89,8 +89,7 @@ TEST_F(OpenAIIntegrationTest, StreamingChunks)
     // a single SSE chunk — counting to 30 gives ~90 characters, which the
     // API always streams as multiple chunks.
     payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content", "Count from 1 to 30, one number per line, no other text."}}};
+        {"role", "user"}, {"content", "Count from 1 to 30, one number per line, no other text."}}};
 
     client->sendMessage(payload);
 
@@ -111,17 +110,11 @@ TEST_F(OpenAIIntegrationTest, ToolUse_EchoTool)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["max_tokens"] = 300;
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content",
-         "Use the echo tool to echo 'integration test works'. Then tell me the result."}}};
+    Conversation conversation;
+    conversation.addUser(
+        "Use the echo tool to echo 'integration test works'. Then tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation, QJsonObject{{"max_tokens", 300}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -142,16 +135,10 @@ TEST_F(OpenAIIntegrationTest, ToolUse_Calculator)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["max_tokens"] = 300;
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content", "Use the calculator to multiply 7 by 8. Tell me the result."}}};
+    Conversation conversation;
+    conversation.addUser("Use the calculator to multiply 7 by 8. Tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation, QJsonObject{{"max_tokens", 300}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 

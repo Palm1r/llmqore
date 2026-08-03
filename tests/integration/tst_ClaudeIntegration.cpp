@@ -3,6 +3,7 @@
 
 #include "IntegrationTestHelpers.hpp"
 #include <LLMQore/ClaudeClient.hpp>
+#include <LLMQore/Conversation.hpp>
 
 using namespace LLMQore;
 using namespace LLMQore::IntegrationTest;
@@ -21,8 +22,7 @@ protected:
 
     std::unique_ptr<ClaudeClient> createClient()
     {
-        return std::make_unique<ClaudeClient>(
-            m_url, m_apiKey, m_model);
+        return std::make_unique<ClaudeClient>(m_url, m_apiKey, m_model);
     }
 
     QString m_apiKey;
@@ -115,18 +115,12 @@ TEST_F(ClaudeIntegrationTest, ToolUse_EchoTool)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["max_tokens"] = 500;
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content",
-         "Use the echo tool to echo the message 'integration test works'. "
-         "Then tell me the result."}}};
+    Conversation conversation;
+    conversation.addUser(
+        "Use the echo tool to echo the message 'integration test works'. "
+        "Then tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation, QJsonObject{{"max_tokens", 500}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
@@ -147,16 +141,10 @@ TEST_F(ClaudeIntegrationTest, ToolUse_Calculator)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["max_tokens"] = 500;
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content", "Use the calculator tool to multiply 7 by 8. Tell me the result."}}};
+    Conversation conversation;
+    conversation.addUser("Use the calculator tool to multiply 7 by 8. Tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation, QJsonObject{{"max_tokens", 500}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
 
