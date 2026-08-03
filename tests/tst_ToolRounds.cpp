@@ -546,3 +546,278 @@ TEST(ToolRounds, BufferedToolCallsProduceTheSameContinuationAsTheEquivalentStrea
         << "buffered and streamed turns must reach the wire as the same continuation";
     EXPECT_EQ(fromBuffered.value("tools"), fromStream.value("tools"));
 }
+
+// --- T27: a full tool round through the transport seam, once per continuation shape ---
+
+namespace {
+
+QJsonArray continuationMessages(const QJsonObject &payload, const QString &key)
+{
+    return payload.value(key).toArray();
+}
+
+} // namespace
+
+TEST(ToolRounds, ClaudeRunsAFullRoundAndPutsResultsInAUserTurn)
+{
+    FakeHttpTransport transport;
+    ClaudeClient client("http://fake.local", "sk-test", "claude-test", &transport);
+    auto *tool = new CountingTool(&client);
+    client.tools()->addTool(tool);
+
+    QSignalSpy completed(&client, &BaseClient::requestCompleted);
+
+    client.ask(oneUserTurn(QStringLiteral("go")));
+    ASSERT_EQ(transport.streamCount(), 1);
+
+    transport.lastStream()->sendAll(
+        R"(data: {"type":"message_start","message":{"role":"assistant"}})"
+        "\n\n"
+        R"(data: {"type":"content_block_start","index":0,)"
+        R"("content_block":{"type":"tool_use","id":"toolu_1","name":"echo","input":{}}})"
+        "\n\n"
+        R"(data: {"type":"content_block_stop","index":0})"
+        "\n\n"
+        R"(data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}})"
+        "\n\n");
+
+    ASSERT_TRUE(LLMQoreTest::waitForStreams(transport, 2)) << "the round did not continue";
+    EXPECT_EQ(tool->calls, 1);
+
+    const QJsonArray messages
+        = continuationMessages(transport.streamRequest(1).payload(), QStringLiteral("messages"));
+    ASSERT_GE(messages.size(), 2);
+
+    const QJsonObject assistant = messages[messages.size() - 2].toObject();
+    EXPECT_EQ(assistant.value("role").toString(), QStringLiteral("assistant"));
+
+    const QJsonObject results = messages.last().toObject();
+    EXPECT_EQ(results.value("role").toString(), QStringLiteral("user"))
+        << "Claude carries tool results in a user turn";
+    const QJsonArray blocks = results.value("content").toArray();
+    ASSERT_EQ(blocks.size(), 1);
+    EXPECT_EQ(blocks[0].toObject().value("type").toString(), QStringLiteral("tool_result"));
+    EXPECT_EQ(blocks[0].toObject().value("tool_use_id").toString(), QStringLiteral("toolu_1"));
+
+    transport.lastStream()->sendAll(
+        R"(data: {"type":"message_start","message":{"role":"assistant"}})"
+        "\n\n"
+        R"(data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}})"
+        "\n\n");
+    pump();
+    EXPECT_EQ(completed.count(), 1);
+}
+
+TEST(ToolRounds, GoogleRunsAFullRoundAndUsesTheFunctionRole)
+{
+    FakeHttpTransport transport;
+    GoogleAIClient client("http://fake.local", "key", "gemini-test", &transport);
+    auto *tool = new CountingTool(&client);
+    client.tools()->addTool(tool);
+
+    client.ask(oneUserTurn(QStringLiteral("go")));
+    ASSERT_EQ(transport.streamCount(), 1);
+
+    transport.lastStream()->sendAll(
+        R"(data: {"candidates":[{"content":{"parts":[)"
+        R"({"functionCall":{"name":"echo","args":{}}}]},"finishReason":"STOP"}]})"
+        "\n\n");
+
+    ASSERT_TRUE(LLMQoreTest::waitForStreams(transport, 2)) << "the round did not continue";
+    EXPECT_EQ(tool->calls, 1);
+
+    const QJsonArray contents
+        = continuationMessages(transport.streamRequest(1).payload(), QStringLiteral("contents"));
+    ASSERT_GE(contents.size(), 2);
+
+    EXPECT_EQ(
+        contents[contents.size() - 2].toObject().value("role").toString(), QStringLiteral("model"));
+
+    const QJsonObject results = contents.last().toObject();
+    EXPECT_EQ(results.value("role").toString(), QStringLiteral("function"))
+        << "Google spells the tool-result turn \"function\"";
+    const QJsonArray parts = results.value("parts").toArray();
+    ASSERT_EQ(parts.size(), 1);
+    EXPECT_TRUE(parts[0].toObject().contains("functionResponse"));
+}
+
+TEST(ToolRounds, ResponsesRunsAFullRoundAndAppendsFunctionCallOutputItems)
+{
+    FakeHttpTransport transport;
+    OpenAIResponsesClient client("http://fake.local/v1", "sk-test", "gpt-test", &transport);
+    auto *tool = new CountingTool(&client);
+    client.tools()->addTool(tool);
+
+    client.ask(oneUserTurn(QStringLiteral("go")));
+    ASSERT_EQ(transport.streamCount(), 1);
+
+    transport.lastStream()->sendAll(
+        "event: response.output_item.added\n"
+        R"(data: {"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"echo"}})"
+        "\n\n"
+        "event: response.function_call_arguments.done\n"
+        R"(data: {"item_id":"item_1","arguments":"{}"})"
+        "\n\n"
+        "event: response.completed\n"
+        R"(data: {"response":{"status":"completed","output":[]}})"
+        "\n\n");
+
+    ASSERT_TRUE(LLMQoreTest::waitForStreams(transport, 2)) << "the round did not continue";
+    EXPECT_EQ(tool->calls, 1);
+
+    const QJsonArray input
+        = continuationMessages(transport.streamRequest(1).payload(), QStringLiteral("input"));
+    ASSERT_GE(input.size(), 2);
+
+    EXPECT_EQ(
+        input[input.size() - 2].toObject().value("type").toString(),
+        QStringLiteral("function_call"));
+
+    const QJsonObject output = input.last().toObject();
+    EXPECT_EQ(output.value("type").toString(), QStringLiteral("function_call_output"))
+        << "Responses continues with input items, not chat messages";
+    EXPECT_EQ(output.value("call_id").toString(), QStringLiteral("call_1"));
+}
+
+TEST(ToolRounds, OllamaRunsAFullRoundOverJsonLines)
+{
+    FakeHttpTransport transport;
+    OllamaClient client("http://fake.local", {}, "llama-test", &transport);
+    auto *tool = new CountingTool(&client);
+    client.tools()->addTool(tool);
+
+    client.ask(oneUserTurn(QStringLiteral("go")));
+    ASSERT_EQ(transport.streamCount(), 1);
+
+    transport.lastStream()->sendAll(
+        R"({"message":{"role":"assistant","tool_calls":[{"function":{"name":"echo","arguments":{}}}]},"done":false})"
+        "\n"
+        R"({"message":{"role":"assistant","content":""},"done":true,"done_reason":"stop"})"
+        "\n");
+
+    ASSERT_TRUE(LLMQoreTest::waitForStreams(transport, 2)) << "the round did not continue";
+    EXPECT_EQ(tool->calls, 1);
+
+    const QJsonArray messages
+        = continuationMessages(transport.streamRequest(1).payload(), QStringLiteral("messages"));
+    ASSERT_GE(messages.size(), 2);
+    EXPECT_EQ(messages.last().toObject().value("role").toString(), QStringLiteral("tool"));
+}
+
+// --- T27 step 2: the buffered path, once per provider that implements it ---
+
+namespace {
+
+QString bufferedAnswer(FakeHttpTransport &transport, BaseClient &client, const QByteArray &body)
+{
+    QSignalSpy completed(&client, &BaseClient::requestCompleted);
+
+    client.ask(oneUserTurn(QStringLiteral("go")), {}, RequestMode::Buffered);
+    if (transport.bufferedCount() != 1)
+        return QStringLiteral("<no buffered request>");
+
+    transport.respondToLast(200, body);
+    for (int i = 0; i < 32 && completed.isEmpty(); ++i)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+
+    if (completed.isEmpty())
+        return QStringLiteral("<never completed>");
+    return completed.first().at(1).toString();
+}
+
+} // namespace
+
+TEST(BufferedResponses, ClaudeReplaysWholeBlocks)
+{
+    FakeHttpTransport transport;
+    ClaudeClient client("http://fake.local", "sk-test", "claude-test", &transport);
+
+    EXPECT_EQ(
+        bufferedAnswer(
+            transport,
+            client,
+            R"({"content":[{"type":"text","text":"pong"}],"stop_reason":"end_turn"})"),
+        QStringLiteral("pong"));
+}
+
+TEST(BufferedResponses, OpenAIReplaysTheChoiceAsAStreamFrame)
+{
+    FakeHttpTransport transport;
+    OpenAIClient client("http://fake.local/v1", "sk-test", "gpt-test", &transport);
+
+    EXPECT_EQ(
+        bufferedAnswer(
+            transport,
+            client,
+            R"({"choices":[{"message":{"role":"assistant","content":"pong"},)"
+            R"("finish_reason":"stop"}]})"),
+        QStringLiteral("pong"));
+}
+
+TEST(BufferedResponses, GoogleReplaysThroughProcessStreamChunk)
+{
+    FakeHttpTransport transport;
+    GoogleAIClient client("http://fake.local", "key", "gemini-test", &transport);
+
+    EXPECT_EQ(
+        bufferedAnswer(
+            transport,
+            client,
+            R"({"candidates":[{"content":{"parts":[{"text":"pong"}]},"finishReason":"STOP"}]})"),
+        QStringLiteral("pong"));
+}
+
+TEST(BufferedResponses, ResponsesReplaysOutputItems)
+{
+    FakeHttpTransport transport;
+    OpenAIResponsesClient client("http://fake.local/v1", "sk-test", "gpt-test", &transport);
+
+    EXPECT_EQ(
+        bufferedAnswer(
+            transport,
+            client,
+            R"({"status":"completed","output":[{"type":"message","role":"assistant",)"
+            R"("content":[{"type":"output_text","text":"pong"}]}]})"),
+        QStringLiteral("pong"));
+}
+
+TEST(BufferedResponses, OllamaReplaysThroughProcessStreamData)
+{
+    FakeHttpTransport transport;
+    OllamaClient client("http://fake.local", {}, "llama-test", &transport);
+
+    EXPECT_EQ(
+        bufferedAnswer(
+            transport,
+            client,
+            R"({"message":{"role":"assistant","content":"pong"},"done":true,)"
+            R"("done_reason":"stop"})"),
+        QStringLiteral("pong"));
+}
+
+TEST(BufferedResponses, ATooluseTurnStillRunsTheRoundForEveryProvider)
+{
+    FakeHttpTransport transport;
+    ClaudeClient client("http://fake.local", "sk-test", "claude-test", &transport);
+    auto *tool = new CountingTool(&client);
+    client.tools()->addTool(tool);
+
+    client.ask(oneUserTurn(QStringLiteral("go")), {}, RequestMode::Buffered);
+    ASSERT_EQ(transport.bufferedCount(), 1);
+
+    transport.respondToLast(
+        200,
+        R"({"content":[{"type":"tool_use","id":"toolu_1","name":"echo",)"
+        R"("input":{"n":1}}],"stop_reason":"tool_use"})");
+    pump();
+
+    ASSERT_EQ(transport.bufferedCount(), 2) << "the buffered round did not continue";
+    EXPECT_EQ(tool->calls, 1);
+
+    const QJsonArray messages = transport.bufferedRequest(1).payload().value("messages").toArray();
+    const QJsonObject assistant = messages[messages.size() - 2].toObject();
+    const QJsonArray blocks = assistant.value("content").toArray();
+    ASSERT_EQ(blocks.size(), 1);
+    EXPECT_EQ(blocks[0].toObject().value("input").toObject().value("n").toInt(), 1)
+        << "a buffered tool_use arrives complete; its input must survive into the replay";
+}
