@@ -104,7 +104,16 @@ Rpc::Transport *makeTransport(const ServerEndpoint &endpoint, QObject *parent)
         cfg.endpoint = endpoint.url;
         cfg.headers = endpoint.headers;
         cfg.spec = parseHttpSpec(endpoint.httpSpec);
-        return new McpHttpTransport(cfg, nullptr, parent);
+
+        // The only place in the tree that chooses a wire revision. Everything
+        // downstream sees an Rpc::Transport and cannot tell them apart.
+        switch (cfg.spec) {
+        case McpHttpSpec::V2024_11_05:
+            return new McpSseHttpTransport(cfg, nullptr, parent);
+        case McpHttpSpec::V2025_03_26:
+            return new McpStreamableHttpTransport(cfg, nullptr, parent);
+        }
+        return nullptr;
     }
 
     if (!endpoint.command.isEmpty()) {

@@ -52,7 +52,7 @@ refactor with no compatibility aliases. The renames were:
 | `Mcp::McpRemoteError` / `McpException` / … | `Rpc::RemoteError` / `Rpc::JsonRpcException` / … |
 | `Mcp::ErrorCode` | `Rpc::ErrorCode` |
 
-MCP-specific transports (`McpStdioServerTransport`, `McpHttpTransport`,
+MCP-specific transports (`McpStdioServerTransport`, `McpStreamableHttpTransport`,
 `McpHttpServerTransport`) stay in `Mcp` and inherit `Rpc::Transport`.
 
 Two design choices to note:

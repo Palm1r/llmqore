@@ -136,7 +136,7 @@ when it differs from the id; loading icon binaries into `IconInfo::src` (as a
 
 | Feature | Client | Server |
 |---|---|---|
-| Long-lived `GET /sse` event stream | ✅ `McpHttpTransport::startV2024` | — |
+| Long-lived `GET /sse` event stream | ✅ `McpSseHttpTransport` | — |
 | Parse `event: endpoint` | ✅ | — |
 | Queue outbound messages until endpoint is resolved | ✅ | — |
 | POST to announced endpoint | ✅ | — |

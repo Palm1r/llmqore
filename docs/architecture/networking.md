@@ -6,14 +6,14 @@ Sits between provider clients and `QNetworkAccessManager`. Three goals:
 2. Transport errors (`HttpTransportError`) vs HTTP status codes (`HttpResponse`) kept separate.
 3. The two shapes are an interface (`HttpTransport`), not a class, so anything above it can be driven without a socket.
 
-LLM-agnostic -- knows nothing about JSON, SSE events, MCP. Also backs `McpHttpTransport`.
+LLM-agnostic -- knows nothing about JSON, SSE events, MCP. Also backs the MCP HTTP client transports.
 
-Authentication and request headers are not part of this layer: a fully-formed `QNetworkRequest` arrives here. `BaseClient` builds it from its own `AuthScheme` and header map (see [BaseClient contract](clients/base-client.md)); `McpHttpTransport` carries its own header map. The transport just sends what it is handed.
+Authentication and request headers are not part of this layer: a fully-formed `QNetworkRequest` arrives here. `BaseClient` builds it from its own `AuthScheme` and header map (see [BaseClient contract](clients/base-client.md)); the MCP HTTP transports carry their own header map. The transport just sends what it is handed.
 
 ```mermaid
 flowchart TD
     subgraph User["Caller"]
-        C1["provider BaseClient subclass<br/>(or McpHttpTransport, ...)"]
+        C1["provider BaseClient subclass<br/>(or an MCP HTTP transport, ...)"]
     end
 
     subgraph Api["HttpTransport interface"]
@@ -60,7 +60,7 @@ flowchart TD
 
 The abstract seam every request passes through. It declares exactly what the layer above needs: a **buffered** send returning a future of `HttpResponse`, a **streaming** `openStream` returning an `HttpStreamHandle`, and the transfer timeout. Nothing else -- proxies, network managers, and reply objects belong to implementations.
 
-`BaseClient` takes an `HttpTransport *` as an optional constructor argument (every provider client forwards it), and `McpHttpTransport` takes one on the same terms. A null transport means "create a private `HttpClient`"; a supplied transport stays owned by the caller. That is the only injection point -- there is no setter, so the transport cannot change under an in-flight request.
+`BaseClient` takes an `HttpTransport *` as an optional constructor argument (every provider client forwards it), and `McpStreamableHttpTransport` / `McpSseHttpTransport` take one on the same terms. A null transport means "create a private `HttpClient`"; a supplied transport stays owned by the caller. That is the only injection point -- there is no setter, so the transport cannot change under an in-flight request.
 
 Tests use it to drive provider clients and MCP-over-HTTP end to end without a socket: `tests/FakeHttpTransport.hpp` records the outgoing `QNetworkRequest` and body, and hands back a stream the test writes arbitrary bytes, statuses, and terminal events into.
 

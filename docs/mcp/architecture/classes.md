@@ -10,13 +10,15 @@ classDiagram
     class RpcPipeTransport["Rpc::PipeTransport"]
     class RpcStdioClientTransport["Rpc::StdioClientTransport"]
     class McpStdioServerTransport
-    class McpHttpTransport
+    class McpStreamableHttpTransport
+    class McpSseHttpTransport
     class McpHttpServerTransport
 
     RpcTransport <|-- RpcPipeTransport
     RpcTransport <|-- RpcStdioClientTransport
     RpcTransport <|-- McpStdioServerTransport
-    RpcTransport <|-- McpHttpTransport
+    RpcTransport <|-- McpStreamableHttpTransport
+    RpcTransport <|-- McpSseHttpTransport
     RpcTransport <|-- McpHttpServerTransport
 
     class JsonRpcSession["Rpc::JsonRpcSession"] {
@@ -101,6 +103,12 @@ classDiagram
         // collect structured input from user
     }
 ```
+
+## Two HTTP client transports, one choice point
+
+`McpStreamableHttpTransport` speaks `2025-03-26` (POST, `Mcp-Session-Id` echoed from the first response). `McpSseHttpTransport` speaks `2024-11-05` (a long-lived `GET` SSE stream that announces a POST endpoint, with sends queued until it arrives). They share the `Rpc::Transport` seam and nothing else -- the state each keeps is meaningless to the other, which is why holding both in one object meant a reader could not tell which half of the fields were live.
+
+`Mcp::makeTransport()` is the only place that reads `HttpTransportConfig::spec`. Everything downstream -- `McpClient`, `McpToolBinder`, the bridge -- sees an `Rpc::Transport` and cannot tell the revisions apart. That is what lets a decorator be applied to one revision and not the other without a second switch appearing somewhere else.
 
 ## What ships with each seam
 

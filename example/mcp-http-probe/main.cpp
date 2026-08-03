@@ -76,7 +76,10 @@ int main(int argc, char *argv[])
     qInfo().noquote() << "Endpoint:" << cfg.endpoint.toString();
     qInfo().noquote() << "Spec:   " << specStr;
 
-    auto *transport = new McpHttpTransport(cfg, nullptr, &app);
+    Rpc::Transport *transport
+        = cfg.spec == McpHttpSpec::V2024_11_05
+              ? static_cast<Rpc::Transport *>(new McpSseHttpTransport(cfg, nullptr, &app))
+              : static_cast<Rpc::Transport *>(new McpStreamableHttpTransport(cfg, nullptr, &app));
     auto *client = new McpClient(transport, Implementation{"mcp-http-probe", "0.1.0"}, &app);
     g_client = client;
 

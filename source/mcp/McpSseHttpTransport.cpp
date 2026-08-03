@@ -1,0 +1,200 @@
+// Copyright (C) 2026 Petr Mironychev
+// SPDX-License-Identifier: MIT
+
+#include <LLMQore/McpHttpTransport.hpp>
+
+#include <QByteArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QList>
+#include <QNetworkRequest>
+
+#include <LLMQore/FutureUtils.hpp>
+#include <LLMQore/HttpClient.hpp>
+#include <LLMQore/HttpResponse.hpp>
+#include <LLMQore/HttpTransport.hpp>
+#include <LLMQore/HttpTransportError.hpp>
+#include <LLMQore/Log.hpp>
+#include <LLMQore/SSEParser.hpp>
+
+#include "McpHttpOwnership.hpp"
+
+namespace LLMQore::Mcp {
+
+struct McpSseHttpTransport::Impl
+{
+    McpSseHttpTransport *q = nullptr;
+    HttpTransportConfig config;
+    LLMQore::HttpTransport *http = nullptr;
+
+    bool open = false;
+
+    LLMQore::HttpStreamHandle *sseStream = nullptr;
+    SSEParser sseParser;
+    QUrl postEndpoint;
+    QList<QJsonObject> pendingSends;
+
+    void openStream()
+    {
+        QNetworkRequest req(config.endpoint);
+        req.setRawHeader("Accept", "text/event-stream");
+        req.setRawHeader("Cache-Control", "no-cache");
+        applyCustomHeaders(req, config.headers);
+
+        sseStream = http->openStream(req, QByteArrayView("GET"));
+
+        QObject::connect(
+            sseStream, &HttpStreamHandle::chunkReceived, q, [this](const QByteArray &chunk) {
+                onChunk(chunk);
+            });
+        QObject::connect(sseStream, &HttpStreamHandle::finished, q, [this]() { onFinished(); });
+        QObject::connect(
+            sseStream, &HttpStreamHandle::errorOccurred, q, [this](const HttpTransportError &e) {
+                const QString reason = QString("SSE stream error: %1").arg(e.message());
+                qCWarning(llmMcpLog).noquote() << reason;
+                emit q->errorOccurred(reason);
+                onFinished();
+            });
+
+        open = true;
+    }
+
+    void onChunk(const QByteArray &chunk)
+    {
+        const QList<SSEEvent> events = sseParser.append(chunk);
+        for (const SSEEvent &ev : events) {
+            if (ev.type == QLatin1String("endpoint")) {
+                QUrl ep(QString::fromUtf8(ev.data).trimmed());
+                if (ep.isRelative())
+                    ep = config.endpoint.resolved(ep);
+                postEndpoint = ep;
+                qCDebug(llmMcpLog).noquote()
+                    << QString("MCP POST endpoint resolved: %1").arg(ep.toString());
+
+                const QList<QJsonObject> queued = std::move(pendingSends);
+                pendingSends.clear();
+                for (const QJsonObject &msg : queued)
+                    post(msg);
+            } else if (ev.type == QLatin1String("message") || ev.type.isEmpty()) {
+                QJsonParseError perr{};
+                const QJsonDocument doc = QJsonDocument::fromJson(ev.data, &perr);
+                if (perr.error != QJsonParseError::NoError || !doc.isObject()) {
+                    qCWarning(llmMcpLog).noquote() << QString("SSE: cannot parse data as JSON: %1")
+                                                          .arg(QString::fromUtf8(ev.data));
+                    continue;
+                }
+                emit q->messageReceived(doc.object());
+            }
+        }
+    }
+
+    void onFinished()
+    {
+        if (sseStream) {
+            sseStream->disconnect();
+            sseStream->deleteLater();
+            sseStream = nullptr;
+        }
+        if (open) {
+            open = false;
+            emit q->closed();
+        }
+    }
+
+    void post(const QJsonObject &message)
+    {
+        if (postEndpoint.isEmpty()) {
+            pendingSends.append(message);
+            return;
+        }
+
+        QNetworkRequest req(postEndpoint);
+        req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+        applyCustomHeaders(req, config.headers);
+
+        const QByteArray body = QJsonDocument(message).toJson(QJsonDocument::Compact);
+
+        (void) LLMQore::compat(http->send(req, QByteArrayView("POST"), body))
+            .then(
+                q,
+                [this](const HttpResponse &response) {
+                    if (!response.isSuccess()) {
+                        const QString reason
+                            = QString("POST failed (HTTP %1)").arg(response.statusCode);
+                        qCWarning(llmMcpLog).noquote() << reason;
+                        emit q->errorOccurred(reason);
+                    }
+                })
+            .onFailed(q, [this](const HttpTransportError &e) {
+                const QString reason = QString("POST failed: %1").arg(e.message());
+                qCWarning(llmMcpLog).noquote() << reason;
+                emit q->errorOccurred(reason);
+            });
+    }
+};
+
+McpSseHttpTransport::McpSseHttpTransport(
+    HttpTransportConfig config, LLMQore::HttpTransport *transport, QObject *parent)
+    : Rpc::Transport(parent)
+    , m_impl(std::make_unique<Impl>())
+{
+    m_impl->q = this;
+    m_impl->config = std::move(config);
+    m_impl->http = resolveHttpTransport(transport, this, m_impl->config.requestTimeoutMs);
+}
+
+McpSseHttpTransport::~McpSseHttpTransport()
+{
+    stop();
+}
+
+void McpSseHttpTransport::start()
+{
+    if (m_impl->open)
+        return;
+    if (!m_impl->config.endpoint.isValid()) {
+        emit errorOccurred(QStringLiteral("Invalid endpoint"));
+        return;
+    }
+    m_impl->openStream();
+}
+
+void McpSseHttpTransport::stop()
+{
+    if (!m_impl->open)
+        return;
+    m_impl->open = false;
+
+    if (m_impl->sseStream) {
+        m_impl->sseStream->disconnect();
+        m_impl->sseStream->abort();
+        m_impl->sseStream->deleteLater();
+        m_impl->sseStream = nullptr;
+    }
+    m_impl->sseParser.clear();
+    m_impl->postEndpoint.clear();
+    m_impl->pendingSends.clear();
+
+    emit closed();
+}
+
+bool McpSseHttpTransport::isOpen() const
+{
+    return m_impl->open;
+}
+
+void McpSseHttpTransport::send(const QJsonObject &message)
+{
+    if (!m_impl->open) {
+        emit errorOccurred(QStringLiteral("Transport not open"));
+        return;
+    }
+    m_impl->post(message);
+}
+
+const HttpTransportConfig &McpSseHttpTransport::config() const
+{
+    return m_impl->config;
+}
+
+} // namespace LLMQore::Mcp

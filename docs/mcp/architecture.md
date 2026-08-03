@@ -66,7 +66,8 @@ flowchart TD
         Pipe["Rpc::PipeTransport<br/><small>in-process pair, tests</small>"]
         StdioC["Rpc::StdioClientTransport<br/><small>launches child process</small>"]
         StdioS["McpStdioServerTransport<br/><small>reads stdin/stdout</small>"]
-        Http["McpHttpTransport<br/><small>client, 2024-11-05 + 2025-03-26</small>"]
+        Http["McpStreamableHttpTransport<br/><small>client, 2025-03-26</small>"]
+        HttpLegacy["McpSseHttpTransport<br/><small>client, 2024-11-05</small>"]
         HttpS["McpHttpServerTransport<br/><small>server, QTcpServer + HTTP/1.1</small>"]
     end
 

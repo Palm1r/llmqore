@@ -32,15 +32,38 @@ struct LLMQORE_EXPORT HttpTransportConfig
     int requestTimeoutMs = 120000;
 };
 
-class LLMQORE_EXPORT McpHttpTransport : public Rpc::Transport
+class LLMQORE_EXPORT McpStreamableHttpTransport : public Rpc::Transport
 {
     Q_OBJECT
 public:
-    explicit McpHttpTransport(
+    explicit McpStreamableHttpTransport(
         HttpTransportConfig config,
         LLMQore::HttpTransport *transport = nullptr,
         QObject *parent = nullptr);
-    ~McpHttpTransport() override;
+    ~McpStreamableHttpTransport() override;
+
+    void start() override;
+    void stop() override;
+    bool isOpen() const override;
+    void send(const QJsonObject &message) override;
+
+    const HttpTransportConfig &config() const;
+    [[nodiscard]] QString sessionId() const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
+};
+
+class LLMQORE_EXPORT McpSseHttpTransport : public Rpc::Transport
+{
+    Q_OBJECT
+public:
+    explicit McpSseHttpTransport(
+        HttpTransportConfig config,
+        LLMQore::HttpTransport *transport = nullptr,
+        QObject *parent = nullptr);
+    ~McpSseHttpTransport() override;
 
     void start() override;
     void stop() override;

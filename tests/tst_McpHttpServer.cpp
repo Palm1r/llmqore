@@ -132,7 +132,7 @@ TEST_F(McpHttpServerTest, HandshakeAndToolCallOverHttp)
     HttpTransportConfig clientCfg;
     clientCfg.endpoint = QUrl(QString("http://127.0.0.1:%1/mcp").arg(port));
     clientCfg.spec = McpHttpSpec::V2025_03_26;
-    auto *clientTransport = new McpHttpTransport(clientCfg);
+    auto *clientTransport = new McpStreamableHttpTransport(clientCfg);
     McpClient client(clientTransport, Implementation{"http-loopback-client", "0.0.1"});
 
     const InitializeResult init = waitForFuture(
@@ -163,7 +163,7 @@ TEST_F(McpHttpServerTest, LatestSpecPostsStraightToTheConfiguredEndpoint)
     HttpTransportConfig cfg;
     cfg.endpoint = QUrl("http://mcp.local/mcp");
     cfg.spec = McpHttpSpec::V2025_03_26;
-    McpHttpTransport transport(cfg, &http);
+    McpStreamableHttpTransport transport(cfg, &http);
 
     transport.start();
     EXPECT_TRUE(transport.isOpen());
@@ -187,7 +187,7 @@ TEST_F(McpHttpServerTest, LegacySpecOpensSseStreamAndWaitsForTheEndpointEvent)
     cfg.endpoint = QUrl("http://mcp.local/sse");
     cfg.spec = McpHttpSpec::V2024_11_05;
     cfg.headers.insert("X-Tenant", "acme");
-    McpHttpTransport transport(cfg, &http);
+    McpSseHttpTransport transport(cfg, &http);
 
     transport.start();
     ASSERT_EQ(http.streamCount(), 1) << "2024-11-05 must open a GET SSE stream";
@@ -219,7 +219,7 @@ TEST_F(McpHttpServerTest, LegacySpecDeliversServerMessagesOverTheSseStream)
     HttpTransportConfig cfg;
     cfg.endpoint = QUrl("http://mcp.local/sse");
     cfg.spec = McpHttpSpec::V2024_11_05;
-    McpHttpTransport transport(cfg, &http);
+    McpSseHttpTransport transport(cfg, &http);
 
     QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
 
@@ -243,7 +243,7 @@ TEST_F(McpHttpServerTest, SessionIdFromTheFirstResponseIsEchoedOnLaterPosts)
     HttpTransportConfig cfg;
     cfg.endpoint = QUrl("http://mcp.local/mcp");
     cfg.spec = McpHttpSpec::V2025_03_26;
-    McpHttpTransport transport(cfg, &http);
+    McpStreamableHttpTransport transport(cfg, &http);
 
     transport.start();
     transport.send(QJsonObject{{"jsonrpc", "2.0"}, {"id", 1}, {"method", "initialize"}});
@@ -268,7 +268,7 @@ TEST_F(McpHttpServerTest, JsonResponseBodyBecomesOneReceivedMessage)
     HttpTransportConfig cfg;
     cfg.endpoint = QUrl("http://mcp.local/mcp");
     cfg.spec = McpHttpSpec::V2025_03_26;
-    McpHttpTransport transport(cfg, &http);
+    McpStreamableHttpTransport transport(cfg, &http);
 
     QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
 
@@ -288,7 +288,7 @@ TEST_F(McpHttpServerTest, EventStreamResponseBodyYieldsEveryFramedMessage)
     HttpTransportConfig cfg;
     cfg.endpoint = QUrl("http://mcp.local/mcp");
     cfg.spec = McpHttpSpec::V2025_03_26;
-    McpHttpTransport transport(cfg, &http);
+    McpStreamableHttpTransport transport(cfg, &http);
 
     QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
 
@@ -312,7 +312,7 @@ TEST_F(McpHttpServerTest, AcceptedWithoutBodyProducesNoMessageAndNoError)
     HttpTransportConfig cfg;
     cfg.endpoint = QUrl("http://mcp.local/mcp");
     cfg.spec = McpHttpSpec::V2025_03_26;
-    McpHttpTransport transport(cfg, &http);
+    McpStreamableHttpTransport transport(cfg, &http);
 
     QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
     QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
@@ -333,7 +333,7 @@ TEST_F(McpHttpServerTest, HttpErrorStatusIsReportedAsTransportError)
     HttpTransportConfig cfg;
     cfg.endpoint = QUrl("http://mcp.local/mcp");
     cfg.spec = McpHttpSpec::V2025_03_26;
-    McpHttpTransport transport(cfg, &http);
+    McpStreamableHttpTransport transport(cfg, &http);
 
     QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
 
