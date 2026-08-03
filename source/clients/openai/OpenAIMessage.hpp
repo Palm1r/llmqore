@@ -34,7 +34,7 @@ public:
     void handleToolCallDelta(int index, const QString &argumentsDelta);
     void handleToolCallComplete(int index);
     void completeAllPendingToolCalls();
-    void handleFinishReason(const QString &finishReason);
+    void handleStopReason(const QString &finishReason);
 
     QString stopReason() const override { return m_finishReason; }
 

@@ -22,7 +22,7 @@ public:
     void handleToolCall(const QJsonObject &toolCall);
     void handleThinkingDelta(const QString &thinking);
     void handleThinkingComplete(const QString &signature);
-    void handleDone(bool done, const QString &doneReason = {});
+    void handleStopReason(bool done, const QString &doneReason = {});
 
     QString stopReason() const override { return m_doneReason; }
 

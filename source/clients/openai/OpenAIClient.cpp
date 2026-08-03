@@ -205,7 +205,7 @@ void OpenAIClient::processStreamChunk(const RequestID &id, const QJsonObject &ch
     if (!finishReason.isEmpty() && finishReason != "null") {
         notifyPendingThinkingBlocks(id);
         message->completeAllPendingToolCalls();
-        message->handleFinishReason(finishReason);
+        message->handleStopReason(finishReason);
         executeToolsFromMessage(id);
     }
 }

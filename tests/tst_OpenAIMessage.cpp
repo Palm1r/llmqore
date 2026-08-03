@@ -135,7 +135,7 @@ TEST(OpenAIMessage, HandleFinishReason_Stop)
 {
     OpenAIMessage msg;
     msg.handleContentDelta("Hello");
-    msg.handleFinishReason("stop");
+    msg.handleStopReason("stop");
     EXPECT_EQ(msg.state(), MessageState::Final);
 }
 
@@ -143,7 +143,7 @@ TEST(OpenAIMessage, HandleFinishReason_ToolCalls)
 {
     OpenAIMessage msg;
     msg.handleToolCallStart(0, "call_1", "tool");
-    msg.handleFinishReason("tool_calls");
+    msg.handleStopReason("tool_calls");
     EXPECT_EQ(msg.state(), MessageState::RequiresToolExecution);
 }
 
@@ -151,14 +151,14 @@ TEST(OpenAIMessage, HandleFinishReason_ToolCallsWithoutToolBlocks)
 {
     OpenAIMessage msg;
     msg.handleContentDelta("text only");
-    msg.handleFinishReason("tool_calls");
+    msg.handleStopReason("tool_calls");
     EXPECT_EQ(msg.state(), MessageState::Complete);
 }
 
 TEST(OpenAIMessage, HandleFinishReason_Other)
 {
     OpenAIMessage msg;
-    msg.handleFinishReason("length");
+    msg.handleStopReason("length");
     EXPECT_EQ(msg.state(), MessageState::Complete);
 }
 
@@ -236,7 +236,7 @@ TEST(OpenAIMessage, StartNewContinuation)
     OpenAIMessage msg;
     msg.handleContentDelta("old text");
     msg.handleToolCallStart(0, "call_1", "tool");
-    msg.handleFinishReason("stop");
+    msg.handleStopReason("stop");
     EXPECT_EQ(msg.state(), MessageState::Final);
 
     msg.startNewContinuation();

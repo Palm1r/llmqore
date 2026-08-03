@@ -82,9 +82,9 @@ TEST(GoogleMessage, HandleThoughtSignature_NoExistingBlock)
 TEST(GoogleMessage, HandleFunctionCall_Complete)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("read_file");
-    msg.handleFunctionCallArgsDelta(R"({"path": "/tmp/test.txt"})");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("read_file");
+    msg.handleToolCallDelta(R"({"path": "/tmp/test.txt"})");
+    msg.handleToolCallComplete();
 
     EXPECT_EQ(msg.currentToolUseContent().size(), 1);
     auto tool = msg.currentToolUseContent()[0];
@@ -96,10 +96,10 @@ TEST(GoogleMessage, HandleFunctionCall_Complete)
 TEST(GoogleMessage, HandleFunctionCall_StreamedArgs)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("write_file");
-    msg.handleFunctionCallArgsDelta(R"({"path":)");
-    msg.handleFunctionCallArgsDelta(R"( "/tmp/f"})");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("write_file");
+    msg.handleToolCallDelta(R"({"path":)");
+    msg.handleToolCallDelta(R"( "/tmp/f"})");
+    msg.handleToolCallComplete();
 
     auto tool = msg.currentToolUseContent()[0];
     EXPECT_EQ(tool.input["path"].toString(), "/tmp/f");
@@ -108,8 +108,8 @@ TEST(GoogleMessage, HandleFunctionCall_StreamedArgs)
 TEST(GoogleMessage, HandleFunctionCall_EmptyArgs)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("list_files");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("list_files");
+    msg.handleToolCallComplete();
 
     auto tool = msg.currentToolUseContent()[0];
     EXPECT_TRUE(tool.input.isEmpty());
@@ -118,9 +118,9 @@ TEST(GoogleMessage, HandleFunctionCall_EmptyArgs)
 TEST(GoogleMessage, HandleFunctionCall_InvalidJson)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("tool");
-    msg.handleFunctionCallArgsDelta("not json{{{");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("tool");
+    msg.handleToolCallDelta("not json{{{");
+    msg.handleToolCallComplete();
 
     auto tool = msg.currentToolUseContent()[0];
     EXPECT_TRUE(tool.input.isEmpty());
@@ -129,20 +129,20 @@ TEST(GoogleMessage, HandleFunctionCall_InvalidJson)
 TEST(GoogleMessage, HandleFunctionCallComplete_NoFunctionStarted)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallComplete();
     EXPECT_TRUE(msg.currentToolUseContent().isEmpty());
 }
 
 TEST(GoogleMessage, HandleFunctionCall_MultipleCalls)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("read");
-    msg.handleFunctionCallArgsDelta(R"({"path": "a"})");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("read");
+    msg.handleToolCallDelta(R"({"path": "a"})");
+    msg.handleToolCallComplete();
 
-    msg.handleFunctionCallStart("write");
-    msg.handleFunctionCallArgsDelta(R"({"path": "b"})");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("write");
+    msg.handleToolCallDelta(R"({"path": "b"})");
+    msg.handleToolCallComplete();
 
     EXPECT_EQ(msg.currentToolUseContent().size(), 2);
 }
@@ -151,25 +151,25 @@ TEST(GoogleMessage, HandleFinishReason_STOP_NoTools)
 {
     GoogleMessage msg;
     msg.handleContentDelta("answer");
-    msg.handleFinishReason("STOP");
+    msg.handleStopReason("STOP");
     EXPECT_EQ(msg.state(), MessageState::Complete);
 }
 
 TEST(GoogleMessage, HandleFinishReason_STOP_WithTools)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("tool");
-    msg.handleFunctionCallComplete();
-    msg.handleFinishReason("STOP");
+    msg.handleToolCallStart("tool");
+    msg.handleToolCallComplete();
+    msg.handleStopReason("STOP");
     EXPECT_EQ(msg.state(), MessageState::RequiresToolExecution);
 }
 
 TEST(GoogleMessage, HandleFinishReason_MAX_TOKENS_WithTools)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("tool");
-    msg.handleFunctionCallComplete();
-    msg.handleFinishReason("MAX_TOKENS");
+    msg.handleToolCallStart("tool");
+    msg.handleToolCallComplete();
+    msg.handleStopReason("MAX_TOKENS");
     EXPECT_EQ(msg.state(), MessageState::RequiresToolExecution);
 }
 
@@ -177,21 +177,21 @@ TEST(GoogleMessage, HandleFinishReason_MAX_TOKENS_NoTools)
 {
     GoogleMessage msg;
     msg.handleContentDelta("truncated");
-    msg.handleFinishReason("MAX_TOKENS");
+    msg.handleStopReason("MAX_TOKENS");
     EXPECT_EQ(msg.state(), MessageState::Complete);
 }
 
 TEST(GoogleMessage, HandleFinishReason_OtherReason)
 {
     GoogleMessage msg;
-    msg.handleFinishReason("UNKNOWN_REASON");
+    msg.handleStopReason("UNKNOWN_REASON");
     EXPECT_EQ(msg.state(), MessageState::Complete);
 }
 
 TEST(GoogleMessage, IsErrorFinishReason_Safety)
 {
     GoogleMessage msg;
-    msg.handleFinishReason("SAFETY");
+    msg.handleStopReason("SAFETY");
     EXPECT_TRUE(msg.isErrorFinishReason());
     EXPECT_FALSE(msg.getErrorMessage().isEmpty());
 }
@@ -199,42 +199,42 @@ TEST(GoogleMessage, IsErrorFinishReason_Safety)
 TEST(GoogleMessage, IsErrorFinishReason_Recitation)
 {
     GoogleMessage msg;
-    msg.handleFinishReason("RECITATION");
+    msg.handleStopReason("RECITATION");
     EXPECT_TRUE(msg.isErrorFinishReason());
 }
 
 TEST(GoogleMessage, IsErrorFinishReason_MalformedFunctionCall)
 {
     GoogleMessage msg;
-    msg.handleFinishReason("MALFORMED_FUNCTION_CALL");
+    msg.handleStopReason("MALFORMED_FUNCTION_CALL");
     EXPECT_TRUE(msg.isErrorFinishReason());
 }
 
 TEST(GoogleMessage, IsErrorFinishReason_ProhibitedContent)
 {
     GoogleMessage msg;
-    msg.handleFinishReason("PROHIBITED_CONTENT");
+    msg.handleStopReason("PROHIBITED_CONTENT");
     EXPECT_TRUE(msg.isErrorFinishReason());
 }
 
 TEST(GoogleMessage, IsErrorFinishReason_SPII)
 {
     GoogleMessage msg;
-    msg.handleFinishReason("SPII");
+    msg.handleStopReason("SPII");
     EXPECT_TRUE(msg.isErrorFinishReason());
 }
 
 TEST(GoogleMessage, IsErrorFinishReason_Other)
 {
     GoogleMessage msg;
-    msg.handleFinishReason("OTHER");
+    msg.handleStopReason("OTHER");
     EXPECT_TRUE(msg.isErrorFinishReason());
 }
 
 TEST(GoogleMessage, IsNotErrorFinishReason_STOP)
 {
     GoogleMessage msg;
-    msg.handleFinishReason("STOP");
+    msg.handleStopReason("STOP");
     EXPECT_FALSE(msg.isErrorFinishReason());
 }
 
@@ -245,7 +245,7 @@ TEST(GoogleMessage, GetErrorMessage_AllTypes)
 
     for (const auto &reason : errorReasons) {
         GoogleMessage msg;
-        msg.handleFinishReason(reason);
+        msg.handleStopReason(reason);
         EXPECT_FALSE(msg.getErrorMessage().isEmpty())
             << "Empty error message for: " << reason.toStdString();
     }
@@ -254,7 +254,7 @@ TEST(GoogleMessage, GetErrorMessage_AllTypes)
 TEST(GoogleMessage, GetErrorMessage_NoError)
 {
     GoogleMessage msg;
-    msg.handleFinishReason("STOP");
+    msg.handleStopReason("STOP");
     EXPECT_TRUE(msg.getErrorMessage().isEmpty());
 }
 
@@ -273,9 +273,9 @@ TEST(GoogleMessage, ToProviderFormat_TextOnly)
 TEST(GoogleMessage, ToProviderFormat_FunctionCall)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("read_file");
-    msg.handleFunctionCallArgsDelta(R"({"path": "/tmp"})");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("read_file");
+    msg.handleToolCallDelta(R"({"path": "/tmp"})");
+    msg.handleToolCallComplete();
 
     QJsonObject result = msg.toProviderFormat();
     QJsonArray parts = result["parts"].toArray();
@@ -304,9 +304,9 @@ TEST(GoogleMessage, ToProviderFormat_MixedContent)
     GoogleMessage msg;
     msg.handleThoughtDelta("thinking");
     msg.handleContentDelta("answer");
-    msg.handleFunctionCallStart("tool");
-    msg.handleFunctionCallArgsDelta(R"({})");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("tool");
+    msg.handleToolCallDelta(R"({})");
+    msg.handleToolCallComplete();
 
     QJsonObject result = msg.toProviderFormat();
     QJsonArray parts = result["parts"].toArray();
@@ -318,9 +318,9 @@ TEST(GoogleMessage, ToProviderFormat_ThinkingSignature_OnFunctionCall)
     GoogleMessage msg;
     msg.handleThoughtDelta("let me think about this...");
     msg.handleThoughtSignature("sig-xyz-123");
-    msg.handleFunctionCallStart("read_file");
-    msg.handleFunctionCallArgsDelta(R"({"path": "/tmp/test"})");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("read_file");
+    msg.handleToolCallDelta(R"({"path": "/tmp/test"})");
+    msg.handleToolCallComplete();
 
     QJsonObject result = msg.toProviderFormat();
     QJsonArray parts = result["parts"].toArray();
@@ -345,9 +345,9 @@ TEST(GoogleMessage, ToProviderFormat_ThinkingSignature_StandaloneOnFunctionCall)
 {
     GoogleMessage msg;
     msg.handleThoughtSignature("sig-standalone");
-    msg.handleFunctionCallStart("echo");
-    msg.handleFunctionCallArgsDelta(R"({"msg": "hi"})");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("echo");
+    msg.handleToolCallDelta(R"({"msg": "hi"})");
+    msg.handleToolCallComplete();
 
     QJsonObject result = msg.toProviderFormat();
     QJsonArray parts = result["parts"].toArray();
@@ -371,13 +371,13 @@ TEST(GoogleMessage, ToProviderFormat_MultipleFunctionCalls_ShareSignature)
     msg.handleThoughtDelta("planning...");
     msg.handleThoughtSignature("sig-multi");
 
-    msg.handleFunctionCallStart("read");
-    msg.handleFunctionCallArgsDelta(R"({"path": "a"})");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("read");
+    msg.handleToolCallDelta(R"({"path": "a"})");
+    msg.handleToolCallComplete();
 
-    msg.handleFunctionCallStart("write");
-    msg.handleFunctionCallArgsDelta(R"({"path": "b"})");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("write");
+    msg.handleToolCallDelta(R"({"path": "b"})");
+    msg.handleToolCallComplete();
 
     QJsonObject result = msg.toProviderFormat();
     QJsonArray parts = result["parts"].toArray();
@@ -396,10 +396,10 @@ TEST(GoogleMessage, ToProviderFormat_MultipleFunctionCalls_ShareSignature)
 TEST(GoogleMessage, CreateToolResultParts)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("read");
-    msg.handleFunctionCallComplete();
-    msg.handleFunctionCallStart("write");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("read");
+    msg.handleToolCallComplete();
+    msg.handleToolCallStart("write");
+    msg.handleToolCallComplete();
 
     auto tools = msg.currentToolUseContent();
 
@@ -423,8 +423,8 @@ TEST(GoogleMessage, CreateToolResultParts)
 TEST(GoogleMessage, CreateToolResultParts_ImageBecomesNestedInlineDataPart)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("get_sample_image");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("get_sample_image");
+    msg.handleToolCallComplete();
 
     auto tools = msg.currentToolUseContent();
     ASSERT_EQ(tools.size(), 1);
@@ -458,10 +458,10 @@ TEST(GoogleMessage, CreateToolResultParts_ImageBecomesNestedInlineDataPart)
 TEST(GoogleMessage, CreateToolResultParts_OnePartPerFunctionCallWithMixedResults)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("read");
-    msg.handleFunctionCallComplete();
-    msg.handleFunctionCallStart("get_sample_image");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("read");
+    msg.handleToolCallComplete();
+    msg.handleToolCallStart("get_sample_image");
+    msg.handleToolCallComplete();
 
     auto tools = msg.currentToolUseContent();
     ASSERT_EQ(tools.size(), 2);
@@ -486,8 +486,8 @@ TEST(GoogleMessage, CreateToolResultParts_OnePartPerFunctionCallWithMixedResults
 TEST(GoogleMessage, CreateToolResultParts_TextOnlyKeepsFlatResponse)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("read");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("read");
+    msg.handleToolCallComplete();
 
     auto tools = msg.currentToolUseContent();
     QHash<QString, ToolResult> results;
@@ -506,8 +506,8 @@ TEST(GoogleMessage, CreateToolResultParts_TextOnlyKeepsFlatResponse)
 TEST(GoogleMessage, CreateToolResultParts_AudioAlsoBecomesInlineData)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("record");
-    msg.handleFunctionCallComplete();
+    msg.handleToolCallStart("record");
+    msg.handleToolCallComplete();
 
     auto tools = msg.currentToolUseContent();
 
@@ -534,9 +534,9 @@ TEST(GoogleMessage, StartNewContinuation)
 {
     GoogleMessage msg;
     msg.handleContentDelta("old");
-    msg.handleFunctionCallStart("tool");
-    msg.handleFunctionCallComplete();
-    msg.handleFinishReason("STOP");
+    msg.handleToolCallStart("tool");
+    msg.handleToolCallComplete();
+    msg.handleStopReason("STOP");
 
     msg.startNewContinuation();
     EXPECT_EQ(msg.state(), MessageState::Building);

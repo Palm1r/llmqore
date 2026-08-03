@@ -238,7 +238,7 @@ void OllamaClient::processStreamData(const RequestID &id, const QJsonObject &dat
             message->handleThinkingComplete(data["signature"].toString());
         }
 
-        message->handleDone(true, data.value("done_reason").toString());
+        message->handleStopReason(true, data.value("done_reason").toString());
 
         applyUsage(id, data);
 

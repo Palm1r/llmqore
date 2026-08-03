@@ -21,10 +21,10 @@ public:
     void handleContentDelta(const QString &text);
     void handleThoughtDelta(const QString &text);
     void handleThoughtSignature(const QString &signature);
-    void handleFunctionCallStart(const QString &name);
-    void handleFunctionCallArgsDelta(const QString &argsJson);
-    void handleFunctionCallComplete();
-    void handleFinishReason(const QString &reason);
+    void handleToolCallStart(const QString &name);
+    void handleToolCallDelta(const QString &argsJson);
+    void handleToolCallComplete();
+    void handleStopReason(const QString &reason);
 
     [[nodiscard]] static QJsonObject serializeTurn(
         TurnRole role, const QList<TurnContent> &blocks);

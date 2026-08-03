@@ -122,18 +122,18 @@ void GoogleMessage::handleThoughtSignature(const QString &signature)
     blockAt<ThinkingContent>(created)->signature = signature;
 }
 
-void GoogleMessage::handleFunctionCallStart(const QString &name)
+void GoogleMessage::handleToolCallStart(const QString &name)
 {
     m_currentFunctionName = name;
     m_pendingFunctionArgs.clear();
 }
 
-void GoogleMessage::handleFunctionCallArgsDelta(const QString &argsJson)
+void GoogleMessage::handleToolCallDelta(const QString &argsJson)
 {
     m_pendingFunctionArgs += argsJson;
 }
 
-void GoogleMessage::handleFunctionCallComplete()
+void GoogleMessage::handleToolCallComplete()
 {
     if (m_currentFunctionName.isEmpty()) {
         return;
@@ -154,7 +154,7 @@ void GoogleMessage::handleFunctionCallComplete()
     m_pendingFunctionArgs.clear();
 }
 
-void GoogleMessage::handleFinishReason(const QString &reason)
+void GoogleMessage::handleStopReason(const QString &reason)
 {
     m_finishReason = reason;
     updateStateFromFinishReason();

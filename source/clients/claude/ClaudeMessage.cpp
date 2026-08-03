@@ -64,7 +64,7 @@ MessageEffects ClaudeMessage::applyEvent(const QJsonObject &event)
     } else if (type == "message_delta") {
         const QJsonObject delta = event["delta"].toObject();
         if (delta.contains("stop_reason")) {
-            applyStopReason(delta["stop_reason"].toString());
+            handleStopReason(delta["stop_reason"].toString());
             effects.toolsReady = true;
         }
         effects.usage = event;
@@ -95,7 +95,7 @@ MessageEffects ClaudeMessage::applyResponse(const QJsonObject &response)
 
     const QString stopReason = response["stop_reason"].toString();
     if (!stopReason.isEmpty()) {
-        applyStopReason(stopReason);
+        handleStopReason(stopReason);
         effects.toolsReady = true;
     }
 
@@ -199,7 +199,7 @@ void ClaudeMessage::endBlock(int index)
         toolContent->input = doc.isObject() ? doc.object() : QJsonObject{};
 }
 
-void ClaudeMessage::applyStopReason(const QString &stopReason)
+void ClaudeMessage::handleStopReason(const QString &stopReason)
 {
     m_stopReason = stopReason;
     updateStateFromStopReason();

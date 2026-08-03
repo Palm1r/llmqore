@@ -36,7 +36,7 @@ private:
     void beginBlock(int index, const QJsonObject &block);
     void applyDelta(int index, const QJsonObject &delta);
     void endBlock(int index);
-    void applyStopReason(const QString &stopReason);
+    void handleStopReason(const QString &stopReason);
 
     QString m_stopReason;
     QHash<int, QString> m_pendingToolInputs;

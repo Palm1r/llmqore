@@ -282,10 +282,10 @@ void GoogleAIClient::processStreamChunk(const RequestID &id, const QJsonObject &
                         QString name = functionCall["name"].toString();
                         QJsonObject args = functionCall["args"].toObject();
 
-                        message->handleFunctionCallStart(name);
-                        message->handleFunctionCallArgsDelta(
+                        message->handleToolCallStart(name);
+                        message->handleToolCallDelta(
                             QString::fromUtf8(QJsonDocument(args).toJson(QJsonDocument::Compact)));
-                        message->handleFunctionCallComplete();
+                        message->handleToolCallComplete();
                     }
                 }
             }
@@ -293,7 +293,7 @@ void GoogleAIClient::processStreamChunk(const RequestID &id, const QJsonObject &
 
         if (candidateObj.contains("finishReason")) {
             QString finishReason = candidateObj["finishReason"].toString();
-            message->handleFinishReason(finishReason);
+            message->handleStopReason(finishReason);
 
             if (message->isErrorFinishReason()) {
                 QString errorMessage = message->getErrorMessage();

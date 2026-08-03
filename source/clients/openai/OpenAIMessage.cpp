@@ -137,7 +137,7 @@ void OpenAIMessage::completeAllPendingToolCalls()
         handleToolCallComplete(index);
 }
 
-void OpenAIMessage::handleFinishReason(const QString &finishReason)
+void OpenAIMessage::handleStopReason(const QString &finishReason)
 {
     m_finishReason = finishReason;
     updateStateFromFinishReason();

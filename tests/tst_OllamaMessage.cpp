@@ -115,7 +115,7 @@ TEST(OllamaMessage, ToolCallIds_DistinctAcrossContinuations)
         {"function", QJsonObject{{"name", "tool"}, {"arguments", QJsonObject{}}}}};
 
     msg.handleToolCall(toolCall);
-    msg.handleDone(true);
+    msg.handleStopReason(true);
     QString firstId = msg.currentToolUseContent()[0].id;
 
     msg.startNewContinuation();
@@ -129,7 +129,7 @@ TEST(OllamaMessage, HandleDone_ParsesToolCallFromContent)
 {
     OllamaMessage msg;
     msg.handleContentDelta(R"({"name": "read_file", "arguments": {"path": "/tmp/test.txt"}})");
-    msg.handleDone(true);
+    msg.handleStopReason(true);
 
     EXPECT_EQ(msg.currentToolUseContent().size(), 1);
     auto tool = msg.currentToolUseContent()[0];
@@ -142,7 +142,7 @@ TEST(OllamaMessage, HandleDone_ParsesToolCallWithStringArguments)
 {
     OllamaMessage msg;
     msg.handleContentDelta(R"({"name": "tool", "arguments": "{\"key\": \"value\"}"})");
-    msg.handleDone(true);
+    msg.handleStopReason(true);
 
     EXPECT_EQ(msg.currentToolUseContent().size(), 1);
     auto tool = msg.currentToolUseContent()[0];
@@ -153,7 +153,7 @@ TEST(OllamaMessage, HandleDone_PlainTextFinal)
 {
     OllamaMessage msg;
     msg.handleContentDelta("Just a normal answer");
-    msg.handleDone(true);
+    msg.handleStopReason(true);
 
     EXPECT_EQ(msg.state(), MessageState::Final);
     EXPECT_EQ(msg.currentToolUseContent().size(), 0);
@@ -167,7 +167,7 @@ TEST(OllamaMessage, HandleDone_FalseDoesNothing)
 {
     OllamaMessage msg;
     msg.handleContentDelta("partial");
-    msg.handleDone(false);
+    msg.handleStopReason(false);
 
     EXPECT_EQ(msg.state(), MessageState::Building);
 }
@@ -176,7 +176,7 @@ TEST(OllamaMessage, HandleDone_InvalidToolCallJson)
 {
     OllamaMessage msg;
     msg.handleContentDelta(R"({"name": "", "arguments": {}})");
-    msg.handleDone(true);
+    msg.handleStopReason(true);
 
     EXPECT_TRUE(msg.currentToolUseContent().isEmpty());
     EXPECT_EQ(msg.state(), MessageState::Final);
@@ -186,7 +186,7 @@ TEST(OllamaMessage, HandleDone_IncompleteToolCallJsonDiscarded)
 {
     OllamaMessage msg;
     msg.handleContentDelta(R"({"name": "tool", "arguments": )");
-    msg.handleDone(true);
+    msg.handleStopReason(true);
 
     EXPECT_TRUE(msg.currentToolUseContent().isEmpty());
 }
@@ -195,7 +195,7 @@ TEST(OllamaMessage, HandleDone_JsonWithoutToolFields)
 {
     OllamaMessage msg;
     msg.handleContentDelta(R"({"key": "value", "other": 123})");
-    msg.handleDone(true);
+    msg.handleStopReason(true);
 
     EXPECT_TRUE(msg.currentToolUseContent().isEmpty());
     EXPECT_EQ(msg.state(), MessageState::Final);
@@ -243,7 +243,7 @@ TEST(OllamaMessage, ToProviderFormat_TextOnly)
 {
     OllamaMessage msg;
     msg.handleContentDelta("Hello world");
-    msg.handleDone(true);
+    msg.handleStopReason(true);
 
     QJsonObject result = msg.toProviderFormat();
     EXPECT_EQ(result["role"].toString(), "assistant");
@@ -270,7 +270,7 @@ TEST(OllamaMessage, ToProviderFormat_WithThinking)
     OllamaMessage msg;
     msg.handleThinkingDelta("hmm...");
     msg.handleContentDelta("answer");
-    msg.handleDone(true);
+    msg.handleStopReason(true);
 
     QJsonObject result = msg.toProviderFormat();
     EXPECT_EQ(result["thinking"].toString(), "hmm...");
@@ -305,7 +305,7 @@ TEST(OllamaMessage, StateTransition_DoneWithTools)
     OllamaMessage msg;
     QJsonObject toolCall{{"function", QJsonObject{{"name", "tool"}, {"arguments", QJsonObject{}}}}};
     msg.handleToolCall(toolCall);
-    msg.handleDone(true);
+    msg.handleStopReason(true);
 
     EXPECT_EQ(msg.state(), MessageState::RequiresToolExecution);
 }
@@ -314,7 +314,7 @@ TEST(OllamaMessage, StateTransition_DoneWithoutTools)
 {
     OllamaMessage msg;
     msg.handleContentDelta("answer");
-    msg.handleDone(true);
+    msg.handleStopReason(true);
 
     EXPECT_EQ(msg.state(), MessageState::Final);
 }
@@ -326,7 +326,7 @@ TEST(OllamaMessage, StartNewContinuation)
     msg.handleThinkingDelta("thought");
     QJsonObject toolCall{{"function", QJsonObject{{"name", "tool"}, {"arguments", QJsonObject{}}}}};
     msg.handleToolCall(toolCall);
-    msg.handleDone(true);
+    msg.handleStopReason(true);
 
     msg.startNewContinuation();
     EXPECT_EQ(msg.state(), MessageState::Building);

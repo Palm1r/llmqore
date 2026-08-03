@@ -116,7 +116,7 @@ void OpenAIResponsesMessage::handleReasoningDelta(const QString &itemId, const Q
         thinking->thinking += text;
 }
 
-void OpenAIResponsesMessage::handleStatus(const QString &status)
+void OpenAIResponsesMessage::handleStopReason(const QString &status)
 {
     m_status = status;
     updateStateFromStatus();
@@ -202,7 +202,7 @@ MessageEffects OpenAIResponsesMessage::applyResponse(const QJsonObject &response
 
     const QString status = response["status"].toString();
     if (!status.isEmpty()) {
-        handleStatus(status);
+        handleStopReason(status);
         effects.toolsReady = true;
     }
 
@@ -286,10 +286,10 @@ void OpenAIResponsesMessage::applyTerminal(
     const QJsonObject &response, const QString &fallbackStatus, MessageEffects &effects)
 {
     if (response.isEmpty()) {
-        handleStatus(fallbackStatus);
+        handleStopReason(fallbackStatus);
     } else {
         effects.fallbackText = aggregatedTextOf(response);
-        handleStatus(response["status"].toString());
+        handleStopReason(response["status"].toString());
         effects.usage = response;
     }
 

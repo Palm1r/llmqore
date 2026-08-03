@@ -99,7 +99,7 @@ void OllamaMessage::handleThinkingComplete(const QString &signature)
     }
 }
 
-void OllamaMessage::handleDone(bool done, const QString &doneReason)
+void OllamaMessage::handleStopReason(bool done, const QString &doneReason)
 {
     m_done = done;
     if (!doneReason.isEmpty())

@@ -30,6 +30,22 @@ When a continuation turn begins, the message deletes all current blocks, empties
 
 ---
 
+## Translator vocabulary
+
+A translator is the per-provider `BaseMessage` subclass. Every one of them models the same lifecycle -- a block starts, deltas arrive, the block completes, and the turn ends -- so they spell it the same way. A reader who knows one translator can navigate the next without a second dictionary.
+
+**Entry points.** `applyEvent(...)` takes one raw wire event, whole and unparsed beyond JSON, and returns `MessageEffects`. `applyResponse(body)` does the same for a whole non-streamed body. Both are the *only* public mutators: the dispatch ladder over the provider's event names lives inside the translator, once, and the client never re-derives it. A client that reads `event["type"]` for anything but a guard has taken dispatch back.
+
+**Phases.** `handleToolCallStart` / `handleToolCallDelta` / `handleToolCallComplete` for tool calls, `handleContentDelta` for assistant text, `handleStopReason` for the terminal event. Key types legitimately differ -- an `int` index for Claude and OpenAI Chat, a `QString` call id for Responses, an implicit current call for Google, a whole object for Ollama -- and so do arities; the phase word does not. There is deliberately no common base interface: nobody calls a translator polymorphically, and forcing one signature would buy a shim, not a seam.
+
+**Wire words stay in string literals.** Google calls a tool call a `functionCall` and Ollama calls the terminal event `done`; those spellings live in the comparisons inside the translator, where they belong, not in the method names. The method names follow the library's own content vocabulary.
+
+**Thinking is not aligned, on purpose.** Claude's `thinking`, OpenAI's `reasoning`, and Google's `thought` blocks carry genuinely different continuation tokens -- a signature, an encrypted item, a thought signature -- with different rules about when they may be dropped. Each translator keeps its provider's word so the difference stays visible at the call site.
+
+**MessageEffects** is what a translator returns instead of reaching into the client: `chunk` (text for `chunkReceived`), `fullText` / `fallbackText` (a whole answer that replaces, or fills in for, what was streamed), `usage` (an object for `applyUsage`), and the `thinkingCompleted` / `toolsReady` flags. `BaseClient::applyEffects` is the one place that turns them into calls, in one order, for every provider.
+
+---
+
 ## ContentBlock hierarchy
 
 ```mermaid

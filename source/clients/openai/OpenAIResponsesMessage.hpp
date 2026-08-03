@@ -45,7 +45,7 @@ private:
     void handleReasoningStart(const QString &itemId);
     void handleReasoningDelta(const QString &itemId, const QString &text);
     void handleReasoningEncryptedContent(const QString &itemId, const QString &encryptedContent);
-    void handleStatus(const QString &status);
+    void handleStopReason(const QString &status);
 
     void applyOutputItem(const QJsonObject &item, MessageEffects &effects);
     void applyItemDone(const QJsonObject &data, MessageEffects &effects);

@@ -177,7 +177,7 @@ TEST(ReviewRegression, OllamaThinkingAfterToolCallDoesNotReuseFreedBlock)
     ASSERT_EQ(msg.currentThinkingContent().size(), 1);
 
     msg.handleContentDelta(R"({"name":"echo","arguments":{"value":"7"}})");
-    msg.handleDone(true);
+    msg.handleStopReason(true);
     ASSERT_EQ(msg.currentToolUseContent().size(), 1);
     EXPECT_TRUE(msg.currentThinkingContent().isEmpty())
         << "the tool-call path deletes every accumulated block";
