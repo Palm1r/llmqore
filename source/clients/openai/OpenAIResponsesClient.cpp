@@ -69,14 +69,14 @@ RequestID OpenAIResponsesClient::sendMessage(
 
     qCDebug(llmOpenAILog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
 
-    sendRequest(id, QUrl(m_url + resolved), request, mode);
+    sendRequest(id, QUrl(url() + resolved), request, mode);
     return id;
 }
 
 RequestID OpenAIResponsesClient::ask(const QString &prompt, RequestMode mode)
 {
     QJsonObject payload;
-    payload["model"] = m_model;
+    payload["model"] = model();
     payload["input"] = prompt;
 
     return sendMessage(payload, {}, mode);
@@ -86,7 +86,7 @@ QJsonObject OpenAIResponsesClient::buildConversationPayload(
     const Conversation &conversation) const
 {
     QJsonObject payload;
-    payload["model"] = m_model;
+    payload["model"] = model();
 
     if (!conversation.system().isEmpty())
         payload["instructions"] = conversation.system();

@@ -63,14 +63,14 @@ RequestID ClaudeClient::sendMessage(
 
     qCDebug(llmClaudeLog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
 
-    sendRequest(id, QUrl(m_url + resolved), request, mode);
+    sendRequest(id, QUrl(url() + resolved), request, mode);
     return id;
 }
 
 RequestID ClaudeClient::ask(const QString &prompt, RequestMode mode)
 {
     QJsonObject payload;
-    payload["model"] = m_model;
+    payload["model"] = model();
     payload["max_tokens"] = kDefaultMaxTokens;
     payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
 
@@ -80,9 +80,9 @@ RequestID ClaudeClient::ask(const QString &prompt, RequestMode mode)
 QJsonObject ClaudeClient::buildConversationPayload(const Conversation &conversation) const
 {
     QJsonObject payload;
-    payload["model"] = m_model;
+    payload["model"] = model();
 
-    const std::optional<ModelInfo> known = cachedModel(m_model);
+    const std::optional<ModelInfo> known = cachedModel(model());
     const bool hasLimit = known && known->maxOutputTokens && *known->maxOutputTokens > 0;
     payload["max_tokens"] = hasLimit ? *known->maxOutputTokens : kDefaultMaxTokens;
 
@@ -195,7 +195,7 @@ void ClaudeClient::processSseEvent(const RequestID &id, const SSEEvent &, const 
     if (eventType == "message_stop")
         return;
 
-    ClaudeMessage *message = messageAs<ClaudeMessage>(id);
+    auto *message = qobject_cast<ClaudeMessage *>(messageForRequest(id));
     if (!message) {
         if (eventType != "message_start") {
             qCWarning(llmClaudeLog).noquote()

@@ -56,8 +56,8 @@ RequestID LlamaCppClient::sendMessage(
 RequestID LlamaCppClient::ask(const QString &prompt, RequestMode mode)
 {
     QJsonObject payload;
-    if (!m_model.isEmpty())
-        payload["model"] = m_model;
+    if (!model().isEmpty())
+        payload["model"] = model();
     payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
 
     return sendMessage(payload, {}, mode);
@@ -71,8 +71,8 @@ QFuture<QList<ModelInfo>> LlamaCppClient::listModels(const QString &endpoint)
 
 QFuture<bool> LlamaCppClient::isServerReady()
 {
-    QUrl url(m_url + "/health");
-    QNetworkRequest request = prepareNetworkRequest(url);
+    const QUrl target(url() + "/health");
+    QNetworkRequest request = prepareNetworkRequest(target);
 
     return LLMQore::compat(transport()->send(request, QByteArrayView("GET")))
         .then(this, [](const HttpResponse &response) {
@@ -86,8 +86,8 @@ QFuture<bool> LlamaCppClient::isServerReady()
 
 QFuture<QJsonObject> LlamaCppClient::serverProps()
 {
-    QUrl url(m_url + "/props");
-    QNetworkRequest request = prepareNetworkRequest(url);
+    const QUrl target(url() + "/props");
+    QNetworkRequest request = prepareNetworkRequest(target);
 
     return LLMQore::compat(transport()->send(request, QByteArrayView("GET")))
         .then(this, [](const HttpResponse &response) -> QJsonObject {

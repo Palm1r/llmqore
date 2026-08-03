@@ -55,7 +55,7 @@ OpenAIClient::OpenAIClient(
 QJsonObject OpenAIClient::buildConversationPayload(const Conversation &conversation) const
 {
     QJsonObject payload;
-    payload["model"] = m_model;
+    payload["model"] = model();
 
     QJsonArray messages;
     if (!conversation.system().isEmpty())
@@ -110,14 +110,14 @@ RequestID OpenAIClient::sendMessage(
 
     qCDebug(logCategory()).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
 
-    sendRequest(id, QUrl(m_url + resolved), request, mode);
+    sendRequest(id, QUrl(url() + resolved), request, mode);
     return id;
 }
 
 RequestID OpenAIClient::ask(const QString &prompt, RequestMode mode)
 {
     QJsonObject payload;
-    payload["model"] = m_model;
+    payload["model"] = model();
     payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
 
     return sendMessage(payload, {}, mode);

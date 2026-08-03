@@ -15,6 +15,7 @@
 
 #include <stdexcept>
 #include <utility>
+#include <variant>
 
 #include "Usage.hpp"
 #include <LLMQore/FutureUtils.hpp>
@@ -22,6 +23,8 @@
 #include <LLMQore/HttpTransport.hpp>
 #include <LLMQore/HttpTransportError.hpp>
 #include <LLMQore/Log.hpp>
+#include <LLMQore/RpcLineFramer.hpp>
+#include <LLMQore/SSEParser.hpp>
 #include <LLMQore/ToolsManager.hpp>
 
 #include "core/ThreadAffinity.hpp"
@@ -30,16 +33,26 @@ namespace LLMQore {
 
 namespace {
 
+// One request frames its bytes one way. Carrying both framers meant every request
+// paid for the one it never used, and both parser headers leaked into the public
+// BaseClient.hpp for the sake of a member nobody but Ollama reads.
 struct DataBuffers
 {
-    Rpc::LineFramer lineFramer;
-    SSEParser sseParser;
+    std::variant<SSEParser, Rpc::LineFramer> framer;
     QString responseContent;
+
+    void reset(StreamFraming framing)
+    {
+        if (framing == StreamFraming::JsonLines)
+            framer.emplace<Rpc::LineFramer>();
+        else
+            framer.emplace<SSEParser>();
+        responseContent.clear();
+    }
 
     void clear()
     {
-        lineFramer.clear();
-        sseParser.clear();
+        std::visit([](auto &active) { active.clear(); }, framer);
         responseContent.clear();
     }
 };
@@ -137,15 +150,13 @@ BaseClient::~BaseClient()
 
 QString BaseClient::url() const
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::url called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     return m_url;
 }
 
 void BaseClient::setUrl(const QString &url)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setUrl called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     if (m_url == url)
         return;
     m_url = url;
@@ -154,15 +165,13 @@ void BaseClient::setUrl(const QString &url)
 
 QString BaseClient::apiKey() const
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::apiKey called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     return m_apiKey;
 }
 
 void BaseClient::setApiKey(const QString &apiKey)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setApiKey called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     if (m_apiKey == apiKey)
         return;
     m_apiKey = apiKey;
@@ -171,50 +180,43 @@ void BaseClient::setApiKey(const QString &apiKey)
 
 QString BaseClient::model() const
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::model called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     return m_model;
 }
 
 void BaseClient::setModel(const QString &model)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setModel called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     m_model = model;
 }
 
 AuthScheme BaseClient::authScheme() const
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::authScheme called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     return m_impl->authScheme;
 }
 
 void BaseClient::setAuthScheme(const AuthScheme &scheme)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setAuthScheme called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     m_impl->authScheme = scheme;
 }
 
 QHash<QString, QString> BaseClient::headers() const
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::headers called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     return m_impl->headers;
 }
 
 void BaseClient::setHeader(const QString &name, const QString &value)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setHeader called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     m_impl->headers.insert(name, value);
 }
 
 void BaseClient::setHeaders(const QHash<QString, QString> &headers)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setHeaders called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     m_impl->headers = headers;
 }
 
@@ -342,6 +344,7 @@ RequestID BaseClient::createRequest()
 
     auto registerRequest = [this, id, oneShot = std::move(oneShot)]() mutable {
         m_impl->requests[id] = ActiveRequest{};
+        m_impl->requests[id].buffers.reset(streamFraming());
         if (oneShot)
             m_impl->oneShots.insert(id, std::move(oneShot));
     };
@@ -775,8 +778,7 @@ void BaseClient::captureStopReason(const RequestID &id)
 
 void BaseClient::addChunk(const RequestID &id, const QString &chunk)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::addChunk called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     auto it = m_impl->requests.find(id);
     if (it == m_impl->requests.end())
         return;
@@ -805,8 +807,7 @@ QJsonObject BaseClient::attachToolDefinitions(QJsonObject payload) const
 RequestID BaseClient::ask(
     const Conversation &conversation, const QJsonObject &extra, RequestMode mode)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::ask called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
 
     QJsonObject payload = attachToolDefinitions(buildConversationPayload(conversation));
     for (auto it = extra.constBegin(); it != extra.constEnd(); ++it)
@@ -874,8 +875,7 @@ QFuture<CompletionInfo> BaseClient::askOnce(
 
 void BaseClient::completeRequest(const RequestID &id)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::completeRequest called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     auto it = m_impl->requests.find(id);
     if (it == m_impl->requests.end())
         return;
@@ -918,8 +918,7 @@ void BaseClient::completeRequest(const RequestID &id)
 
 void BaseClient::setUsage(const RequestID &id, const TokenUsage &usage)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setUsage called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     auto it = m_impl->requests.find(id);
     if (it == m_impl->requests.end())
         return;
@@ -951,8 +950,7 @@ void BaseClient::applyUsage(
 
 void BaseClient::finalizeTurn(const RequestID &id)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::finalizeTurn called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     auto it = m_impl->requests.find(id);
     if (it == m_impl->requests.end() || !it->turnUsage)
         return;
@@ -970,8 +968,7 @@ void BaseClient::finalizeTurn(const RequestID &id)
 
 void BaseClient::failRequest(const RequestID &id, const QString &error)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::failRequest called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     if (!m_impl->requests.contains(id))
         return;
 
@@ -1057,8 +1054,7 @@ QJsonObject BaseClient::buildReplayContinuation(
 
 void BaseClient::continueRequest(const RequestID &id, const QJsonObject &payload)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::continueRequest called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     auto it = m_impl->requests.find(id);
     if (it == m_impl->requests.end() || it->url.isEmpty()) {
         qCWarning(llmQoreLog).noquote()
@@ -1186,8 +1182,7 @@ void BaseClient::storeRequestContext(const RequestID &id, const QUrl &url, const
 
     it->url = url;
     it->originalPayload = payload;
-    it->buffers.lineFramer.clear();
-    it->buffers.sseParser.clear();
+    it->buffers.clear();
 }
 
 bool BaseClient::hasRequest(const RequestID &id) const noexcept
@@ -1195,18 +1190,27 @@ bool BaseClient::hasRequest(const RequestID &id) const noexcept
     return m_impl->requests.contains(id);
 }
 
+StreamFraming BaseClient::streamFraming() const
+{
+    return StreamFraming::ServerSentEvents;
+}
+
 Rpc::LineFramer &BaseClient::requestLineFramer(const RequestID &id)
 {
     auto it = m_impl->requests.find(id);
     Q_ASSERT(it != m_impl->requests.end());
-    return it->buffers.lineFramer;
+    auto *framer = std::get_if<Rpc::LineFramer>(&it->buffers.framer);
+    Q_ASSERT_X(framer != nullptr, Q_FUNC_INFO, "requestLineFramer needs JsonLines framing");
+    return *framer;
 }
 
 SSEParser &BaseClient::requestSSEParser(const RequestID &id)
 {
     auto it = m_impl->requests.find(id);
     Q_ASSERT(it != m_impl->requests.end());
-    return it->buffers.sseParser;
+    auto *parser = std::get_if<SSEParser>(&it->buffers.framer);
+    Q_ASSERT_X(parser != nullptr, Q_FUNC_INFO, "requestSSEParser needs ServerSentEvents framing");
+    return *parser;
 }
 
 QString BaseClient::responseContent(const RequestID &id) const

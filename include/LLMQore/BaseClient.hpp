@@ -25,17 +25,23 @@
 #include <LLMQore/BaseMessage.hpp>
 #include <LLMQore/Conversation.hpp>
 #include <LLMQore/RequestMode.hpp>
-#include <LLMQore/RpcLineFramer.hpp>
-#include <LLMQore/SSEParser.hpp>
-#include <LLMQore/ToolResult.hpp>
+#include <LLMQore/SSEEvent.hpp>
 #include <LLMQore/ToolDialect.hpp>
+#include <LLMQore/ToolResult.hpp>
 #include <LLMQore/UsageSchema.hpp>
 
 namespace LLMQore {
 
+namespace Rpc {
+class LineFramer;
+}
+
 class HttpStreamHandle;
 class HttpTransport;
+class SSEParser;
 class ToolsManager;
+
+enum class StreamFraming { ServerSentEvents, JsonLines };
 
 using RequestID = QString;
 
@@ -181,6 +187,8 @@ protected:
 
     virtual const UsageSchema &usageSchema() const = 0;
 
+    [[nodiscard]] virtual StreamFraming streamFraming() const;
+
     virtual void processData(const RequestID &id, const QByteArray &data);
     void processBufferedResponse(const RequestID &id, const QByteArray &data);
     virtual void processBufferedBody(const RequestID &id, const QJsonObject &body) = 0;
@@ -233,12 +241,6 @@ protected:
         auto *created = new T(this);
         setMessageForRequest(id, created);
         return created;
-    }
-
-    template<typename T>
-    [[nodiscard]] T *messageAs(const RequestID &id) const
-    {
-        return qobject_cast<T *>(messageForRequest(id));
     }
 
     [[nodiscard]] static QJsonObject appendChatMessagesContinuation(
@@ -309,11 +311,11 @@ protected:
     QString responseContent(const RequestID &id) const;
     void setResponseContent(const RequestID &id, const QString &content);
 
+private:
     QString m_url;
     QString m_apiKey;
     QString m_model;
 
-private:
     void handleToolsCompleted(
         const RequestID &id, const QHash<QString, ToolResult> &toolResults);
     void setUsage(const RequestID &id, const TokenUsage &usage);

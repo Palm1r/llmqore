@@ -23,6 +23,7 @@ target_sources(LLMQore PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/network/HttpClient.cpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/HttpRequestParser.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/network/HttpRequestParser.cpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/SSEEvent.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/SSEParser.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/network/SSEParser.cpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/RequestMode.hpp

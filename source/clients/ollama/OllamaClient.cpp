@@ -64,14 +64,14 @@ RequestID OllamaClient::sendMessage(
 
     qCDebug(llmOllamaLog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
 
-    sendRequest(id, QUrl(m_url + resolved), request, mode);
+    sendRequest(id, QUrl(url() + resolved), request, mode);
     return id;
 }
 
 RequestID OllamaClient::ask(const QString &prompt, RequestMode mode)
 {
     QJsonObject payload;
-    payload["model"] = m_model;
+    payload["model"] = model();
     payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
 
     return sendMessage(payload, {}, mode);
@@ -80,7 +80,7 @@ RequestID OllamaClient::ask(const QString &prompt, RequestMode mode)
 QJsonObject OllamaClient::buildConversationPayload(const Conversation &conversation) const
 {
     QJsonObject payload;
-    payload["model"] = m_model;
+    payload["model"] = model();
 
     QJsonArray messages;
     if (!conversation.system().isEmpty())
@@ -122,6 +122,11 @@ QFuture<QList<ModelInfo>> OllamaClient::listModels(const QString &endpoint)
         endpointUrl(endpoint, QStringLiteral("/api/tags")),
         QStringLiteral("models"),
         QStringLiteral("name"));
+}
+
+StreamFraming OllamaClient::streamFraming() const
+{
+    return StreamFraming::JsonLines;
 }
 
 void OllamaClient::processData(const RequestID &id, const QByteArray &data)

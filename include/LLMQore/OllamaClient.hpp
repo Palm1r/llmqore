@@ -42,6 +42,7 @@ public:
 protected:
     [[nodiscard]] const ToolDialect &toolDialect() const override;
     [[nodiscard]] const UsageSchema &usageSchema() const override;
+    [[nodiscard]] StreamFraming streamFraming() const override;
     void processData(const RequestID &id, const QByteArray &data) override;
     void processBufferedBody(const RequestID &id, const QJsonObject &body) override;
     void flushStreamBuffers(const RequestID &id) override;

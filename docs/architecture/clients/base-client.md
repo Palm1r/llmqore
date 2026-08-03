@@ -34,6 +34,8 @@ Public, the caller-facing surface:
 - `ask(prompt, mode)` -- the minimal single-prompt convenience payload.
 - `listModels(endpoint)` -- almost always one line over `fetchModelList`.
 
+`url()`, `apiKey()` and `model()` are the only way to read the endpoint triple, from inside the class as well as outside. They were protected fields until the thread guards on the accessors turned out to be decorative: fourteen reads in subclasses went straight past them. Nothing in the tree stores a copy.
+
 Protected, the format-facing surface:
 
 - `toolDialect()` -- the provider's `ToolDialect`, returned from its message translator (`FooMessage::toolDialect()`). This is what `ToolsManager` serializes tool definitions through. It is a method on the client rather than something read off the message object because `tools()` may be called before any request, i.e. before a translator exists.
@@ -46,7 +48,8 @@ Protected, the format-facing surface:
 Override only when the provider deviates:
 
 - `processSseEvent(id, event, json)` -- one framed SSE event, already parsed. This is where an SSE provider does its work; `event.type` carries the wire event name for providers that dispatch on it (Responses), and providers that dispatch on the JSON body (Claude, OpenAI, Google) ignore it.
-- `processData(id, data)` -- raw streaming bytes. The default feeds `requestSSEParser(id)` and hands whatever it framed to `dispatchSseEvents`. Override only for a different framing (Ollama's JSON lines) or to inspect the bytes first (Google sniffs for a non-SSE error body, then calls `BaseClient::processData`).
+- `streamFraming()` -- how this provider frames its stream: `ServerSentEvents` (the default) or `JsonLines` (Ollama). A request allocates exactly one framer, chosen from this, so `requestSSEParser(id)` and `requestLineFramer(id)` are each valid only under the matching answer and assert otherwise. This is also why `BaseClient.hpp` no longer drags `SSEParser.hpp` and `RpcLineFramer.hpp` into every translation unit that includes a client.
+- `processData(id, data)` -- raw streaming bytes. The default feeds `requestSSEParser(id)` and hands whatever it framed to `dispatchSseEvents`. Override only to inspect the bytes first (Google sniffs for a non-SSE error body, then calls `BaseClient::processData`); a different framing is `streamFraming()`, not an override here.
 - `errorAnnotations()` -- the provider's error-envelope vocabulary, as data. `errorMessageFrom(body)` reads `error.message` out of a decoded body and appends one parenthesised clause per annotation whose field is present; an annotation with an empty label prints the value bare. An `error` that is a plain string rather than an object (Ollama) is read as the message directly, so Ollama overrides nothing. Both the HTTP path and the buffered path go through this one function, which is why they cannot drift.
 - `parseHttpError(response)` -- the whole vendor error envelope, including the `"HTTP <status>: "` prefix and the fallback to a body snippet when there is no envelope at all. The default is built on `errorAnnotations()`; override it only for a provider whose errors are not JSON.
 - `flushStreamBuffers(id)` -- called by the base at end of stream *before* it decides the request is done. The default flushes the SSE parser, so every SSE provider gets its trailing partial event for free; Ollama overrides it to drain the line framer.

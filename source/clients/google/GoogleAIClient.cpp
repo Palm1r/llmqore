@@ -58,17 +58,15 @@ RequestID GoogleAIClient::sendMessage(
 
     QString resolved = endpoint;
     if (resolved.isEmpty()) {
-        const QString modelName = payload.contains("model") ? payload["model"].toString() : m_model;
+        const QString modelName = payload.contains("model") ? payload["model"].toString() : model();
         const QString suffix = (mode == RequestMode::Streaming)
                                    ? QStringLiteral(":streamGenerateContent?alt=sse")
                                    : QStringLiteral(":generateContent");
         resolved = QStringLiteral("/models/%1%2").arg(modelName, suffix);
     }
-    QUrl url(m_url + resolved);
-
     qCDebug(llmGoogleLog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
 
-    sendRequest(id, url, payload, mode);
+    sendRequest(id, QUrl(url() + resolved), payload, mode);
     return id;
 }
 
