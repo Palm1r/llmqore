@@ -18,10 +18,16 @@ public:
     // How this provider spells tool schemas on the way out.
     static const ToolDialect &toolDialect();
 
-    void handleContentBlockStart(int index, const QString &blockType, const QJsonObject &data);
-    void handleContentBlockDelta(int index, const QString &deltaType, const QJsonObject &delta);
-    void handleContentBlockStop(int index);
-    void handleStopReason(const QString &stopReason);
+    struct Effects
+    {
+        QString chunk;
+        QJsonObject usage;
+        bool thinkingCompleted = false;
+        bool toolsReady = false;
+    };
+
+    Effects applyEvent(const QJsonObject &event);
+    Effects applyResponse(const QJsonObject &response);
 
     QString stopReason() const override { return m_stopReason; }
 
@@ -35,6 +41,11 @@ public:
     void startNewContinuation() override;
 
 private:
+    void beginBlock(int index, const QJsonObject &block);
+    void applyDelta(int index, const QJsonObject &delta);
+    void endBlock(int index);
+    void applyStopReason(const QString &stopReason);
+
     QString m_stopReason;
     QHash<int, QString> m_pendingToolInputs;
 

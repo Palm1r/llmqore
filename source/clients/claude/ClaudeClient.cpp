@@ -188,10 +188,9 @@ QJsonObject ClaudeClient::buildContinuationPayload(
     return request;
 }
 
-void ClaudeClient::processSseEvent(
-    const RequestID &id, const SSEEvent &, const QJsonObject &event)
+void ClaudeClient::processSseEvent(const RequestID &id, const SSEEvent &, const QJsonObject &event)
 {
-    QString eventType = event["type"].toString();
+    const QString eventType = event["type"].toString();
 
     if (eventType == "message_stop")
         return;
@@ -206,89 +205,14 @@ void ClaudeClient::processSseEvent(
             return;
         }
         message = ensureMessage<ClaudeMessage>(id);
-        qCDebug(llmClaudeLog).noquote()
-            << QString("Created ClaudeMessage for request %1").arg(id);
     }
 
-    if (eventType == "message_start") {
-        message->startNewContinuation();
-        qCDebug(llmClaudeLog).noquote() << QString("Starting continuation for request %1").arg(id);
-
-        applyUsage(id, event["message"].toObject());
-
-    } else if (eventType == "content_block_start") {
-        int index = event["index"].toInt();
-        QJsonObject contentBlock = event["content_block"].toObject();
-        QString blockType = contentBlock["type"].toString();
-
-        message->handleContentBlockStart(index, blockType, contentBlock);
-
-    } else if (eventType == "content_block_delta") {
-        int index = event["index"].toInt();
-        QJsonObject delta = event["delta"].toObject();
-        QString deltaType = delta["type"].toString();
-
-        message->handleContentBlockDelta(index, deltaType, delta);
-
-        if (deltaType == "text_delta") {
-            QString text = delta["text"].toString();
-            addChunk(id, text);
-        }
-
-    } else if (eventType == "content_block_stop") {
-        int index = event["index"].toInt();
-
-        notifyPendingThinkingBlocks(id);
-
-        message->handleContentBlockStop(index);
-
-    } else if (eventType == "message_delta") {
-        QJsonObject delta = event["delta"].toObject();
-        if (delta.contains("stop_reason")) {
-            message->handleStopReason(delta["stop_reason"].toString());
-            executeToolsFromMessage(id);
-        }
-        applyUsage(id, event);
-    }
+    applyEffects(id, message->applyEvent(event));
 }
 
 void ClaudeClient::processBufferedBody(const RequestID &id, const QJsonObject &response)
 {
-    auto *message = ensureMessage<ClaudeMessage>(id);
-    message->startNewContinuation();
-
-    QJsonArray content = response["content"].toArray();
-    for (int i = 0; i < content.size(); ++i) {
-        QJsonObject block = content[i].toObject();
-        QString blockType = block["type"].toString();
-
-        message->handleContentBlockStart(i, blockType, block);
-
-        if (blockType == "text") {
-            QString text = block["text"].toString();
-            if (!text.isEmpty()) {
-                message->handleContentBlockDelta(
-                    i, QStringLiteral("text_delta"), QJsonObject{{"text", text}});
-                addChunk(id, text);
-            }
-        } else if (blockType == "thinking") {
-            // handleContentBlockStart already took `thinking` and `signature` off the
-            // complete block. Replaying them as deltas would append the text twice.
-            notifyPendingThinkingBlocks(id);
-        } else if (blockType == "redacted_thinking") {
-            notifyPendingThinkingBlocks(id);
-        }
-
-        message->handleContentBlockStop(i);
-    }
-
-    QString stopReason = response["stop_reason"].toString();
-    if (!stopReason.isEmpty()) {
-        message->handleStopReason(stopReason);
-        executeToolsFromMessage(id);
-    }
-
-    applyUsage(id, response);
+    applyEffects(id, ensureMessage<ClaudeMessage>(id)->applyResponse(response));
 }
 
 } // namespace LLMQore

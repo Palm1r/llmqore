@@ -39,14 +39,79 @@ ClaudeMessage::ClaudeMessage(QObject *parent)
     : BaseMessage(parent)
 {}
 
-void ClaudeMessage::handleContentBlockStart(
-    int index, const QString &blockType, const QJsonObject &data)
+ClaudeMessage::Effects ClaudeMessage::applyEvent(const QJsonObject &event)
 {
+    Effects effects;
+    const QString type = event["type"].toString();
+
+    if (type == "message_start") {
+        startNewContinuation();
+        effects.usage = event["message"].toObject();
+
+    } else if (type == "content_block_start") {
+        beginBlock(event["index"].toInt(), event["content_block"].toObject());
+
+    } else if (type == "content_block_delta") {
+        const QJsonObject delta = event["delta"].toObject();
+        applyDelta(event["index"].toInt(), delta);
+        if (delta["type"].toString() == "text_delta")
+            effects.chunk = delta["text"].toString();
+
+    } else if (type == "content_block_stop") {
+        effects.thinkingCompleted = true;
+        endBlock(event["index"].toInt());
+
+    } else if (type == "message_delta") {
+        const QJsonObject delta = event["delta"].toObject();
+        if (delta.contains("stop_reason")) {
+            applyStopReason(delta["stop_reason"].toString());
+            effects.toolsReady = true;
+        }
+        effects.usage = event;
+    }
+
+    return effects;
+}
+
+ClaudeMessage::Effects ClaudeMessage::applyResponse(const QJsonObject &response)
+{
+    Effects effects;
+    startNewContinuation();
+
+    const QJsonArray content = response["content"].toArray();
+    for (int index = 0; index < content.size(); ++index) {
+        const QJsonObject block = content[index].toObject();
+        const QString blockType = block["type"].toString();
+
+        beginBlock(index, block);
+
+        if (blockType == "text")
+            effects.chunk += block["text"].toString();
+        else if (blockType == "thinking" || blockType == "redacted_thinking")
+            effects.thinkingCompleted = true;
+
+        endBlock(index);
+    }
+
+    const QString stopReason = response["stop_reason"].toString();
+    if (!stopReason.isEmpty()) {
+        applyStopReason(stopReason);
+        effects.toolsReady = true;
+    }
+
+    effects.usage = response;
+    return effects;
+}
+
+void ClaudeMessage::beginBlock(int index, const QJsonObject &data)
+{
+    const QString blockType = data["type"].toString();
+
     qCDebug(llmClaudeLog).noquote()
-        << QString("handleContentBlockStart index=%1, blockType=%2").arg(index).arg(blockType);
+        << QString("beginBlock index=%1, blockType=%2").arg(index).arg(blockType);
 
     if (blockType == "text") {
-        addCurrentContent(TextContent{});
+        addCurrentContent(TextContent{data["text"].toString()});
 
     } else if (blockType == "image") {
         const QJsonObject source = data["source"].toObject();
@@ -80,12 +145,13 @@ void ClaudeMessage::handleContentBlockStart(
     }
 }
 
-void ClaudeMessage::handleContentBlockDelta(
-    int index, const QString &deltaType, const QJsonObject &delta)
+void ClaudeMessage::applyDelta(int index, const QJsonObject &delta)
 {
     if (index >= m_currentBlocks.size()) {
         return;
     }
+
+    const QString deltaType = delta["type"].toString();
 
     if (deltaType == "text_delta") {
         if (auto *textContent = blockAt<TextContent>(index))
@@ -119,27 +185,21 @@ void ClaudeMessage::handleContentBlockDelta(
     }
 }
 
-void ClaudeMessage::handleContentBlockStop(int index)
+void ClaudeMessage::endBlock(int index)
 {
-    if (m_pendingToolInputs.contains(index)) {
-        QString jsonInput = m_pendingToolInputs[index];
-        QJsonObject inputObject;
+    if (!m_pendingToolInputs.contains(index))
+        return;
 
-        if (!jsonInput.isEmpty()) {
-            QJsonDocument doc = QJsonDocument::fromJson(jsonInput.toUtf8());
-            if (doc.isObject()) {
-                inputObject = doc.object();
-            }
-        }
+    const QString accumulated = m_pendingToolInputs.take(index);
+    if (accumulated.isEmpty())
+        return;
 
-        if (auto *toolContent = blockAt<ToolUseContent>(index))
-            toolContent->input = inputObject;
-
-        m_pendingToolInputs.remove(index);
-    }
+    const QJsonDocument doc = QJsonDocument::fromJson(accumulated.toUtf8());
+    if (auto *toolContent = blockAt<ToolUseContent>(index))
+        toolContent->input = doc.isObject() ? doc.object() : QJsonObject{};
 }
 
-void ClaudeMessage::handleStopReason(const QString &stopReason)
+void ClaudeMessage::applyStopReason(const QString &stopReason)
 {
     m_stopReason = stopReason;
     updateStateFromStopReason();

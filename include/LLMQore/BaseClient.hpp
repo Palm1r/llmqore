@@ -190,6 +190,19 @@ protected:
         const QHash<QString, ToolResult> &toolResults)
         = 0;
 
+    template<typename Effects>
+    void applyEffects(const RequestID &id, const Effects &effects)
+    {
+        if (effects.thinkingCompleted)
+            notifyPendingThinkingBlocks(id);
+        if (!effects.chunk.isEmpty())
+            addChunk(id, effects.chunk);
+        if (!effects.usage.isEmpty())
+            applyUsage(id, effects.usage);
+        if (effects.toolsReady)
+            executeToolsFromMessage(id);
+    }
+
     virtual void cleanupDerivedData(const RequestID &id);
 
     [[nodiscard]] const QLoggingCategory &logCategory() const;
