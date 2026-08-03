@@ -513,3 +513,36 @@ TEST(ToolDefinitions, DefinitionsSurviveIntoTheContinuationRequest)
     const QJsonArray tools = transport.streamRequest(1).payload().value("tools").toArray();
     EXPECT_EQ(tools.size(), 1) << "the continuation is built from the original payload";
 }
+
+TEST(ToolRounds, BufferedToolCallsProduceTheSameContinuationAsTheEquivalentStream)
+{
+    FakeHttpTransport streamTransport;
+    OpenAIClient streamClient("http://fake.local/v1", "sk-test", "gpt-test", &streamTransport);
+    streamClient.tools()->addTool(new CountingTool(&streamClient));
+
+    streamClient.ask(oneUserTurn(QStringLiteral("go")));
+    ASSERT_EQ(streamTransport.streamCount(), 1);
+    streamTransport.lastStream()->sendAll(toolCallTurn("call_1"));
+    ASSERT_TRUE(LLMQoreTest::waitForStreams(streamTransport, 2)) << "the stream did not continue";
+
+    FakeHttpTransport bufferedTransport;
+    OpenAIClient bufferedClient("http://fake.local/v1", "sk-test", "gpt-test", &bufferedTransport);
+    bufferedClient.tools()->addTool(new CountingTool(&bufferedClient));
+
+    bufferedClient.ask(oneUserTurn(QStringLiteral("go")), {}, RequestMode::Buffered);
+    ASSERT_EQ(bufferedTransport.bufferedCount(), 1);
+    bufferedTransport.respondToLast(
+        200,
+        R"({"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[)"
+        R"({"id":"call_1","type":"function","function":{"name":"echo","arguments":"{}"}}]},)"
+        R"("finish_reason":"tool_calls"}]})");
+    pump();
+    ASSERT_EQ(bufferedTransport.bufferedCount(), 2) << "the buffered round did not continue";
+
+    const QJsonObject fromStream = streamTransport.streamRequest(1).payload();
+    const QJsonObject fromBuffered = bufferedTransport.bufferedRequest(1).payload();
+
+    EXPECT_EQ(fromBuffered.value("messages"), fromStream.value("messages"))
+        << "buffered and streamed turns must reach the wire as the same continuation";
+    EXPECT_EQ(fromBuffered.value("tools"), fromStream.value("tools"));
+}

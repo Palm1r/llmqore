@@ -210,48 +210,47 @@ void OpenAIClient::processStreamChunk(const RequestID &id, const QJsonObject &ch
     }
 }
 
+namespace {
+
+// The buffered shape differs from the streamed one in exactly two places: the turn
+// arrives under `message` instead of `delta`, and its tool calls carry no wire `index`
+// because nothing was ever split across frames. Normalising those two makes the
+// buffered body a one-frame stream, which is the only reason the five steps below it
+// exist in a single copy.
+QJsonObject bufferedChoiceAsDelta(const QJsonObject &choice)
+{
+    QJsonObject delta = choice["message"].toObject();
+
+    QJsonArray toolCalls = delta["tool_calls"].toArray();
+    for (int position = 0; position < toolCalls.size(); ++position) {
+        QJsonObject call = toolCalls[position].toObject();
+        if (!call.contains("index"))
+            call["index"] = position;
+        toolCalls[position] = call;
+    }
+    if (!toolCalls.isEmpty())
+        delta["tool_calls"] = toolCalls;
+
+    QJsonObject normalized = choice;
+    normalized.remove("message");
+    normalized["delta"] = delta;
+    return normalized;
+}
+
+} // namespace
+
 void OpenAIClient::processBufferedBody(const RequestID &id, const QJsonObject &response)
 {
-    QJsonArray choices = response["choices"].toArray();
+    const QJsonArray choices = response["choices"].toArray();
     if (choices.isEmpty()) {
         failRequest(id, QStringLiteral("Empty choices in buffered response"));
         return;
     }
 
-    QJsonObject choice = choices[0].toObject();
-    QJsonObject messageObj = choice["message"].toObject();
-    QString finishReason = choice["finish_reason"].toString();
+    QJsonObject replayed = response;
+    replayed["choices"] = QJsonArray{bufferedChoiceAsDelta(choices.first().toObject())};
 
-    auto *message = ensureMessage<OpenAIMessage>(id);
-
-    const QString text = takeReasoningAndText(message, messageObj);
-    if (!text.isEmpty()) {
-        message->handleContentDelta(text);
-        addChunk(id, text);
-    }
-
-    notifyPendingThinkingBlocks(id);
-
-    if (messageObj.contains("tool_calls")) {
-        QJsonArray toolCalls = messageObj["tool_calls"].toArray();
-        for (int i = 0; i < toolCalls.size(); ++i) {
-            QJsonObject toolCall = toolCalls[i].toObject();
-            QString toolId = toolCall["id"].toString();
-            QJsonObject function = toolCall["function"].toObject();
-            QString name = function["name"].toString();
-            QString arguments = function["arguments"].toString();
-
-            message->handleToolCallStart(i, toolId, name);
-            message->handleToolCallDelta(i, arguments);
-            message->handleToolCallComplete(i);
-        }
-    }
-
-    if (!finishReason.isEmpty()) {
-        message->handleFinishReason(finishReason);
-        executeToolsFromMessage(id);
-    }
-
+    processStreamChunk(id, replayed);
     applyUsage(id, response);
 }
 
