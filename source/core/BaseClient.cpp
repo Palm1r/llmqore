@@ -93,7 +93,7 @@ struct BaseClient::Impl
     QHash<QString, QString> headers;
     ToolsManager *toolsManager = nullptr;
     int maxToolRounds = BaseClient::kDefaultMaxToolRounds;
-    const QLoggingCategory *logCategory = &llmQoreLog();
+    ProviderProfile profile;
     QHash<RequestID, ActiveRequest> requests;
     QList<ModelInfo> modelCache;
     QHash<QString, int> modelIndex;
@@ -319,7 +319,7 @@ void BaseClient::handleToolsCompleted(
         return;
 
     if (++it->toolRounds > m_impl->maxToolRounds) {
-        qCWarning(llmQoreLog).noquote()
+        qCWarning(logCategory()).noquote()
             << QString("Tool continuation limit reached for request %1").arg(id);
         abortRequest(id, QStringLiteral("Tool continuation limit reached"));
         return;
@@ -327,7 +327,7 @@ void BaseClient::handleToolsCompleted(
 
     const QJsonObject payload = buildReplayContinuation(id, toolResults);
     if (payload.isEmpty()) {
-        qCWarning(llmQoreLog).noquote()
+        qCWarning(logCategory()).noquote()
             << QString("Missing data for continuation request %1").arg(id);
         abortRequest(id, QStringLiteral("Missing data for tool continuation"));
         return;
@@ -372,14 +372,43 @@ void BaseClient::sendRequest(
     startHttpRequest(id, prepareNetworkRequest(url), payload, mode);
 }
 
-const QLoggingCategory &BaseClient::logCategory() const
+const ProviderProfile &BaseClient::profile() const
 {
-    return *m_impl->logCategory;
+    return m_impl->profile;
 }
 
-void BaseClient::setLogCategory(const QLoggingCategory &category)
+void BaseClient::setProfile(const ProviderProfile &profile)
 {
-    m_impl->logCategory = &category;
+    LLMQORE_ASSERT_OWNING_THREAD();
+    m_impl->profile = profile;
+    setAuthScheme(profile.auth);
+    if (!profile.headers.isEmpty())
+        setHeaders(profile.headers);
+}
+
+const QLoggingCategory &BaseClient::logCategory() const
+{
+    return m_impl->profile.log ? *m_impl->profile.log : llmQoreLog();
+}
+
+RequestID BaseClient::postJson(const QJsonObject &payload, const QString &endpoint, RequestMode mode)
+{
+    LLMQORE_ASSERT_OWNING_THREAD();
+
+    const RequestID id = createRequest();
+    const QString resolved = endpoint.isEmpty() ? m_impl->profile.chatPath : endpoint;
+
+    qCDebug(logCategory()).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
+
+    sendRequest(id, QUrl(url() + resolved), payload, mode);
+    return id;
+}
+
+RequestID BaseClient::ask(const QString &prompt, RequestMode mode)
+{
+    Conversation conversation;
+    conversation.addUser(prompt);
+    return ask(conversation, {}, mode);
 }
 
 void BaseClient::cleanupDerivedData(const RequestID &)
@@ -1057,7 +1086,7 @@ void BaseClient::continueRequest(const RequestID &id, const QJsonObject &payload
     LLMQORE_ASSERT_OWNING_THREAD();
     auto it = m_impl->requests.find(id);
     if (it == m_impl->requests.end() || it->url.isEmpty()) {
-        qCWarning(llmQoreLog).noquote()
+        qCWarning(logCategory()).noquote()
             << QString("Missing transport context for continuation request %1").arg(id);
         cleanupFullRequest(id);
         failRequest(id, QStringLiteral("Missing data for tool continuation"));

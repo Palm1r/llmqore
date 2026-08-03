@@ -8,7 +8,6 @@
 #include <LLMQore/ClaudeClient.hpp>
 #include <LLMQore/GoogleAIClient.hpp>
 #include <LLMQore/LlamaCppClient.hpp>
-#include <LLMQore/MistralClient.hpp>
 #include <LLMQore/OllamaClient.hpp>
 #include <LLMQore/OpenAIClient.hpp>
 #include <LLMQore/OpenAIResponsesClient.hpp>
@@ -165,23 +164,15 @@ TEST(LlamaCppClientConstructor, Default)
     EXPECT_TRUE(client.model().isEmpty());
 }
 
-TEST(MistralClientConstructor, Basic)
+TEST(MistralProfile, IsAnOpenAIClientWithDifferentPaths)
 {
-    MistralClient client("https://api.mistral.ai/v1", "sk-test", "codestral-latest");
+    OpenAIClient client("https://api.mistral.ai", "sk-test", "codestral-latest");
+    client.setProfile(mistralProfile());
 
     EXPECT_NE(client.tools(), nullptr);
     EXPECT_TRUE(soleDefinition(client).contains("function"));
-}
-
-TEST(MistralClientConstructor, Default)
-{
-    MistralClient client;
-
-    EXPECT_NE(client.tools(), nullptr);
-    EXPECT_TRUE(soleDefinition(client).contains("function"));
-    EXPECT_TRUE(client.url().isEmpty());
-    EXPECT_TRUE(client.apiKey().isEmpty());
-    EXPECT_TRUE(client.model().isEmpty());
+    EXPECT_EQ(client.profile().chatPath, QStringLiteral("/v1/chat/completions"));
+    EXPECT_EQ(client.profile().modelsPath, QStringLiteral("/v1/models"));
 }
 
 #include "tst_ClientConstructors.moc"

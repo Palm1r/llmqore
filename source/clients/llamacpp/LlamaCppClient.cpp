@@ -25,15 +25,6 @@ const UsageSchema kLlamaCppNativeUsage{
 
 } // namespace
 
-LlamaCppClient::LlamaCppClient(QObject *parent)
-    : LlamaCppClient({}, {}, {}, parent)
-{}
-
-LlamaCppClient::LlamaCppClient(
-    const QString &url, const QString &apiKey, const QString &model, QObject *parent)
-    : LlamaCppClient(url, apiKey, model, nullptr, parent)
-{}
-
 LlamaCppClient::LlamaCppClient(
     const QString &url,
     const QString &apiKey,
@@ -42,31 +33,11 @@ LlamaCppClient::LlamaCppClient(
     QObject *parent)
     : OpenAIClient(url, apiKey, model, transport, parent)
 {
-    setLogCategory(llmLlamaCppLog());
-}
-
-RequestID LlamaCppClient::sendMessage(
-    const QJsonObject &payload, const QString &endpoint, RequestMode mode)
-{
-    LLMQORE_ASSERT_OWNING_THREAD();
-    return OpenAIClient::sendMessage(
-        payload, endpoint.isEmpty() ? QStringLiteral("/v1/chat/completions") : endpoint, mode);
-}
-
-RequestID LlamaCppClient::ask(const QString &prompt, RequestMode mode)
-{
-    QJsonObject payload;
-    if (!model().isEmpty())
-        payload["model"] = model();
-    payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
-
-    return sendMessage(payload, {}, mode);
-}
-
-QFuture<QList<ModelInfo>> LlamaCppClient::listModels(const QString &endpoint)
-{
-    return OpenAIClient::listModels(
-        endpoint.isEmpty() ? QStringLiteral("/v1/models") : endpoint);
+    ProviderProfile profile = openAiProfile();
+    profile.log = &llmLlamaCppLog();
+    profile.chatPath = QStringLiteral("/v1/chat/completions");
+    profile.modelsPath = QStringLiteral("/v1/models");
+    setProfile(profile);
 }
 
 QFuture<bool> LlamaCppClient::isServerReady()

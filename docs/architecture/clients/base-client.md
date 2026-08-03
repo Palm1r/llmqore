@@ -30,9 +30,10 @@ Abstract base for every LLM provider client. Owns HTTP transport, request bookke
 
 Public, the caller-facing surface:
 
-- `sendMessage(payload, endpoint, mode)` -- shape the payload for the provider, then hand it to `sendRequest`.
-- `ask(prompt, mode)` -- the minimal single-prompt convenience payload.
-- `listModels(endpoint)` -- almost always one line over `fetchModelList`.
+- `sendMessage(payload, endpoint, mode)` -- put the provider's envelope on the payload (`stream`, `stream_options`, `store`) and hand it to `postJson`, which resolves the endpoint against the profile, logs, and sends. Nothing else belongs here.
+- `listModels(endpoint)` -- almost always one line over `fetchModelList` with `profile().modelsPath`.
+
+`ask()` is not on this list any more: both overloads live in `BaseClient`. The prompt form builds a one-turn `Conversation` and goes through the conversation form, so a provider that can answer a conversation can answer a prompt for free -- and cannot forget to attach tools to one of them.
 
 `url()`, `apiKey()` and `model()` are the only way to read the endpoint triple, from inside the class as well as outside. They were protected fields until the thread guards on the accessors turned out to be decorative: fourteen reads in subclasses went straight past them. Nothing in the tree stores a copy.
 
@@ -58,7 +59,7 @@ Override only when the provider deviates:
 - `cleanupDerivedData(id)` -- per-request state beyond the message object. Only providers that keep survives-the-turn bookkeeping need it (Google's failed-request set and error sniffers, Responses' item-id map).
 - `onStreamFinished(id, error)` -- the whole end-of-stream sequence. Nothing in the tree overrides it, and nothing should: the hooks above are the seams cut out of it.
 
-Not a hook, but the same idea: `setLogCategory()` decides which category the shared base code logs under, so a subclass does not report under its parent's name. Call it once, first thing in the constructor. A client that derives from another (Mistral, llama.cpp) must route every one of its constructors through the one that sets it.
+Not a hook, but the same idea: `setProfile()` in the constructor is what tells the shared base code which paths, headers, auth scheme and logging category a provider uses. A client that derives from another (llama.cpp) starts from its parent's profile and overrides the fields it changes; a provider that changes *only* those fields does not need a class at all, which is why Mistral is `openAiProfile()` with three fields replaced.
 
 ### End of stream
 
@@ -131,6 +132,6 @@ Errors reach the caller through three paths:
 2. Add a public header under `include/LLMQore/`, and list it in the `include/LLMQore/Clients` umbrella header.
 3. In the translator's `.cpp`, define the provider's `ToolDialect` subclass (anonymous namespace) and expose it through a static `FooMessage::toolDialect()`. Both directions of the format -- schema out, tool results back -- belong in this one file.
 4. Implement the pure virtuals: `sendMessage`, `ask`, `listModels`, `toolDialect`, `usageSchema`, `processBufferedBody`, `buildContinuationPayload`. The usage schema is a `constexpr UsageSchema` next to the client, like the dialect is next to the translator. Seed the default `AuthScheme` and header map in the constructor -- there is no request-building hook to override.
-5. Override `processSseEvent()` for the streaming path, and call `setLogCategory()` in the constructor so the shared base code logs under the new provider's name. A provider that is not SSE-framed overrides `processData()` and `flushStreamBuffers()` instead.
+5. Override `processSseEvent()` for the streaming path, and call `setProfile()` in the constructor so the shared base code resolves endpoints and logs under the new provider's name. A provider that is not SSE-framed answers `streamFraming()` with `JsonLines` and overrides `processData()` and `flushStreamBuffers()` instead.
 6. Use `ensureMessage<FooMessage>(id)` in the stream handler; do not keep a message map in the client.
 7. Add unit tests: constructor sanity and header shape (`tst_RequestHeaders` is parameterised over every provider), the tool schema shape in `tst_ToolsManager`, model listing over `FakeHttpTransport` in `ListModels`, error rendering in `ParseHttpError`, and translator behaviour in a `tst_FooMessage` suite that needs no event loop.

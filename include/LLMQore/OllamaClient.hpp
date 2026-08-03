@@ -14,27 +14,23 @@ namespace LLMQore {
 
 class OllamaMessage;
 
+[[nodiscard]] LLMQORE_EXPORT ProviderProfile ollamaProfile();
+
 class LLMQORE_EXPORT OllamaClient : public BaseClient
 {
     Q_OBJECT
 public:
-    explicit OllamaClient(QObject *parent = nullptr);
     explicit OllamaClient(
-        const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
-    explicit OllamaClient(
-        const QString &url,
-        const QString &apiKey,
-        const QString &model,
-        HttpTransport *transport,
+        const QString &url = {},
+        const QString &apiKey = {},
+        const QString &model = {},
+        HttpTransport *transport = nullptr,
         QObject *parent = nullptr);
 
     RequestID sendMessage(
         const QJsonObject &payload,
         const QString &endpoint = {},
         RequestMode mode = RequestMode::Streaming) override;
-    RequestID ask(
-        const QString &prompt, RequestMode mode = RequestMode::Streaming) override;
-    using BaseClient::ask;
 
     QFuture<QList<ModelInfo>> listModels(const QString &endpoint = {}) override;
     QJsonObject buildConversationPayload(const Conversation &conversation) const override;

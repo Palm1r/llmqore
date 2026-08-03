@@ -17,27 +17,24 @@ namespace LLMQore {
 
 class OpenAIMessage;
 
+[[nodiscard]] LLMQORE_EXPORT ProviderProfile openAiProfile();
+[[nodiscard]] LLMQORE_EXPORT ProviderProfile mistralProfile();
+
 class LLMQORE_EXPORT OpenAIClient : public BaseClient
 {
     Q_OBJECT
 public:
-    explicit OpenAIClient(QObject *parent = nullptr);
     explicit OpenAIClient(
-        const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
-    explicit OpenAIClient(
-        const QString &url,
-        const QString &apiKey,
-        const QString &model,
-        HttpTransport *transport,
+        const QString &url = {},
+        const QString &apiKey = {},
+        const QString &model = {},
+        HttpTransport *transport = nullptr,
         QObject *parent = nullptr);
 
     RequestID sendMessage(
         const QJsonObject &payload,
         const QString &endpoint = {},
         RequestMode mode = RequestMode::Streaming) override;
-    RequestID ask(
-        const QString &prompt, RequestMode mode = RequestMode::Streaming) override;
-    using BaseClient::ask;
 
     QFuture<QList<ModelInfo>> listModels(const QString &endpoint = {}) override;
     QJsonObject buildConversationPayload(const Conversation &conversation) const override;

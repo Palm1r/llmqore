@@ -3,7 +3,7 @@
 
 #include "IntegrationTestHelpers.hpp"
 #include <LLMQore/Conversation.hpp>
-#include <LLMQore/MistralClient.hpp>
+#include <LLMQore/OpenAIClient.hpp>
 
 using namespace LLMQore;
 using namespace LLMQore::IntegrationTest;
@@ -21,14 +21,18 @@ protected:
         m_fimModel = getEnvOrDefault("MISTRAL_FIM_MODEL", "codestral-latest");
     }
 
-    std::unique_ptr<MistralClient> createClient()
+    std::unique_ptr<OpenAIClient> createClient()
     {
-        return std::make_unique<MistralClient>(m_url, m_apiKey, m_model);
+        auto client = std::make_unique<OpenAIClient>(m_url, m_apiKey, m_model);
+        client->setProfile(mistralProfile());
+        return client;
     }
 
-    std::unique_ptr<MistralClient> createFimClient()
+    std::unique_ptr<OpenAIClient> createFimClient()
     {
-        return std::make_unique<MistralClient>(m_url, m_apiKey, m_fimModel);
+        auto client = std::make_unique<OpenAIClient>(m_url, m_apiKey, m_fimModel);
+        client->setProfile(mistralProfile());
+        return client;
     }
 
     QString m_apiKey;

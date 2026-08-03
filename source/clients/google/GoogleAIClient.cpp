@@ -16,6 +16,16 @@
 
 namespace LLMQore {
 
+ProviderProfile googleProfile()
+{
+    return ProviderProfile{
+        {},
+        QStringLiteral("/models"),
+        &llmGoogleLog(),
+        {},
+        {{QStringLiteral("Content-Type"), QStringLiteral("application/json")}}};
+}
+
 namespace {
 
 const UsageSchema kGoogleUsage{
@@ -27,15 +37,6 @@ const UsageSchema kGoogleUsage{
 
 } // namespace
 
-GoogleAIClient::GoogleAIClient(QObject *parent)
-    : GoogleAIClient({}, {}, {}, parent)
-{}
-
-GoogleAIClient::GoogleAIClient(
-    const QString &url, const QString &apiKey, const QString &model, QObject *parent)
-    : GoogleAIClient(url, apiKey, model, nullptr, parent)
-{}
-
 GoogleAIClient::GoogleAIClient(
     const QString &url,
     const QString &apiKey,
@@ -44,7 +45,7 @@ GoogleAIClient::GoogleAIClient(
     QObject *parent)
     : BaseClient(url, apiKey, model, transport, parent)
 {
-    setLogCategory(llmGoogleLog());
+    setProfile(googleProfile());
     setAuthScheme(
         {.placement = AuthScheme::Placement::QueryParam, .name = QStringLiteral("key")});
     setHeaders({{QStringLiteral("Content-Type"), QStringLiteral("application/json")}});
@@ -53,9 +54,6 @@ GoogleAIClient::GoogleAIClient(
 RequestID GoogleAIClient::sendMessage(
     const QJsonObject &payload, const QString &endpoint, RequestMode mode)
 {
-    LLMQORE_ASSERT_OWNING_THREAD();
-    RequestID id = createRequest();
-
     QString resolved = endpoint;
     if (resolved.isEmpty()) {
         const QString modelName = payload.contains("model") ? payload["model"].toString() : model();
@@ -64,19 +62,8 @@ RequestID GoogleAIClient::sendMessage(
                                    : QStringLiteral(":generateContent");
         resolved = QStringLiteral("/models/%1%2").arg(modelName, suffix);
     }
-    qCDebug(llmGoogleLog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
 
-    sendRequest(id, QUrl(url() + resolved), payload, mode);
-    return id;
-}
-
-RequestID GoogleAIClient::ask(const QString &prompt, RequestMode mode)
-{
-    QJsonObject payload;
-    payload["contents"] = QJsonArray{
-        QJsonObject{{"role", "user"}, {"parts", QJsonArray{QJsonObject{{"text", prompt}}}}}};
-
-    return sendMessage(payload, {}, mode);
+    return postJson(payload, resolved, mode);
 }
 
 QJsonObject GoogleAIClient::buildConversationPayload(const Conversation &conversation) const
@@ -147,12 +134,10 @@ const UsageSchema &GoogleAIClient::usageSchema() const
 QFuture<QList<ModelInfo>> GoogleAIClient::listModels(const QString &endpoint)
 {
     return fetchModelList(
-        endpointUrl(endpoint, QStringLiteral("/models")),
+        endpointUrl(endpoint, profile().modelsPath),
         QStringLiteral("models"),
         QStringLiteral("name"),
-        [](QString name) {
-            return name.contains('/') ? name.split('/').last() : name;
-        });
+        [](QString name) { return name.contains('/') ? name.split('/').last() : name; });
 }
 
 QList<BaseClient::ErrorAnnotation> GoogleAIClient::errorAnnotations() const

@@ -10,7 +10,7 @@ The **default auth** column is what each client seeds in its constructor. None o
 | OpenAI Chat Completions | `OpenAIClient` | `OpenAIMessage` | SSE | Bearer token |
 | OpenAI Responses | `OpenAIResponsesClient` | `OpenAIResponsesMessage` | SSE | Bearer token |
 | Google AI (Gemini) | `GoogleAIClient` | `GoogleMessage` | SSE (query param) | API key in query string |
-| Mistral | `MistralClient` | reuses `OpenAIMessage` | SSE | Bearer token |
+| Mistral | `OpenAIClient` + `mistralProfile()` | reuses `OpenAIMessage` | SSE | Bearer token |
 | DeepSeek | `OpenAIClient` (direct) | reuses `OpenAIMessage` | SSE | Bearer token |
 | Ollama | `OllamaClient` | `OllamaMessage` | JSON-lines (`Rpc::LineFramer`) | Bearer token (optional) |
 | llama.cpp | `LlamaCppClient` | reuses `OpenAIMessage` | SSE | Bearer token (optional) |
@@ -35,9 +35,11 @@ The newer OpenAI Responses API with a different payload shape and its own event 
 
 Streams via SSE with the API key passed as a query parameter -- the one client whose default `AuthScheme` uses `Placement::QueryParam` rather than a header. The message parser reads from the candidates/parts structure, handling text, function calls, and safety blocks. Tool results are rich -- function responses carry structured data and images are sent as inline data. The error parser handles Google's error object format with code, message, and status fields. Google has the most varied set of finish reasons, including safety and content-policy categories.
 
-## Mistral (`source/clients/mistral/`)
+## Mistral (a profile, not a class)
 
-OpenAI-compatible -- subclasses `OpenAIClient`, reuses `OpenAIMessage` and the OpenAI tool schema format. Defaults to `/chat/completions`; pass `/fim/completions` as the `endpoint` argument to `sendMessage` to target the Codestral fill-in-the-middle endpoint. Bearer-token auth. Works with the standard OpenAI error envelope handling from the base class.
+OpenAI-compatible with no dedicated client class. Construct an `OpenAIClient` and hand it `mistralProfile()`, which is the whole of what `MistralClient` used to be: `/v1/chat/completions`, `/v1/models`, and the `llmqore.mistral` logging category. Pass `/fim/completions` as the `endpoint` argument to `sendMessage` to target the Codestral fill-in-the-middle endpoint. Bearer-token auth and the standard OpenAI error envelope apply.
+
+A provider earns a class when it has behaviour -- a different wire format, framing, or event vocabulary. Paths, headers, auth and a logging category are a `ProviderProfile`.
 
 Reasoning models (Magistral) reason natively -- no `reasoning_effort` parameter is needed. Their `content` arrives as an array of chunks: `thinking` entries (whose `thinking` field is a string or a nested array of `{type:"text", text}` parts) and `text` entries for the final answer. `OpenAIClient` parses these inherited paths, routing the reasoning trace to `ThinkingContent` / `thinkingBlockReceived` and the answer to normal text deltas.
 

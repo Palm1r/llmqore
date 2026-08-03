@@ -45,8 +45,6 @@ target_sources(LLMQore PRIVATE
     ${PROJECT_SOURCE_DIR}/include/LLMQore/LlamaCppClient.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/clients/llamacpp/LlamaCppClient.cpp
 
-    ${PROJECT_SOURCE_DIR}/include/LLMQore/MistralClient.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/clients/mistral/MistralClient.cpp
 
     ${PROJECT_SOURCE_DIR}/include/LLMQore/OllamaClient.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/clients/ollama/OllamaClient.cpp

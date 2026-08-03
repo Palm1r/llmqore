@@ -21,7 +21,6 @@
 #include <LLMQore/HttpClient.hpp>
 #include <LLMQore/HttpStream.hpp>
 #include <LLMQore/LlamaCppClient.hpp>
-#include <LLMQore/MistralClient.hpp>
 #include <LLMQore/OllamaClient.hpp>
 #include <LLMQore/OpenAIClient.hpp>
 #include <LLMQore/OpenAIResponsesClient.hpp>
@@ -368,7 +367,8 @@ TEST(ListModels, ClaudeAsksForTheFullPage)
 TEST(ListModels, MistralKeepsTheV1Prefix)
 {
     FakeHttpTransport transport;
-    MistralClient client("http://fake.local", "sk-test", "mistral-test", &transport);
+    OpenAIClient client("http://fake.local", "sk-test", "mistral-test", &transport);
+    client.setProfile(mistralProfile());
 
     auto future = client.listModels();
     ASSERT_EQ(transport.bufferedCount(), 1);
@@ -908,19 +908,76 @@ TEST(LogCategory, EveryProviderReportsUnderItsOwnName)
 
 TEST(LogCategory, OpenAIDerivedClientsKeepTheirOwnNameOnEveryConstructor)
 {
-    CategoryProbe<MistralClient> mistralPlain;
     CategoryProbe<LlamaCppClient> llamaPlain;
-
-    EXPECT_STREQ(mistralPlain.logCategory().categoryName(), "llmqore.mistral");
     EXPECT_STREQ(llamaPlain.logCategory().categoryName(), "llmqore.llamacpp");
 
-    CategoryProbe<MistralClient> mistral("http://fake.local", "k", "m");
     CategoryProbe<LlamaCppClient> llama("http://fake.local", "", "m");
-
-    EXPECT_STREQ(mistral.logCategory().categoryName(), "llmqore.mistral")
-        << "the transport-less constructor must not fall through to the OpenAI category";
     EXPECT_STREQ(llama.logCategory().categoryName(), "llmqore.llamacpp")
         << "the transport-less constructor must not fall through to the OpenAI category";
 }
 
+TEST(LogCategory, AProfileCarriesItsOwnCategory)
+{
+    CategoryProbe<OpenAIClient> mistral;
+    mistral.setProfile(mistralProfile());
+
+    EXPECT_STREQ(mistral.logCategory().categoryName(), "llmqore.mistral")
+        << "a profile is the whole of what MistralClient used to be";
+}
+
 #include "tst_ReviewRegressions.moc"
+
+// --- Mistral is a profile, and it has to behave like one on the wire ---
+
+TEST(MistralProfile, StreamsTextAndReasoningThroughTheOpenAIDialect)
+{
+    FakeHttpTransport transport;
+    OpenAIClient client("http://fake.local", "sk-test", "magistral-small", &transport);
+    client.setProfile(mistralProfile());
+
+    QSignalSpy chunks(&client, &BaseClient::chunkReceived);
+    QSignalSpy thinking(&client, &BaseClient::thinkingBlockReceived);
+    QSignalSpy completed(&client, &BaseClient::requestCompleted);
+
+    client.ask(QStringLiteral("why is the sky blue?"));
+    ASSERT_EQ(transport.streamCount(), 1);
+    EXPECT_EQ(transport.streamRequest(0).url(), QUrl("http://fake.local/v1/chat/completions"))
+        << "the profile carries Mistral's /v1 prefix";
+
+    transport.lastStream()->sendAll(
+        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"Rayleigh scattering.\"}}]}\n\n"
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Because of scattering.\"}}]}\n\n"
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+        "data: [DONE]\n\n");
+
+    ASSERT_EQ(completed.count(), 1);
+    EXPECT_EQ(completed.first().at(1).toString(), QStringLiteral("Because of scattering."));
+
+    ASSERT_EQ(chunks.count(), 1) << "reasoning must not reach chunkReceived";
+    EXPECT_EQ(chunks.first().at(1).toString(), QStringLiteral("Because of scattering."));
+
+    ASSERT_EQ(thinking.count(), 1) << "Magistral reasoning arrives as a thinking block";
+    EXPECT_EQ(thinking.first().at(1).toString(), QStringLiteral("Rayleigh scattering."));
+}
+
+TEST(MistralProfile, BufferedResponseTakesTheSamePath)
+{
+    FakeHttpTransport transport;
+    OpenAIClient client("http://fake.local", "sk-test", "mistral-small", &transport);
+    client.setProfile(mistralProfile());
+
+    QSignalSpy completed(&client, &BaseClient::requestCompleted);
+
+    client.ask(QStringLiteral("ping"), RequestMode::Buffered);
+    ASSERT_EQ(transport.bufferedCount(), 1);
+    transport.respondToLast(
+        200,
+        R"({"choices":[{"message":{"role":"assistant","content":"pong"},)"
+        R"("finish_reason":"stop"}]})");
+
+    for (int i = 0; i < 32 && completed.isEmpty(); ++i)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+
+    ASSERT_EQ(completed.count(), 1);
+    EXPECT_EQ(completed.first().at(1).toString(), QStringLiteral("pong"));
+}

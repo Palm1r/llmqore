@@ -13,7 +13,6 @@
 #include <LLMQore/ClaudeClient.hpp>
 #include <LLMQore/GoogleAIClient.hpp>
 #include <LLMQore/LlamaCppClient.hpp>
-#include <LLMQore/MistralClient.hpp>
 #include <LLMQore/OllamaClient.hpp>
 #include <LLMQore/OpenAIClient.hpp>
 #include <LLMQore/OpenAIResponsesClient.hpp>
@@ -47,6 +46,16 @@ ClientFactory factoryFor()
     };
 }
 
+ClientFactory factoryForProfile(ProviderProfile (*profile)())
+{
+    return [profile](const QString &apiKey, HttpTransport *transport) -> BaseClient * {
+        auto *client = new OpenAIClient(
+            QStringLiteral("http://fake.local"), apiKey, QStringLiteral("m"), transport, nullptr);
+        client->setProfile(profile());
+        return client;
+    };
+}
+
 const QList<QPair<QByteArray, QByteArray>> kJsonOnly = {{"Content-Type", "application/json"}};
 
 std::vector<ProviderCase> providerCases()
@@ -69,8 +78,8 @@ std::vector<ProviderCase> providerCases()
             {},
             kJsonOnly},
         ProviderCase{
-            "Mistral",
-            factoryFor<MistralClient>(),
+            "MistralProfile",
+            factoryForProfile(&mistralProfile),
             "Authorization",
             "Bearer sk-test",
             {},
@@ -85,12 +94,7 @@ std::vector<ProviderCase> providerCases()
             {},
             kJsonOnly},
         ProviderCase{
-            "GoogleAI",
-            factoryFor<GoogleAIClient>(),
-            {},
-            {},
-            QStringLiteral("key"),
-            kJsonOnly},
+            "GoogleAI", factoryFor<GoogleAIClient>(), {}, {}, QStringLiteral("key"), kJsonOnly},
     };
 }
 

@@ -54,6 +54,15 @@ struct LLMQORE_EXPORT AuthScheme
     QString valuePrefix;
 };
 
+struct LLMQORE_EXPORT ProviderProfile
+{
+    QString chatPath;
+    QString modelsPath;
+    const QLoggingCategory *log = nullptr;
+    AuthScheme auth;
+    QHash<QString, QString> headers;
+};
+
 struct LLMQORE_EXPORT TokenUsage
 {
     int promptTokens = 0;
@@ -110,9 +119,7 @@ public:
         const QString &endpoint = {},
         RequestMode mode = RequestMode::Streaming)
         = 0;
-    virtual RequestID ask(
-        const QString &prompt, RequestMode mode = RequestMode::Streaming)
-        = 0;
+    RequestID ask(const QString &prompt, RequestMode mode = RequestMode::Streaming);
     RequestID ask(
         const Conversation &conversation,
         const QJsonObject &extra = {},
@@ -150,6 +157,9 @@ public:
 
     ToolsManager *tools();
     bool hasTools() const noexcept;
+
+    [[nodiscard]] const ProviderProfile &profile() const;
+    void setProfile(const ProviderProfile &profile);
 
     static constexpr int kDefaultMaxToolRounds = 10;
 
@@ -203,7 +213,8 @@ protected:
     virtual void cleanupDerivedData(const RequestID &id);
 
     [[nodiscard]] const QLoggingCategory &logCategory() const;
-    void setLogCategory(const QLoggingCategory &category);
+
+    RequestID postJson(const QJsonObject &payload, const QString &endpoint, RequestMode mode);
 
     struct ErrorAnnotation
     {

@@ -16,6 +16,17 @@
 
 namespace LLMQore {
 
+ProviderProfile claudeProfile()
+{
+    return ProviderProfile{
+        QStringLiteral("/v1/messages"),
+        QStringLiteral("/v1/models"),
+        &llmClaudeLog(),
+        AuthScheme{AuthScheme::Placement::Header, QStringLiteral("x-api-key"), {}},
+        {{QStringLiteral("Content-Type"), QStringLiteral("application/json")},
+         {QStringLiteral("anthropic-version"), QStringLiteral("2023-06-01")}}};
+}
+
 namespace {
 
 const UsageSchema kClaudeUsage{
@@ -27,15 +38,6 @@ const UsageSchema kClaudeUsage{
 
 } // namespace
 
-ClaudeClient::ClaudeClient(QObject *parent)
-    : ClaudeClient({}, {}, {}, parent)
-{}
-
-ClaudeClient::ClaudeClient(
-    const QString &url, const QString &apiKey, const QString &model, QObject *parent)
-    : ClaudeClient(url, apiKey, model, nullptr, parent)
-{}
-
 ClaudeClient::ClaudeClient(
     const QString &url,
     const QString &apiKey,
@@ -44,37 +46,15 @@ ClaudeClient::ClaudeClient(
     QObject *parent)
     : BaseClient(url, apiKey, model, transport, parent)
 {
-    setLogCategory(llmClaudeLog());
-    setAuthScheme({.placement = AuthScheme::Placement::Header, .name = QStringLiteral("x-api-key")});
-    setHeaders(
-        {{QStringLiteral("Content-Type"), QStringLiteral("application/json")},
-         {QStringLiteral("anthropic-version"), QStringLiteral("2023-06-01")}});
+    setProfile(claudeProfile());
 }
 
 RequestID ClaudeClient::sendMessage(
     const QJsonObject &payload, const QString &endpoint, RequestMode mode)
 {
-    LLMQORE_ASSERT_OWNING_THREAD();
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
-
-    RequestID id = createRequest();
-    const QString resolved = endpoint.isEmpty() ? QStringLiteral("/v1/messages") : endpoint;
-
-    qCDebug(llmClaudeLog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
-
-    sendRequest(id, QUrl(url() + resolved), request, mode);
-    return id;
-}
-
-RequestID ClaudeClient::ask(const QString &prompt, RequestMode mode)
-{
-    QJsonObject payload;
-    payload["model"] = model();
-    payload["max_tokens"] = kDefaultMaxTokens;
-    payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
-
-    return sendMessage(payload, {}, mode);
+    return postJson(request, endpoint, mode);
 }
 
 QJsonObject ClaudeClient::buildConversationPayload(const Conversation &conversation) const
@@ -119,7 +99,7 @@ const UsageSchema &ClaudeClient::usageSchema() const
 
 QFuture<QList<ModelInfo>> ClaudeClient::listModels(const QString &endpoint)
 {
-    QUrl url = endpointUrl(endpoint, QStringLiteral("/v1/models"));
+    QUrl url = endpointUrl(endpoint, profile().modelsPath);
     QUrlQuery query;
     query.addQueryItem("limit", "1000");
     url.setQuery(query);

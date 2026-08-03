@@ -322,13 +322,6 @@ public:
         return id;
     }
 
-    RequestID ask(
-        const QString &prompt,
-        RequestMode mode = RequestMode::Streaming) override
-    {
-        return sendMessage(QJsonObject{{"prompt", prompt}}, {}, mode);
-    }
-
     QJsonObject buildConversationPayload(const Conversation &conversation) const override
     {
         return conversation.toJson();

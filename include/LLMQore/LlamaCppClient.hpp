@@ -15,25 +15,14 @@ class LLMQORE_EXPORT LlamaCppClient : public OpenAIClient
 {
     Q_OBJECT
 public:
-    explicit LlamaCppClient(QObject *parent = nullptr);
     explicit LlamaCppClient(
-        const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
-    explicit LlamaCppClient(
-        const QString &url,
-        const QString &apiKey,
-        const QString &model,
-        HttpTransport *transport,
+        const QString &url = {},
+        const QString &apiKey = {},
+        const QString &model = {},
+        HttpTransport *transport = nullptr,
         QObject *parent = nullptr);
 
-    RequestID sendMessage(
-        const QJsonObject &payload,
-        const QString &endpoint = {},
-        RequestMode mode = RequestMode::Streaming) override;
-    RequestID ask(
-        const QString &prompt, RequestMode mode = RequestMode::Streaming) override;
     using OpenAIClient::ask;
-
-    QFuture<QList<ModelInfo>> listModels(const QString &endpoint = {}) override;
 
     QFuture<bool> isServerReady();
     QFuture<QJsonObject> serverProps();

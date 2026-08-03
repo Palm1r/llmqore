@@ -16,6 +16,28 @@
 
 namespace LLMQore {
 
+ProviderProfile openAiProfile()
+{
+    return ProviderProfile{
+        QStringLiteral("/chat/completions"),
+        QStringLiteral("/models"),
+        &llmOpenAILog(),
+        AuthScheme{
+            AuthScheme::Placement::Header,
+            QStringLiteral("Authorization"),
+            QStringLiteral("Bearer ")},
+        {{QStringLiteral("Content-Type"), QStringLiteral("application/json")}}};
+}
+
+ProviderProfile mistralProfile()
+{
+    ProviderProfile profile = openAiProfile();
+    profile.chatPath = QStringLiteral("/v1/chat/completions");
+    profile.modelsPath = QStringLiteral("/v1/models");
+    profile.log = &llmMistralLog();
+    return profile;
+}
+
 namespace {
 
 const UsageSchema kOpenAIUsage{
@@ -27,15 +49,6 @@ const UsageSchema kOpenAIUsage{
 
 } // namespace
 
-OpenAIClient::OpenAIClient(QObject *parent)
-    : OpenAIClient({}, {}, {}, parent)
-{}
-
-OpenAIClient::OpenAIClient(
-    const QString &url, const QString &apiKey, const QString &model, QObject *parent)
-    : OpenAIClient(url, apiKey, model, nullptr, parent)
-{}
-
 OpenAIClient::OpenAIClient(
     const QString &url,
     const QString &apiKey,
@@ -44,12 +57,7 @@ OpenAIClient::OpenAIClient(
     QObject *parent)
     : BaseClient(url, apiKey, model, transport, parent)
 {
-    setLogCategory(llmOpenAILog());
-    setAuthScheme(
-        {.placement = AuthScheme::Placement::Header,
-         .name = QStringLiteral("Authorization"),
-         .valuePrefix = QStringLiteral("Bearer ")});
-    setHeaders({{QStringLiteral("Content-Type"), QStringLiteral("application/json")}});
+    setProfile(openAiProfile());
 }
 
 QJsonObject OpenAIClient::buildConversationPayload(const Conversation &conversation) const
@@ -95,7 +103,6 @@ const UsageSchema &OpenAIClient::usageSchema() const
 RequestID OpenAIClient::sendMessage(
     const QJsonObject &payload, const QString &endpoint, RequestMode mode)
 {
-    LLMQORE_ASSERT_OWNING_THREAD();
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
@@ -105,27 +112,12 @@ RequestID OpenAIClient::sendMessage(
         request["stream_options"] = streamOptions;
     }
 
-    RequestID id = createRequest();
-    const QString resolved = endpoint.isEmpty() ? QStringLiteral("/chat/completions") : endpoint;
-
-    qCDebug(logCategory()).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
-
-    sendRequest(id, QUrl(url() + resolved), request, mode);
-    return id;
-}
-
-RequestID OpenAIClient::ask(const QString &prompt, RequestMode mode)
-{
-    QJsonObject payload;
-    payload["model"] = model();
-    payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
-
-    return sendMessage(payload, {}, mode);
+    return postJson(request, endpoint, mode);
 }
 
 QFuture<QList<ModelInfo>> OpenAIClient::listModels(const QString &endpoint)
 {
-    return fetchModelList(endpointUrl(endpoint, QStringLiteral("/models")));
+    return fetchModelList(endpointUrl(endpoint, profile().modelsPath));
 }
 
 QList<BaseClient::ErrorAnnotation> OpenAIClient::errorAnnotations() const

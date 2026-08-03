@@ -18,6 +18,19 @@
 
 namespace LLMQore {
 
+ProviderProfile openAiResponsesProfile()
+{
+    return ProviderProfile{
+        QStringLiteral("/responses"),
+        QStringLiteral("/models"),
+        &llmOpenAILog(),
+        AuthScheme{
+            AuthScheme::Placement::Header,
+            QStringLiteral("Authorization"),
+            QStringLiteral("Bearer ")},
+        {{QStringLiteral("Content-Type"), QStringLiteral("application/json")}}};
+}
+
 namespace {
 
 const UsageSchema kResponsesUsage{
@@ -29,15 +42,6 @@ const UsageSchema kResponsesUsage{
 
 } // namespace
 
-OpenAIResponsesClient::OpenAIResponsesClient(QObject *parent)
-    : OpenAIResponsesClient({}, {}, {}, parent)
-{}
-
-OpenAIResponsesClient::OpenAIResponsesClient(
-    const QString &url, const QString &apiKey, const QString &model, QObject *parent)
-    : OpenAIResponsesClient(url, apiKey, model, nullptr, parent)
-{}
-
 OpenAIResponsesClient::OpenAIResponsesClient(
     const QString &url,
     const QString &apiKey,
@@ -46,40 +50,19 @@ OpenAIResponsesClient::OpenAIResponsesClient(
     QObject *parent)
     : BaseClient(url, apiKey, model, transport, parent)
 {
-    setLogCategory(llmOpenAILog());
-    setAuthScheme(
-        {.placement = AuthScheme::Placement::Header,
-         .name = QStringLiteral("Authorization"),
-         .valuePrefix = QStringLiteral("Bearer ")});
-    setHeaders({{QStringLiteral("Content-Type"), QStringLiteral("application/json")}});
+    setProfile(openAiResponsesProfile());
 }
 
 RequestID OpenAIResponsesClient::sendMessage(
     const QJsonObject &payload, const QString &endpoint, RequestMode mode)
 {
-    LLMQORE_ASSERT_OWNING_THREAD();
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
     if (m_reasoningPersistence == ReasoningPersistence::Replay && !request.contains("store"))
         request["store"] = false;
 
-    RequestID id = createRequest();
-    const QString resolved = endpoint.isEmpty() ? QStringLiteral("/responses") : endpoint;
-
-    qCDebug(llmOpenAILog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
-
-    sendRequest(id, QUrl(url() + resolved), request, mode);
-    return id;
-}
-
-RequestID OpenAIResponsesClient::ask(const QString &prompt, RequestMode mode)
-{
-    QJsonObject payload;
-    payload["model"] = model();
-    payload["input"] = prompt;
-
-    return sendMessage(payload, {}, mode);
+    return postJson(request, endpoint, mode);
 }
 
 QJsonObject OpenAIResponsesClient::buildConversationPayload(
@@ -140,7 +123,7 @@ const UsageSchema &OpenAIResponsesClient::usageSchema() const
 
 QFuture<QList<ModelInfo>> OpenAIResponsesClient::listModels(const QString &endpoint)
 {
-    return fetchModelList(endpointUrl(endpoint, QStringLiteral("/models")));
+    return fetchModelList(endpointUrl(endpoint, profile().modelsPath));
 }
 
 QList<BaseClient::ErrorAnnotation> OpenAIResponsesClient::errorAnnotations() const

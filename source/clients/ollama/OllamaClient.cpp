@@ -16,6 +16,16 @@
 
 namespace LLMQore {
 
+ProviderProfile ollamaProfile()
+{
+    return ProviderProfile{
+        QStringLiteral("/api/chat"),
+        QStringLiteral("/api/tags"),
+        &llmOllamaLog(),
+        {},
+        {{QStringLiteral("Content-Type"), QStringLiteral("application/json")}}};
+}
+
 namespace {
 
 const UsageSchema kOllamaUsage{
@@ -27,15 +37,6 @@ const UsageSchema kOllamaUsage{
 
 } // namespace
 
-OllamaClient::OllamaClient(QObject *parent)
-    : OllamaClient({}, {}, {}, parent)
-{}
-
-OllamaClient::OllamaClient(
-    const QString &url, const QString &apiKey, const QString &model, QObject *parent)
-    : OllamaClient(url, apiKey, model, nullptr, parent)
-{}
-
 OllamaClient::OllamaClient(
     const QString &url,
     const QString &apiKey,
@@ -44,7 +45,7 @@ OllamaClient::OllamaClient(
     QObject *parent)
     : BaseClient(url, apiKey, model, transport, parent)
 {
-    setLogCategory(llmOllamaLog());
+    setProfile(ollamaProfile());
     setAuthScheme(
         {.placement = AuthScheme::Placement::Header,
          .name = QStringLiteral("Authorization"),
@@ -55,26 +56,9 @@ OllamaClient::OllamaClient(
 RequestID OllamaClient::sendMessage(
     const QJsonObject &payload, const QString &endpoint, RequestMode mode)
 {
-    LLMQORE_ASSERT_OWNING_THREAD();
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
-
-    RequestID id = createRequest();
-    const QString resolved = endpoint.isEmpty() ? QStringLiteral("/api/chat") : endpoint;
-
-    qCDebug(llmOllamaLog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
-
-    sendRequest(id, QUrl(url() + resolved), request, mode);
-    return id;
-}
-
-RequestID OllamaClient::ask(const QString &prompt, RequestMode mode)
-{
-    QJsonObject payload;
-    payload["model"] = model();
-    payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
-
-    return sendMessage(payload, {}, mode);
+    return postJson(request, endpoint, mode);
 }
 
 QJsonObject OllamaClient::buildConversationPayload(const Conversation &conversation) const
@@ -119,7 +103,7 @@ const UsageSchema &OllamaClient::usageSchema() const
 QFuture<QList<ModelInfo>> OllamaClient::listModels(const QString &endpoint)
 {
     return fetchModelList(
-        endpointUrl(endpoint, QStringLiteral("/api/tags")),
+        endpointUrl(endpoint, profile().modelsPath),
         QStringLiteral("models"),
         QStringLiteral("name"));
 }

@@ -221,8 +221,9 @@ Clients with more than one inference endpoint take a path suffix as the second a
 `sendMessage`. An empty string selects the provider's default.
 
 ```cpp
-auto *mistral = new LLMQore::MistralClient(
-    "https://api.mistral.ai/v1", "...", "codestral-latest", this);
+auto *mistral = new LLMQore::OpenAIClient(
+    "https://api.mistral.ai", "...", "codestral-latest", nullptr, this);
+mistral->setProfile(LLMQore::mistralProfile());
 
 QJsonObject payload;
 payload["model"] = "codestral-latest";
