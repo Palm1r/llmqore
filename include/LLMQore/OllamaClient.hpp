@@ -43,13 +43,12 @@ protected:
     [[nodiscard]] const ToolDialect &toolDialect() const override;
     [[nodiscard]] const UsageSchema &usageSchema() const override;
     void processData(const RequestID &id, const QByteArray &data) override;
-    void processBufferedResponse(const RequestID &id, const QByteArray &data) override;
+    void processBufferedBody(const RequestID &id, const QJsonObject &body) override;
     void flushStreamBuffers(const RequestID &id) override;
     QJsonObject buildContinuationPayload(
         const QJsonObject &originalPayload,
         BaseMessage *message,
         const QHash<QString, ToolResult> &toolResults) override;
-    [[nodiscard]] QString parseHttpError(const HttpResponse &response) const override;
 
 private:
     void processStreamData(const RequestID &id, const QJsonObject &data);

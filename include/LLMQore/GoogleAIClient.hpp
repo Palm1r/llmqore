@@ -49,7 +49,7 @@ protected:
     void processData(const RequestID &id, const QByteArray &data) override;
     void processSseEvent(
         const RequestID &id, const SSEEvent &event, const QJsonObject &json) override;
-    void processBufferedResponse(const RequestID &id, const QByteArray &data) override;
+    void processBufferedBody(const RequestID &id, const QJsonObject &body) override;
     std::optional<QString> takePendingStreamError(const RequestID &id) override;
     void onStreamDrained(const RequestID &id) override;
     void cleanupDerivedData(const RequestID &id) override;
@@ -57,7 +57,7 @@ protected:
         const QJsonObject &originalPayload,
         BaseMessage *message,
         const QHash<QString, ToolResult> &toolResults) override;
-    [[nodiscard]] QString parseHttpError(const HttpResponse &response) const override;
+    [[nodiscard]] QList<ErrorAnnotation> errorAnnotations() const override;
 
 private:
     class JsonErrorSniffer

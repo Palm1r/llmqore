@@ -9,7 +9,6 @@
 #include <algorithm>
 
 #include <QJsonArray>
-#include <QJsonDocument>
 
 #include "OpenAIResponsesMessage.hpp"
 #include <LLMQore/FutureUtils.hpp>
@@ -144,12 +143,11 @@ QFuture<QList<ModelInfo>> OpenAIResponsesClient::listModels(const QString &endpo
     return fetchModelList(endpointUrl(endpoint, QStringLiteral("/models")));
 }
 
-QString OpenAIResponsesClient::parseHttpError(const HttpResponse &response) const
+QList<BaseClient::ErrorAnnotation> OpenAIResponsesClient::errorAnnotations() const
 {
-    return parseErrorObject(
-        response,
-        {{QStringLiteral("type"), QStringLiteral("type")},
-         {QStringLiteral("code"), QStringLiteral("code")}});
+    return {
+        {QStringLiteral("type"), QStringLiteral("type")},
+        {QStringLiteral("code"), QStringLiteral("code")}};
 }
 
 void OpenAIResponsesClient::cleanupDerivedData(const RequestID &id)
@@ -387,22 +385,8 @@ QString OpenAIResponsesClient::extractReasoningText(const QJsonObject &item)
     return reasoningText;
 }
 
-void OpenAIResponsesClient::processBufferedResponse(const RequestID &id, const QByteArray &data)
+void OpenAIResponsesClient::processBufferedBody(const RequestID &id, const QJsonObject &response)
 {
-    QJsonDocument doc = QJsonDocument::fromJson(data);
-    if (!doc.isObject()) {
-        failRequest(id, QStringLiteral("Invalid JSON in buffered response"));
-        return;
-    }
-
-    QJsonObject response = doc.object();
-
-    if (response["error"].isObject()) {
-        QJsonObject error = response["error"].toObject();
-        failRequest(id, error["message"].toString());
-        return;
-    }
-
     auto *message = ensureMessage<OpenAIResponsesMessage>(id);
 
     QJsonArray output = response["output"].toArray();

@@ -4,7 +4,6 @@
 #include <LLMQore/OpenAIClient.hpp>
 
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QJsonValue>
 
 #include "OpenAIMessage.hpp"
@@ -129,12 +128,11 @@ QFuture<QList<ModelInfo>> OpenAIClient::listModels(const QString &endpoint)
     return fetchModelList(endpointUrl(endpoint, QStringLiteral("/models")));
 }
 
-QString OpenAIClient::parseHttpError(const HttpResponse &response) const
+QList<BaseClient::ErrorAnnotation> OpenAIClient::errorAnnotations() const
 {
-    return parseErrorObject(
-        response,
-        {{QStringLiteral("type"), QStringLiteral("type")},
-         {QStringLiteral("code"), QStringLiteral("code")}});
+    return {
+        {QStringLiteral("type"), QStringLiteral("type")},
+        {QStringLiteral("code"), QStringLiteral("code")}};
 }
 
 void OpenAIClient::processSseEvent(
@@ -212,22 +210,8 @@ void OpenAIClient::processStreamChunk(const RequestID &id, const QJsonObject &ch
     }
 }
 
-void OpenAIClient::processBufferedResponse(const RequestID &id, const QByteArray &data)
+void OpenAIClient::processBufferedBody(const RequestID &id, const QJsonObject &response)
 {
-    QJsonDocument doc = QJsonDocument::fromJson(data);
-    if (!doc.isObject()) {
-        failRequest(id, QStringLiteral("Invalid JSON in buffered response"));
-        return;
-    }
-
-    QJsonObject response = doc.object();
-
-    if (response["error"].isObject()) {
-        QJsonObject error = response["error"].toObject();
-        failRequest(id, error["message"].toString());
-        return;
-    }
-
     QJsonArray choices = response["choices"].toArray();
     if (choices.isEmpty()) {
         failRequest(id, QStringLiteral("Empty choices in buffered response"));

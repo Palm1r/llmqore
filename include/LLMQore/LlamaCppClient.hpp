@@ -39,7 +39,7 @@ public:
     QFuture<QJsonObject> serverProps();
 
 protected:
-    void processBufferedResponse(const RequestID &id, const QByteArray &data) override;
+    void processBufferedBody(const RequestID &id, const QJsonObject &body) override;
     void processSseEvent(
         const RequestID &id, const SSEEvent &event, const QJsonObject &json) override;
 

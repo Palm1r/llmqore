@@ -45,12 +45,12 @@ public:
 protected:
     [[nodiscard]] const ToolDialect &toolDialect() const override;
     [[nodiscard]] const UsageSchema &usageSchema() const override;
-    void processBufferedResponse(const RequestID &id, const QByteArray &data) override;
+    void processBufferedBody(const RequestID &id, const QJsonObject &body) override;
     QJsonObject buildContinuationPayload(
         const QJsonObject &originalPayload,
         BaseMessage *message,
         const QHash<QString, ToolResult> &toolResults) override;
-    [[nodiscard]] QString parseHttpError(const HttpResponse &response) const override;
+    [[nodiscard]] QList<ErrorAnnotation> errorAnnotations() const override;
 
     void processSseEvent(
         const RequestID &id, const SSEEvent &event, const QJsonObject &json) override;

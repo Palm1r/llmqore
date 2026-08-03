@@ -123,24 +123,21 @@ void LlamaCppClient::processSseEvent(
     }
 }
 
-void LlamaCppClient::processBufferedResponse(const RequestID &id, const QByteArray &data)
+void LlamaCppClient::processBufferedBody(const RequestID &id, const QJsonObject &body)
 {
-    const QJsonDocument doc = QJsonDocument::fromJson(data);
-    if (doc.isObject() && isNativeCompletionChunk(doc.object())) {
-        const QJsonObject response = doc.object();
-
-        const QString content = response["content"].toString();
-        if (!content.isEmpty())
-            addChunk(id, content);
-
-        applyUsage(id, response, kLlamaCppNativeUsage);
-
-        cleanupFullRequest(id);
-        completeRequest(id);
+    if (!isNativeCompletionChunk(body)) {
+        OpenAIClient::processBufferedBody(id, body);
         return;
     }
 
-    OpenAIClient::processBufferedResponse(id, data);
+    const QString content = body["content"].toString();
+    if (!content.isEmpty())
+        addChunk(id, content);
+
+    applyUsage(id, body, kLlamaCppNativeUsage);
+
+    cleanupFullRequest(id);
+    completeRequest(id);
 }
 
 } // namespace LLMQore

@@ -506,21 +506,27 @@ void BaseClient::clearModelCache()
     m_impl->modelIndex.clear();
 }
 
-QString BaseClient::parseErrorObject(
-    const HttpResponse &response, const QList<ErrorAnnotation> &annotations) const
+QList<BaseClient::ErrorAnnotation> BaseClient::errorAnnotations() const
 {
-    const QJsonDocument doc = QJsonDocument::fromJson(response.body);
-    if (!doc.isObject())
-        return BaseClient::parseHttpError(response);
+    return {};
+}
 
-    const QJsonObject error = doc.object().value("error").toObject();
-    const QString message = error.value("message").toString();
-    if (message.isEmpty())
-        return BaseClient::parseHttpError(response);
+QString BaseClient::errorMessageFrom(const QJsonObject &body) const
+{
+    const QJsonValue error = body.value(QLatin1String("error"));
+    if (error.isString())
+        return error.toString();
+    if (!error.isObject())
+        return {};
 
-    QString out = QString("HTTP %1: %2").arg(response.statusCode).arg(message);
+    const QJsonObject object = error.toObject();
+    QString out = object.value(QLatin1String("message")).toString();
+    if (out.isEmpty())
+        return {};
+
+    const QList<ErrorAnnotation> annotations = errorAnnotations();
     for (const ErrorAnnotation &annotation : annotations) {
-        const QJsonValue value = error.value(annotation.field);
+        const QJsonValue value = object.value(annotation.field);
         QString text;
         if (value.isString())
             text = value.toString();
@@ -529,20 +535,50 @@ QString BaseClient::parseErrorObject(
         if (text.isEmpty())
             continue;
 
-        out += annotation.label.isEmpty()
-            ? QString(" (%1)").arg(text)
-            : QString(" (%1: %2)").arg(annotation.label, text);
+        out += annotation.label.isEmpty() ? QString(" (%1)").arg(text)
+                                          : QString(" (%1: %2)").arg(annotation.label, text);
     }
     return out;
 }
 
-QString BaseClient::parseHttpError(const HttpResponse &response) const
+QString BaseClient::httpErrorSnippet(const HttpResponse &response) const
 {
     constexpr int kSnippetCap = 512;
     if (response.body.isEmpty())
         return QString("HTTP %1").arg(response.statusCode);
     const QString snippet = QString::fromUtf8(response.body.left(kSnippetCap));
     return QString("HTTP %1: %2").arg(response.statusCode).arg(snippet);
+}
+
+QString BaseClient::parseHttpError(const HttpResponse &response) const
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(response.body);
+    if (!doc.isObject())
+        return httpErrorSnippet(response);
+
+    const QString message = errorMessageFrom(doc.object());
+    if (message.isEmpty())
+        return httpErrorSnippet(response);
+
+    return QString("HTTP %1: %2").arg(response.statusCode).arg(message);
+}
+
+void BaseClient::processBufferedResponse(const RequestID &id, const QByteArray &data)
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (!doc.isObject()) {
+        failRequest(id, QStringLiteral("Invalid JSON in buffered response"));
+        return;
+    }
+
+    const QJsonObject body = doc.object();
+    const QString error = errorMessageFrom(body);
+    if (!error.isEmpty()) {
+        failRequest(id, error);
+        return;
+    }
+
+    processBufferedBody(id, body);
 }
 
 void BaseClient::startHttpRequest(

@@ -124,17 +124,6 @@ QFuture<QList<ModelInfo>> OllamaClient::listModels(const QString &endpoint)
         QStringLiteral("name"));
 }
 
-QString OllamaClient::parseHttpError(const HttpResponse &response) const
-{
-    const QJsonDocument doc = QJsonDocument::fromJson(response.body);
-    if (doc.isObject()) {
-        const QString message = doc.object().value("error").toString();
-        if (!message.isEmpty())
-            return QString("HTTP %1: %2").arg(response.statusCode).arg(message);
-    }
-    return BaseClient::parseHttpError(response);
-}
-
 void OllamaClient::processData(const RequestID &id, const QByteArray &data)
 {
     if (data.isEmpty())
@@ -258,21 +247,8 @@ void OllamaClient::processStreamData(const RequestID &id, const QJsonObject &dat
     }
 }
 
-void OllamaClient::processBufferedResponse(const RequestID &id, const QByteArray &data)
+void OllamaClient::processBufferedBody(const RequestID &id, const QJsonObject &response)
 {
-    QJsonDocument doc = QJsonDocument::fromJson(data);
-    if (!doc.isObject()) {
-        failRequest(id, QStringLiteral("Invalid JSON in buffered response"));
-        return;
-    }
-
-    QJsonObject response = doc.object();
-
-    if (response.contains("error") && !response["error"].toString().isEmpty()) {
-        failRequest(id, response["error"].toString());
-        return;
-    }
-
     processStreamData(id, response);
 }
 

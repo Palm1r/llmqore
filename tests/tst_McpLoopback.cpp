@@ -347,7 +347,7 @@ protected:
     const ToolDialect &toolDialect() const override { return OpenAIMessage::toolDialect(); }
     const UsageSchema &usageSchema() const override { return kNoUsageSchema; }
     void processData(const RequestID &, const QByteArray &) override {}
-    void processBufferedResponse(const RequestID &, const QByteArray &) override {}
+    void processBufferedBody(const RequestID &, const QJsonObject &) override {}
     QJsonObject buildContinuationPayload(
         const QJsonObject &,
         BaseMessage *,

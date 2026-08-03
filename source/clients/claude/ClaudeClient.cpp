@@ -4,7 +4,6 @@
 #include <LLMQore/ClaudeClient.hpp>
 
 #include <QJsonArray>
-#include <QJsonDocument>
 #include <QUrlQuery>
 
 #include "ClaudeMessage.hpp"
@@ -161,9 +160,9 @@ QFuture<QList<ModelInfo>> ClaudeClient::listModels(const QString &endpoint)
         });
 }
 
-QString ClaudeClient::parseHttpError(const HttpResponse &response) const
+QList<BaseClient::ErrorAnnotation> ClaudeClient::errorAnnotations() const
 {
-    return parseErrorObject(response, {{{}, QStringLiteral("type")}});
+    return {{{}, QStringLiteral("type")}};
 }
 
 QJsonObject ClaudeClient::buildContinuationPayload(
@@ -253,22 +252,8 @@ void ClaudeClient::processSseEvent(
     }
 }
 
-void ClaudeClient::processBufferedResponse(const RequestID &id, const QByteArray &data)
+void ClaudeClient::processBufferedBody(const RequestID &id, const QJsonObject &response)
 {
-    QJsonDocument doc = QJsonDocument::fromJson(data);
-    if (!doc.isObject()) {
-        failRequest(id, QStringLiteral("Invalid JSON in buffered response"));
-        return;
-    }
-
-    QJsonObject response = doc.object();
-
-    if (response["error"].isObject()) {
-        QJsonObject error = response["error"].toObject();
-        failRequest(id, error["message"].toString());
-        return;
-    }
-
     auto *message = ensureMessage<ClaudeMessage>(id);
     message->startNewContinuation();
 

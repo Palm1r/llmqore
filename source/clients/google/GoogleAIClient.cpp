@@ -157,12 +157,11 @@ QFuture<QList<ModelInfo>> GoogleAIClient::listModels(const QString &endpoint)
         });
 }
 
-QString GoogleAIClient::parseHttpError(const HttpResponse &response) const
+QList<BaseClient::ErrorAnnotation> GoogleAIClient::errorAnnotations() const
 {
-    return parseErrorObject(
-        response,
-        {{QStringLiteral("code"), QStringLiteral("code")},
-         {QStringLiteral("status"), QStringLiteral("status")}});
+    return {
+        {QStringLiteral("code"), QStringLiteral("code")},
+        {QStringLiteral("status"), QStringLiteral("status")}};
 }
 
 std::optional<QString> GoogleAIClient::JsonErrorSniffer::append(const QByteArray &chunk)
@@ -339,24 +338,8 @@ QJsonObject GoogleAIClient::buildContinuationPayload(
     return request;
 }
 
-void GoogleAIClient::processBufferedResponse(const RequestID &id, const QByteArray &data)
+void GoogleAIClient::processBufferedBody(const RequestID &id, const QJsonObject &response)
 {
-    QJsonDocument doc = QJsonDocument::fromJson(data);
-    if (!doc.isObject()) {
-        failRequest(id, QStringLiteral("Invalid JSON in buffered response"));
-        return;
-    }
-
-    QJsonObject response = doc.object();
-
-    if (response["error"].isObject()) {
-        QJsonObject error = response["error"].toObject();
-        QString errorMessage = error["message"].toString();
-        int errorCode = error["code"].toInt();
-        failRequest(id, QString("Google AI API Error %1: %2").arg(errorCode).arg(errorMessage));
-        return;
-    }
-
     processStreamChunk(id, response);
 }
 

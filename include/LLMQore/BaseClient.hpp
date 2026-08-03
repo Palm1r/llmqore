@@ -182,7 +182,8 @@ protected:
     virtual const UsageSchema &usageSchema() const = 0;
 
     virtual void processData(const RequestID &id, const QByteArray &data);
-    virtual void processBufferedResponse(const RequestID &id, const QByteArray &data) = 0;
+    void processBufferedResponse(const RequestID &id, const QByteArray &data);
+    virtual void processBufferedBody(const RequestID &id, const QJsonObject &body) = 0;
     virtual QJsonObject buildContinuationPayload(
         const QJsonObject &originalPayload,
         BaseMessage *message,
@@ -194,15 +195,16 @@ protected:
     [[nodiscard]] const QLoggingCategory &logCategory() const;
     void setLogCategory(const QLoggingCategory &category);
 
-    [[nodiscard]] virtual QString parseHttpError(const HttpResponse &response) const;
-
     struct ErrorAnnotation
     {
         QString label;
         QString field;
     };
-    [[nodiscard]] QString parseErrorObject(
-        const HttpResponse &response, const QList<ErrorAnnotation> &annotations) const;
+    [[nodiscard]] virtual QList<ErrorAnnotation> errorAnnotations() const;
+
+    [[nodiscard]] QString errorMessageFrom(const QJsonObject &body) const;
+    [[nodiscard]] QString httpErrorSnippet(const HttpResponse &response) const;
+    [[nodiscard]] virtual QString parseHttpError(const HttpResponse &response) const;
 
     using ModelInfoEnricher = std::function<void(const QJsonObject &, ModelInfo &)>;
 
