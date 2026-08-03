@@ -5,6 +5,7 @@ Server → client direction for collecting structured information from end user.
 ## Client side — BaseElicitationProvider
 
 - Subclass and implement the elicitation handler, returning the result as a future.
+- Or hand `CallbackElicitationProvider` a `std::function<ElicitResult(const ElicitRequestParams &)>` and skip the subclass. It answers synchronously through `readyFuture`, so it fits a host that can decide on the spot; a host that has to wait for a dialog to close wants the subclass and its own promise. A callback that is null answers `Cancel` rather than hanging the server.
 - Register the provider on McpClient -- this installs the handler and declares `elicitation` capability.
 - Without provider → `MethodNotFound` (-32601).
 - Reply actions: `ElicitAction::Accept` / `Decline` / `Cancel`. `content` only on accept (serialiser enforces).

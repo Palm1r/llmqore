@@ -13,6 +13,9 @@
 #include <LLMQore/BasePromptProvider.hpp>
 #include <LLMQore/BaseResourceProvider.hpp>
 #include <LLMQore/BaseRootsProvider.hpp>
+#include <LLMQore/CallbackElicitationProvider.hpp>
+#include <LLMQore/DirectoryRootsProvider.hpp>
+#include <LLMQore/StaticResourceProvider.hpp>
 #include <LLMQore/McpClient.hpp>
 #include <LLMQore/McpHttpServerTransport.hpp>
 #include <LLMQore/McpHttpTransport.hpp>

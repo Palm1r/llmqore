@@ -114,6 +114,11 @@ target_sources(LLMQore PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpHttpServerTransport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/BaseResourceProvider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/BasePromptProvider.cpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/CallbackElicitationProvider.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/DirectoryRootsProvider.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/DirectoryRootsProvider.cpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/StaticResourceProvider.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/StaticResourceProvider.cpp
 
     # --- ACP (Agent Client Protocol, host side) ---
     ${PROJECT_SOURCE_DIR}/include/LLMQore/Acp
