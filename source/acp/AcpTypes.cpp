@@ -277,8 +277,10 @@ QJsonObject SessionConfigOption::toJson() const
         o.insert("description", description);
     if (!category.isEmpty())
         o.insert("category", category);
-    if (!currentValue.isUndefined())
-        o.insert("currentValue", currentValue);
+    if (type == QLatin1String("boolean"))
+        o.insert("currentValue", enabled);
+    else
+        o.insert("currentValue", value);
     if (!options.isEmpty()) {
         QJsonArray arr;
         for (const SessionConfigSelectOption &v : options)
@@ -301,7 +303,10 @@ SessionConfigOption SessionConfigOption::fromJson(const QJsonObject &obj)
     o.description = obj.value("description").toString();
     o.category = obj.value("category").toString();
     o.type = obj.value("type").toString();
-    o.currentValue = obj.value("currentValue");
+    if (o.type == QLatin1String("boolean"))
+        o.enabled = obj.value("currentValue").toBool();
+    else
+        o.value = obj.value("currentValue").toString();
     for (const QJsonValue &v : obj.value("options").toArray()) {
         const QJsonObject entry = v.toObject();
         if (entry.contains("options"))

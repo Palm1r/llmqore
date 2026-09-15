@@ -180,14 +180,28 @@ QFuture<void> AcpClient::setMode(
 QFuture<QList<SessionConfigOption>> AcpClient::setConfigOption(
     const QString &sessionId,
     const QString &configId,
-    const QJsonValue &value,
+    bool enabled,
     std::chrono::milliseconds timeout)
 {
-    QJsonObject params{{"sessionId", sessionId}, {"configId", configId}, {"value", value}};
-    if (value.isBool())
-        params.insert("type", QStringLiteral("boolean"));
-    return LLMQore::compat(
-               m_peer->request(QLatin1String(Method::SetConfigOption), params, timeout))
+    QJsonObject params{
+        {"sessionId", sessionId},
+        {"configId", configId},
+        {"value", enabled},
+        {"type", QStringLiteral("boolean")}};
+    return LLMQore::compat(m_peer->request(QLatin1String(Method::SetConfigOption), params, timeout))
+        .then(this, [](const QJsonValue &v) {
+            return configOptionsFromJson(v.toObject().value("configOptions").toArray());
+        });
+}
+
+QFuture<QList<SessionConfigOption>> AcpClient::setConfigOption(
+    const QString &sessionId,
+    const QString &configId,
+    const QString &valueId,
+    std::chrono::milliseconds timeout)
+{
+    QJsonObject params{{"sessionId", sessionId}, {"configId", configId}, {"value", valueId}};
+    return LLMQore::compat(m_peer->request(QLatin1String(Method::SetConfigOption), params, timeout))
         .then(this, [](const QJsonValue &v) {
             return configOptionsFromJson(v.toObject().value("configOptions").toArray());
         });

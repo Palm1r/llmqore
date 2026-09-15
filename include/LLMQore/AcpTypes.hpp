@@ -237,7 +237,8 @@ struct LLMQORE_EXPORT SessionConfigOption
     QString description;
     QString category;
     QString type;
-    QJsonValue currentValue = QJsonValue::Undefined;
+    QString value;
+    bool enabled = false;
     QList<SessionConfigSelectOption> options;
     QList<SessionConfigSelectGroup> groups;
 

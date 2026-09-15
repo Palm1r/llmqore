@@ -112,7 +112,7 @@ TEST(AcpTypes, SessionConfigOptionSelectRoundTrip)
     o.description = "AI model to use";
     o.category = "model";
     o.type = "select";
-    o.currentValue = "default";
+    o.value = "default";
     o.options.append(SessionConfigSelectOption{"default", "Default", "Opus 4.5"});
     o.options.append(SessionConfigSelectOption{"sonnet", "Sonnet", ""});
 
@@ -133,7 +133,7 @@ TEST(AcpTypes, SessionConfigOptionSelectRoundTrip)
     EXPECT_EQ(back.toJson(), expected);
     EXPECT_EQ(back.id, "model");
     EXPECT_EQ(back.category, "model");
-    EXPECT_EQ(back.currentValue.toString(), "default");
+    EXPECT_EQ(back.value, "default");
     ASSERT_EQ(back.options.size(), 2);
     EXPECT_EQ(back.options.first().description, "Opus 4.5");
     EXPECT_TRUE(back.groups.isEmpty());
@@ -145,7 +145,7 @@ TEST(AcpTypes, SessionConfigSelectGroupedRoundTrip)
     o.id = "model";
     o.name = "Model";
     o.type = "select";
-    o.currentValue = "opus";
+    o.value = "opus";
     SessionConfigSelectGroup g;
     g.group = "anthropic";
     g.name = "Anthropic";
@@ -182,18 +182,15 @@ TEST(AcpTypes, SessionConfigOptionBooleanRoundTrip)
     o.id = "fast";
     o.name = "Fast mode";
     o.type = "boolean";
-    o.currentValue = true;
+    o.enabled = true;
 
-    // The schema's boolean arm: currentValue is a JSON bool and there is no
-    // options key at all.
     const QJsonObject expected{
         {"id", "fast"}, {"name", "Fast mode"}, {"type", "boolean"}, {"currentValue", true}};
     EXPECT_EQ(o.toJson(), expected);
 
     const SessionConfigOption back = SessionConfigOption::fromJson(expected);
     EXPECT_EQ(back.toJson(), expected);
-    EXPECT_TRUE(back.currentValue.isBool());
-    EXPECT_TRUE(back.currentValue.toBool());
+    EXPECT_TRUE(back.enabled);
 }
 
 TEST(AcpTypes, NewSessionResultCarriesConfigOptions)
@@ -206,7 +203,7 @@ TEST(AcpTypes, NewSessionResultCarriesConfigOptions)
     o.id = "effort";
     o.name = "Effort";
     o.type = "select";
-    o.currentValue = "high";
+    o.value = "high";
     o.options.append(SessionConfigSelectOption{"default", "Default", ""});
     o.options.append(SessionConfigSelectOption{"high", "High", ""});
     r.configOptions.append(o);
@@ -240,7 +237,7 @@ TEST(AcpTypes, SessionUpdateConfigOptionsRoundTrip)
     o.id = "model";
     o.name = "Model";
     o.type = "select";
-    o.currentValue = "sonnet";
+    o.value = "sonnet";
     o.options.append(SessionConfigSelectOption{"sonnet", "Sonnet", ""});
     u.configOptions.append(o);
 

@@ -66,8 +66,24 @@ public:
     QFuture<QList<SessionConfigOption>> setConfigOption(
         const QString &sessionId,
         const QString &configId,
-        const QJsonValue &value,
+        bool enabled,
         std::chrono::milliseconds timeout = std::chrono::seconds(30));
+    QFuture<QList<SessionConfigOption>> setConfigOption(
+        const QString &sessionId,
+        const QString &configId,
+        const QString &valueId,
+        std::chrono::milliseconds timeout = std::chrono::seconds(30));
+    // A string literal converts to bool for free but to QString only via a
+    // user-defined conversion, so without this exact match
+    // setConfigOption(sid, "model", "sonnet") would pick the bool overload.
+    QFuture<QList<SessionConfigOption>> setConfigOption(
+        const QString &sessionId,
+        const QString &configId,
+        const char *valueId,
+        std::chrono::milliseconds timeout = std::chrono::seconds(30))
+    {
+        return setConfigOption(sessionId, configId, QString::fromUtf8(valueId), timeout);
+    }
 
     bool isInitialized() const { return m_peer->isInitialized(); }
     const InitializeResult &agentInfo() const { return m_initResult; }

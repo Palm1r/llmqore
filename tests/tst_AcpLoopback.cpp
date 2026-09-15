@@ -177,8 +177,6 @@ TEST_F(AcpLoopbackTest, SetConfigOptionRoundTripsAndUpdatesArrive)
     FakeAgent agent(serverTransport);
     serverTransport->start();
 
-    // Answer set_config_option with a refreshed option set, preceded by the
-    // config_option_update notification agents broadcast alongside it.
     QJsonObject seen;
     agent.session()->setRequestHandler(
         QLatin1String(Method::SetConfigOption), [&](const QJsonObject &params) {
@@ -187,7 +185,7 @@ TEST_F(AcpLoopbackTest, SetConfigOptionRoundTripsAndUpdatesArrive)
             model.id = "model";
             model.name = "Model";
             model.type = "select";
-            model.currentValue = params.value("value");
+            model.value = params.value("value").toString();
             model.options.append(SessionConfigSelectOption{"default", "Default", ""});
             model.options.append(SessionConfigSelectOption{"sonnet", "Sonnet", ""});
 
@@ -219,13 +217,13 @@ TEST_F(AcpLoopbackTest, SetConfigOptionRoundTripsAndUpdatesArrive)
     const QList<SessionConfigOption> refreshed
         = waitForFuture(client.setConfigOption(ns.sessionId, "model", "sonnet"));
 
-    EXPECT_EQ(seen.value("sessionId").toString(), ns.sessionId);
-    EXPECT_EQ(seen.value("configId").toString(), "model");
-    EXPECT_EQ(seen.value("value").toString(), "sonnet");
-    EXPECT_FALSE(seen.contains("type"));
+    // SetSessionConfigOptionRequest, string arm: no "type" key.
+    const QJsonObject
+        expectedRequest{{"sessionId", ns.sessionId}, {"configId", "model"}, {"value", "sonnet"}};
+    EXPECT_EQ(seen, expectedRequest);
 
     ASSERT_EQ(refreshed.size(), 1);
-    EXPECT_EQ(refreshed.first().currentValue.toString(), "sonnet");
+    EXPECT_EQ(refreshed.first().value, "sonnet");
     ASSERT_EQ(refreshed.first().options.size(), 2);
 
     EXPECT_EQ(updateSession, ns.sessionId);
@@ -254,9 +252,10 @@ TEST_F(AcpLoopbackTest, BooleanConfigValueCarriesItsTypeTag)
     const NewSessionResult ns = waitForFuture(client.newSession(NewSessionParams{}));
     waitForFuture(client.setConfigOption(ns.sessionId, "fast", true));
 
-    EXPECT_EQ(seen.value("type").toString(), "boolean");
-    EXPECT_TRUE(seen.value("value").isBool());
-    EXPECT_TRUE(seen.value("value").toBool());
+    // SetSessionConfigOptionRequest, boolean arm: "type" is required.
+    const QJsonObject expectedRequest{
+        {"sessionId", ns.sessionId}, {"configId", "fast"}, {"value", true}, {"type", "boolean"}};
+    EXPECT_EQ(seen, expectedRequest);
 
     delete serverTransport;
     delete clientTransport;
