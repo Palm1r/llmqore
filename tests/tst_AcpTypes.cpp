@@ -116,15 +116,27 @@ TEST(AcpTypes, SessionConfigOptionSelectRoundTrip)
     o.options.append(SessionConfigSelectOption{"default", "Default", "Opus 4.5"});
     o.options.append(SessionConfigSelectOption{"sonnet", "Sonnet", ""});
 
-    const QJsonObject obj = o.toJson();
-    const SessionConfigOption back = SessionConfigOption::fromJson(obj);
+    const QJsonObject expected{
+        {"id", "model"},
+        {"name", "Model"},
+        {"type", "select"},
+        {"description", "AI model to use"},
+        {"category", "model"},
+        {"currentValue", "default"},
+        {"options",
+         QJsonArray{
+             QJsonObject{{"value", "default"}, {"name", "Default"}, {"description", "Opus 4.5"}},
+             QJsonObject{{"value", "sonnet"}, {"name", "Sonnet"}}}}};
+    EXPECT_EQ(o.toJson(), expected);
+
+    const SessionConfigOption back = SessionConfigOption::fromJson(expected);
+    EXPECT_EQ(back.toJson(), expected);
     EXPECT_EQ(back.id, "model");
     EXPECT_EQ(back.category, "model");
     EXPECT_EQ(back.currentValue.toString(), "default");
     ASSERT_EQ(back.options.size(), 2);
     EXPECT_EQ(back.options.first().description, "Opus 4.5");
     EXPECT_TRUE(back.groups.isEmpty());
-    EXPECT_EQ(back.toJson(), obj);
 }
 
 TEST(AcpTypes, SessionConfigSelectGroupedRoundTrip)
@@ -154,8 +166,9 @@ TEST(AcpTypes, SessionConfigSelectGroupedRoundTrip)
               QJsonArray{
                   QJsonObject{{"value", "opus"}, {"name", "Opus"}},
                   QJsonObject{{"value", "sonnet"}, {"name", "Sonnet"}}}}}}}};
-    const SessionConfigOption back = SessionConfigOption::fromJson(expected);
     EXPECT_EQ(o.toJson(), expected);
+
+    const SessionConfigOption back = SessionConfigOption::fromJson(expected);
     EXPECT_EQ(back.toJson(), expected);
     EXPECT_TRUE(back.options.isEmpty());
     ASSERT_EQ(back.groups.size(), 1);
@@ -171,12 +184,16 @@ TEST(AcpTypes, SessionConfigOptionBooleanRoundTrip)
     o.type = "boolean";
     o.currentValue = true;
 
-    const QJsonObject obj = o.toJson();
-    EXPECT_FALSE(obj.contains("options"));
-    const SessionConfigOption back = SessionConfigOption::fromJson(obj);
+    // The schema's boolean arm: currentValue is a JSON bool and there is no
+    // options key at all.
+    const QJsonObject expected{
+        {"id", "fast"}, {"name", "Fast mode"}, {"type", "boolean"}, {"currentValue", true}};
+    EXPECT_EQ(o.toJson(), expected);
+
+    const SessionConfigOption back = SessionConfigOption::fromJson(expected);
+    EXPECT_EQ(back.toJson(), expected);
     EXPECT_TRUE(back.currentValue.isBool());
     EXPECT_TRUE(back.currentValue.toBool());
-    EXPECT_EQ(back.toJson(), obj);
 }
 
 TEST(AcpTypes, NewSessionResultCarriesConfigOptions)
@@ -194,11 +211,25 @@ TEST(AcpTypes, NewSessionResultCarriesConfigOptions)
     o.options.append(SessionConfigSelectOption{"high", "High", ""});
     r.configOptions.append(o);
 
-    const NewSessionResult back = NewSessionResult::fromJson(r.toJson());
+    // NewSessionResponse in the schema: sessionId plus the configOptions array.
+    const QJsonObject expected{
+        {"sessionId", "sess-1"},
+        {"configOptions",
+         QJsonArray{QJsonObject{
+             {"id", "effort"},
+             {"name", "Effort"},
+             {"type", "select"},
+             {"currentValue", "high"},
+             {"options",
+              QJsonArray{
+                  QJsonObject{{"value", "default"}, {"name", "Default"}},
+                  QJsonObject{{"value", "high"}, {"name", "High"}}}}}}}};
+    EXPECT_EQ(r.toJson(), expected);
+
+    const NewSessionResult back = NewSessionResult::fromJson(expected);
+    EXPECT_EQ(back.toJson(), expected);
     ASSERT_EQ(back.configOptions.size(), 1);
     EXPECT_EQ(back.configOptions.first().id, "effort");
-    EXPECT_EQ(back.configOptions.first().currentValue.toString(), "high");
-    ASSERT_EQ(back.configOptions.first().options.size(), 2);
 }
 
 TEST(AcpTypes, SessionUpdateConfigOptionsRoundTrip)
@@ -210,14 +241,25 @@ TEST(AcpTypes, SessionUpdateConfigOptionsRoundTrip)
     o.name = "Model";
     o.type = "select";
     o.currentValue = "sonnet";
+    o.options.append(SessionConfigSelectOption{"sonnet", "Sonnet", ""});
     u.configOptions.append(o);
 
-    const QJsonObject obj = u.toJson();
-    EXPECT_EQ(obj.value("sessionUpdate").toString(), "config_option_update");
+    // ConfigOptionUpdate in the schema: the sessionUpdate tag plus configOptions.
+    const QJsonObject expected{
+        {"sessionUpdate", "config_option_update"},
+        {"configOptions",
+         QJsonArray{QJsonObject{
+             {"id", "model"},
+             {"name", "Model"},
+             {"type", "select"},
+             {"currentValue", "sonnet"},
+             {"options", QJsonArray{QJsonObject{{"value", "sonnet"}, {"name", "Sonnet"}}}}}}}};
+    EXPECT_EQ(u.toJson(), expected);
 
-    const SessionUpdate back = SessionUpdate::fromJson(obj);
+    const SessionUpdate back = SessionUpdate::fromJson(expected);
+    EXPECT_EQ(back.toJson(), expected);
     ASSERT_EQ(back.configOptions.size(), 1);
-    EXPECT_EQ(back.configOptions.first().currentValue.toString(), "sonnet");
+    EXPECT_EQ(back.configOptions.first().id, "model");
 }
 
 TEST(AcpTypes, ContentBlockTextRoundTrip)
