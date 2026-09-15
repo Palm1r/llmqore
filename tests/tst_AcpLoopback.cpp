@@ -188,8 +188,8 @@ TEST_F(AcpLoopbackTest, SetConfigOptionRoundTripsAndUpdatesArrive)
             model.name = "Model";
             model.type = "select";
             model.currentValue = params.value("value");
-            model.options.append(SessionConfigValueOption{"default", "Default", ""});
-            model.options.append(SessionConfigValueOption{"sonnet", "Sonnet", ""});
+            model.options.append(SessionConfigSelectOption{"default", "Default", ""});
+            model.options.append(SessionConfigSelectOption{"sonnet", "Sonnet", ""});
 
             SessionNotification n;
             n.sessionId = params.value("sessionId").toString();

@@ -210,24 +210,24 @@ struct LLMQORE_EXPORT SessionModeState
     static SessionModeState fromJson(const QJsonObject &obj);
 };
 
-struct LLMQORE_EXPORT SessionConfigValueOption
+struct LLMQORE_EXPORT SessionConfigSelectOption
 {
     QString value;
     QString name;
     QString description;
 
     QJsonObject toJson() const;
-    static SessionConfigValueOption fromJson(const QJsonObject &obj);
+    static SessionConfigSelectOption fromJson(const QJsonObject &obj);
 };
 
-struct LLMQORE_EXPORT SessionConfigOptionGroup
+struct LLMQORE_EXPORT SessionConfigSelectGroup
 {
-    QString groupId;
+    QString group;
     QString name;
-    QList<SessionConfigValueOption> options;
+    QList<SessionConfigSelectOption> options;
 
     QJsonObject toJson() const;
-    static SessionConfigOptionGroup fromJson(const QJsonObject &obj);
+    static SessionConfigSelectGroup fromJson(const QJsonObject &obj);
 };
 
 struct LLMQORE_EXPORT SessionConfigOption
@@ -238,8 +238,8 @@ struct LLMQORE_EXPORT SessionConfigOption
     QString category;
     QString type;
     QJsonValue currentValue = QJsonValue::Undefined;
-    QList<SessionConfigValueOption> options;
-    QList<SessionConfigOptionGroup> groups;
+    QList<SessionConfigSelectOption> options;
+    QList<SessionConfigSelectGroup> groups;
 
     QJsonObject toJson() const;
     static SessionConfigOption fromJson(const QJsonObject &obj);

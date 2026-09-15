@@ -250,24 +250,24 @@ SessionModeState SessionModeState::fromJson(const QJsonObject &obj)
     return Json::fromJson<SessionModeState>(obj);
 }
 
-QJsonObject SessionConfigValueOption::toJson() const
+QJsonObject SessionConfigSelectOption::toJson() const
 {
     return Json::toJson(*this);
 }
 
-SessionConfigValueOption SessionConfigValueOption::fromJson(const QJsonObject &obj)
+SessionConfigSelectOption SessionConfigSelectOption::fromJson(const QJsonObject &obj)
 {
-    return Json::fromJson<SessionConfigValueOption>(obj);
+    return Json::fromJson<SessionConfigSelectOption>(obj);
 }
 
-QJsonObject SessionConfigOptionGroup::toJson() const
+QJsonObject SessionConfigSelectGroup::toJson() const
 {
     return Json::toJson(*this);
 }
 
-SessionConfigOptionGroup SessionConfigOptionGroup::fromJson(const QJsonObject &obj)
+SessionConfigSelectGroup SessionConfigSelectGroup::fromJson(const QJsonObject &obj)
 {
-    return Json::fromJson<SessionConfigOptionGroup>(obj);
+    return Json::fromJson<SessionConfigSelectGroup>(obj);
 }
 
 QJsonObject SessionConfigOption::toJson() const
@@ -281,12 +281,12 @@ QJsonObject SessionConfigOption::toJson() const
         o.insert("currentValue", currentValue);
     if (!options.isEmpty()) {
         QJsonArray arr;
-        for (const SessionConfigValueOption &v : options)
+        for (const SessionConfigSelectOption &v : options)
             arr.append(v.toJson());
         o.insert("options", arr);
     } else if (!groups.isEmpty()) {
         QJsonArray arr;
-        for (const SessionConfigOptionGroup &g : groups)
+        for (const SessionConfigSelectGroup &g : groups)
             arr.append(g.toJson());
         o.insert("options", arr);
     }
@@ -305,9 +305,9 @@ SessionConfigOption SessionConfigOption::fromJson(const QJsonObject &obj)
     for (const QJsonValue &v : obj.value("options").toArray()) {
         const QJsonObject entry = v.toObject();
         if (entry.contains("options"))
-            o.groups.append(SessionConfigOptionGroup::fromJson(entry));
+            o.groups.append(SessionConfigSelectGroup::fromJson(entry));
         else
-            o.options.append(SessionConfigValueOption::fromJson(entry));
+            o.options.append(SessionConfigSelectOption::fromJson(entry));
     }
     return o;
 }

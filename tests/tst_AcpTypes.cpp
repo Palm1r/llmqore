@@ -113,8 +113,8 @@ TEST(AcpTypes, SessionConfigOptionSelectRoundTrip)
     o.category = "model";
     o.type = "select";
     o.currentValue = "default";
-    o.options.append(SessionConfigValueOption{"default", "Default", "Opus 4.5"});
-    o.options.append(SessionConfigValueOption{"sonnet", "Sonnet", ""});
+    o.options.append(SessionConfigSelectOption{"default", "Default", "Opus 4.5"});
+    o.options.append(SessionConfigSelectOption{"sonnet", "Sonnet", ""});
 
     const QJsonObject obj = o.toJson();
     const SessionConfigOption back = SessionConfigOption::fromJson(obj);
@@ -127,27 +127,40 @@ TEST(AcpTypes, SessionConfigOptionSelectRoundTrip)
     EXPECT_EQ(back.toJson(), obj);
 }
 
-TEST(AcpTypes, SessionConfigOptionGroupedRoundTrip)
+TEST(AcpTypes, SessionConfigSelectGroupedRoundTrip)
 {
     SessionConfigOption o;
     o.id = "model";
     o.name = "Model";
     o.type = "select";
     o.currentValue = "opus";
-    SessionConfigOptionGroup g;
-    g.groupId = "anthropic";
+    SessionConfigSelectGroup g;
+    g.group = "anthropic";
     g.name = "Anthropic";
-    g.options.append(SessionConfigValueOption{"opus", "Opus", ""});
-    g.options.append(SessionConfigValueOption{"sonnet", "Sonnet", ""});
+    g.options.append(SessionConfigSelectOption{"opus", "Opus", ""});
+    g.options.append(SessionConfigSelectOption{"sonnet", "Sonnet", ""});
     o.groups.append(g);
 
-    const QJsonObject obj = o.toJson();
-    const SessionConfigOption back = SessionConfigOption::fromJson(obj);
+    const QJsonObject expected{
+        {"id", "model"},
+        {"name", "Model"},
+        {"type", "select"},
+        {"currentValue", "opus"},
+        {"options",
+         QJsonArray{QJsonObject{
+             {"group", "anthropic"},
+             {"name", "Anthropic"},
+             {"options",
+              QJsonArray{
+                  QJsonObject{{"value", "opus"}, {"name", "Opus"}},
+                  QJsonObject{{"value", "sonnet"}, {"name", "Sonnet"}}}}}}}};
+    const SessionConfigOption back = SessionConfigOption::fromJson(expected);
+    EXPECT_EQ(o.toJson(), expected);
+    EXPECT_EQ(back.toJson(), expected);
     EXPECT_TRUE(back.options.isEmpty());
     ASSERT_EQ(back.groups.size(), 1);
-    EXPECT_EQ(back.groups.first().groupId, "anthropic");
+    EXPECT_EQ(back.groups.first().group, "anthropic");
     ASSERT_EQ(back.groups.first().options.size(), 2);
-    EXPECT_EQ(back.toJson(), obj);
 }
 
 TEST(AcpTypes, SessionConfigOptionBooleanRoundTrip)
@@ -177,8 +190,8 @@ TEST(AcpTypes, NewSessionResultCarriesConfigOptions)
     o.name = "Effort";
     o.type = "select";
     o.currentValue = "high";
-    o.options.append(SessionConfigValueOption{"default", "Default", ""});
-    o.options.append(SessionConfigValueOption{"high", "High", ""});
+    o.options.append(SessionConfigSelectOption{"default", "Default", ""});
+    o.options.append(SessionConfigSelectOption{"high", "High", ""});
     r.configOptions.append(o);
 
     const NewSessionResult back = NewSessionResult::fromJson(r.toJson());
@@ -520,8 +533,8 @@ TEST(AcpTypes, EveryTabledStructureHandsBackWhatItWasGiven)
     expectRoundTrip<InitializeResult>("InitializeResult");
     expectRoundTrip<SessionMode>("SessionMode");
     expectRoundTrip<SessionModeState>("SessionModeState");
-    expectRoundTrip<SessionConfigValueOption>("SessionConfigValueOption");
-    expectRoundTrip<SessionConfigOptionGroup>("SessionConfigOptionGroup");
+    expectRoundTrip<SessionConfigSelectOption>("SessionConfigSelectOption");
+    expectRoundTrip<SessionConfigSelectGroup>("SessionConfigSelectGroup");
     expectRoundTrip<NewSessionParams>("NewSessionParams");
     expectRoundTrip<NewSessionResult>("NewSessionResult");
     expectRoundTrip<LoadSessionParams>("LoadSessionParams");
