@@ -75,6 +75,7 @@ Two design choices to note:
 | `session/prompt` | host → agent | ✓ `AcpClient::prompt` |
 | `session/cancel` | host → agent (notify) | ✓ `AcpClient::cancel` |
 | `session/set_mode` | host → agent | ✓ `AcpClient::setMode` |
+| `session/set_config_option` | host → agent | ✓ `AcpClient::setConfigOption` |
 | `session/update` | agent → host (notify) | ✓ routed to typed signals |
 | `session/request_permission` | agent → host | ✓ `AcpPermissionProvider` |
 | `fs/read_text_file` | agent → host | ✓ `AcpFileSystemProvider` |
@@ -87,8 +88,8 @@ Two design choices to note:
 
 `session/update` variants handled: `user_message_chunk`, `agent_message_chunk`,
 `agent_thought_chunk`, `tool_call`, `tool_call_update` (merged by `toolCallId`),
-`plan`, `available_commands_update`, `current_mode_update`, `usage_update` (raw JSON via
-the `AcpClient::usageUpdated` signal).
+`plan`, `available_commands_update`, `current_mode_update`, `config_option_update`,
+`usage_update` (raw JSON via the `AcpClient::usageUpdated` signal).
 
 ## Live validation
 
@@ -98,7 +99,7 @@ adapter (the renamed `@zed-industries/claude-code-acp`):
 `stopReason: "end_turn"`, driven by an `AcpClient` host (the `example-chat` ACP path).
 
 This is now automated: [`tests/integration/tst_AcpIntegration.cpp`](../../tests/integration/tst_AcpIntegration.cpp)
-launches the adapter with `npx` and runs six conformance cases against it. Build with
+launches the adapter with `npx` and runs nine conformance cases against it. Build with
 `-DLLMQORE_BUILD_INTEGRATION_TESTS=ON` and run
 `LLMQoreIntegrationTests --gtest_filter='AcpIntegrationTest.*'` (~20 s, real tokens).
 
@@ -113,6 +114,13 @@ Corrections that came out of these runs and are folded in:
   credential from the environment (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`) or the
   macOS Keychain. A GUI-launched host must pass a token explicitly — see
   [`authentication.md`](authentication.md).
+- **Mode changes arrive on the other API's channel.** Against the Claude adapter,
+  `session/set_mode` answers `{}` and reports the change as `config_option_update`, so
+  `configOptionsUpdated` fires. `session/set_config_option` on the `mode` option is the
+  reverse: the reply carries the updated `configOptions` and the agent emits
+  `current_mode_update`, so `modeChanged` fires. Neither signal is synthesised on our
+  side. Hosts should read the `set_config_option` reply and connect both signals; the
+  Codex adapter sends no notification at all after `set_config_option`.
 
 ## Unreachable surface (this agent will never exercise it)
 
@@ -154,13 +162,8 @@ touching the host provider. A different agent could close it; swap one in with
 
 ## Known gaps in our types
 
-- **`NewSessionResult.configOptions`** is dropped — the agent sends it next to `modes`.
-- **`config_option_update`** is not in `SessionUpdateKind`, so it falls through to the
-  unknown-kind debug log. This is what `session/set_mode` actually triggers: the agent
-  answers `{}` and emits `config_option_update`, **not** `current_mode_update`, so
-  `AcpClient::modeChanged` never fires on an explicit mode switch.
-- **`ClientCapabilities`** serialises only `{fs, terminal}`, while the agent reads
-  `elicitation.form` / `elicitation.url` / `session.configOptions.boolean`.
+- **`ClientCapabilities`** serialises `{fs, terminal, session.configOptions.boolean}`; the
+  agent also reads `elicitation.form` / `elicitation.url`, which we do not send.
 
 ## Still unvalidated
 
