@@ -34,10 +34,27 @@ constexpr auto jsonSchema(const FileSystemCapability *)
         field("writeTextFile", &FileSystemCapability::writeTextFile));
 }
 
+constexpr auto jsonSchema(const BooleanConfigOptionCapabilities *)
+{
+    return std::make_tuple();
+}
+
+constexpr auto jsonSchema(const SessionConfigOptionsCapabilities *)
+{
+    return std::make_tuple(field("boolean", &SessionConfigOptionsCapabilities::boolean));
+}
+
+constexpr auto jsonSchema(const ClientSessionCapabilities *)
+{
+    return std::make_tuple(field("configOptions", &ClientSessionCapabilities::configOptions));
+}
+
 constexpr auto jsonSchema(const ClientCapabilities *)
 {
     return std::make_tuple(
-        field("fs", &ClientCapabilities::fs), field("terminal", &ClientCapabilities::terminal));
+        field("fs", &ClientCapabilities::fs),
+        field("terminal", &ClientCapabilities::terminal),
+        field("session", &ClientCapabilities::session));
 }
 
 constexpr auto jsonExtras(const ClientCapabilities *)

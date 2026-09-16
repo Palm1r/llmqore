@@ -90,6 +90,36 @@ FileSystemCapability FileSystemCapability::fromJson(const QJsonObject &obj)
     return Json::fromJson<FileSystemCapability>(obj);
 }
 
+QJsonObject BooleanConfigOptionCapabilities::toJson() const
+{
+    return Json::toJson(*this);
+}
+
+BooleanConfigOptionCapabilities BooleanConfigOptionCapabilities::fromJson(const QJsonObject &obj)
+{
+    return Json::fromJson<BooleanConfigOptionCapabilities>(obj);
+}
+
+QJsonObject SessionConfigOptionsCapabilities::toJson() const
+{
+    return Json::toJson(*this);
+}
+
+SessionConfigOptionsCapabilities SessionConfigOptionsCapabilities::fromJson(const QJsonObject &obj)
+{
+    return Json::fromJson<SessionConfigOptionsCapabilities>(obj);
+}
+
+QJsonObject ClientSessionCapabilities::toJson() const
+{
+    return Json::toJson(*this);
+}
+
+ClientSessionCapabilities ClientSessionCapabilities::fromJson(const QJsonObject &obj)
+{
+    return Json::fromJson<ClientSessionCapabilities>(obj);
+}
+
 QJsonObject ClientCapabilities::toJson() const
 {
     return Json::toJson(*this);

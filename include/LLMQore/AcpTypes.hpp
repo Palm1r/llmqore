@@ -92,10 +92,33 @@ struct LLMQORE_EXPORT FileSystemCapability
     static FileSystemCapability fromJson(const QJsonObject &obj);
 };
 
+struct LLMQORE_EXPORT BooleanConfigOptionCapabilities
+{
+    QJsonObject toJson() const;
+    static BooleanConfigOptionCapabilities fromJson(const QJsonObject &obj);
+};
+
+struct LLMQORE_EXPORT SessionConfigOptionsCapabilities
+{
+    std::optional<BooleanConfigOptionCapabilities> boolean = BooleanConfigOptionCapabilities{};
+
+    QJsonObject toJson() const;
+    static SessionConfigOptionsCapabilities fromJson(const QJsonObject &obj);
+};
+
+struct LLMQORE_EXPORT ClientSessionCapabilities
+{
+    SessionConfigOptionsCapabilities configOptions;
+
+    QJsonObject toJson() const;
+    static ClientSessionCapabilities fromJson(const QJsonObject &obj);
+};
+
 struct LLMQORE_EXPORT ClientCapabilities
 {
     FileSystemCapability fs;
     bool terminal = false;
+    ClientSessionCapabilities session;
     QJsonObject extras;
 
     QJsonObject toJson() const;

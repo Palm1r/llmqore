@@ -67,6 +67,8 @@ ClientCapabilities AcpClient::clientCapabilities() const
     caps.fs.readTextFile = !m_fsProvider.isNull();
     caps.fs.writeTextFile = !m_fsProvider.isNull() && m_fsProvider->supportsWrite();
     caps.terminal = !m_terminalProvider.isNull();
+    if (!m_booleanConfigOptions)
+        caps.session.configOptions.boolean.reset();
     return caps;
 }
 
@@ -86,6 +88,12 @@ void AcpClient::setTerminalProvider(AcpTerminalProvider *provider)
 {
     LLMQORE_ASSERT_OWNING_THREAD();
     m_terminalProvider = provider;
+}
+
+void AcpClient::setBooleanConfigOptionsSupported(bool supported)
+{
+    LLMQORE_ASSERT_OWNING_THREAD();
+    m_booleanConfigOptions = supported;
 }
 
 QFuture<InitializeResult> AcpClient::connectAndInitialize(std::chrono::milliseconds timeout)

@@ -150,6 +150,27 @@ TEST_F(AcpLoopbackTest, ClientAdvertisesCapabilitiesFromProviders)
     delete clientTransport;
 }
 
+TEST_F(AcpLoopbackTest, BooleanConfigOptionsCapabilityIsOnByDefaultAndOmittedWhenOff)
+{
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
+    FakeAgent agent(serverTransport);
+    serverTransport->start();
+
+    AcpClient client(clientTransport);
+
+    const QJsonObject on = client.clientCapabilities().toJson();
+    const QJsonObject expectedOn{{"configOptions", QJsonObject{{"boolean", QJsonObject{}}}}};
+    EXPECT_EQ(on.value("session").toObject(), expectedOn);
+
+    client.setBooleanConfigOptionsSupported(false);
+    const QJsonObject off = client.clientCapabilities().toJson();
+    EXPECT_FALSE(
+        off.value("session").toObject().value("configOptions").toObject().contains("boolean"));
+
+    delete serverTransport;
+    delete clientTransport;
+}
+
 TEST_F(AcpLoopbackTest, NewSessionRegistersSessionId)
 {
     auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();

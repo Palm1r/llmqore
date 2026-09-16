@@ -39,6 +39,7 @@ public:
     void setPermissionProvider(AcpPermissionProvider *provider);
     void setFileSystemProvider(AcpFileSystemProvider *provider);
     void setTerminalProvider(AcpTerminalProvider *provider);
+    void setBooleanConfigOptionsSupported(bool supported);
 
     AcpPermissionProvider *permissionProvider() const { return m_permissionProvider.data(); }
     AcpFileSystemProvider *fileSystemProvider() const { return m_fsProvider.data(); }
@@ -137,6 +138,7 @@ private:
     QPointer<AcpPermissionProvider> m_permissionProvider;
     QPointer<AcpFileSystemProvider> m_fsProvider;
     QPointer<AcpTerminalProvider> m_terminalProvider;
+    bool m_booleanConfigOptions = true;
 };
 
 } // namespace LLMQore::Acp
