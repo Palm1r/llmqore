@@ -259,6 +259,24 @@ TEST(AcpTypes, SessionUpdateConfigOptionsRoundTrip)
     EXPECT_EQ(back.configOptions.first().id, "model");
 }
 
+TEST(AcpTypes, BooleanConfigOptionsCapabilityIsOffUnlessAdvertised)
+{
+    const QJsonObject configOptionsWithoutBoolean{
+        {"session", QJsonObject{{"configOptions", QJsonObject{}}}}};
+    EXPECT_FALSE(ClientCapabilities::fromJson(configOptionsWithoutBoolean)
+                     .session.configOptions.boolean.has_value());
+
+    const QJsonObject noSessionKey{
+        {"fs", QJsonObject{{"readTextFile", true}, {"writeTextFile", false}}}, {"terminal", false}};
+    EXPECT_FALSE(
+        ClientCapabilities::fromJson(noSessionKey).session.configOptions.boolean.has_value());
+
+    const QJsonObject booleanAdvertised{
+        {"session", QJsonObject{{"configOptions", QJsonObject{{"boolean", QJsonObject{}}}}}}};
+    EXPECT_TRUE(
+        ClientCapabilities::fromJson(booleanAdvertised).session.configOptions.boolean.has_value());
+}
+
 TEST(AcpTypes, ContentBlockTextRoundTrip)
 {
     const ContentBlock b = ContentBlock::makeText("hello");

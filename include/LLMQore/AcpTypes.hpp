@@ -100,7 +100,7 @@ struct LLMQORE_EXPORT BooleanConfigOptionCapabilities
 
 struct LLMQORE_EXPORT SessionConfigOptionsCapabilities
 {
-    std::optional<BooleanConfigOptionCapabilities> boolean = BooleanConfigOptionCapabilities{};
+    std::optional<BooleanConfigOptionCapabilities> boolean = std::nullopt;
 
     QJsonObject toJson() const;
     static SessionConfigOptionsCapabilities fromJson(const QJsonObject &obj);

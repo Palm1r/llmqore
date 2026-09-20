@@ -67,8 +67,8 @@ ClientCapabilities AcpClient::clientCapabilities() const
     caps.fs.readTextFile = !m_fsProvider.isNull();
     caps.fs.writeTextFile = !m_fsProvider.isNull() && m_fsProvider->supportsWrite();
     caps.terminal = !m_terminalProvider.isNull();
-    if (!m_booleanConfigOptions)
-        caps.session.configOptions.boolean.reset();
+    if (m_booleanConfigOptions)
+        caps.session.configOptions.boolean = BooleanConfigOptionCapabilities{};
     return caps;
 }
 
