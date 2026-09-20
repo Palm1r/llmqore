@@ -20,6 +20,7 @@ add_executable(LLMQoreUnitTests
     tst_Conversation.cpp
     tst_TurnSerializerParity.cpp
     tst_SSEParser.cpp
+    tst_ObjectToolsAdapter.cpp
     tst_ToolsManager.cpp
     tst_ToolHandler.cpp
     tst_ToolRounds.cpp

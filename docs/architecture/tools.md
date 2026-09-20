@@ -11,6 +11,7 @@ flowchart TD
         T1["WeatherTool : BaseTool"]
         T2["CalcTool : BaseTool"]
         T3["McpRemoteTool<br/>(bridged from MCP server)"]
+        T4["ObjectToolsAdapter<br/>(wraps QObject methods)"]
     end
 
     subgraph Manager["ToolsManager (per BaseClient)"]
@@ -29,6 +30,7 @@ flowchart TD
     T1 -.register.-> REG
     T2 -.register.-> REG
     T3 -.register via McpToolBinder.-> REG
+    T4 -.ObjectToolsAdapter::registerTools().-> REG
     REG --> SCHEMA
     REG --> EXEC
     EXEC --> QUEUE
@@ -112,3 +114,87 @@ Tool failures produce results with an error flag set. The model sees the error a
 ### Structured content
 
 An optional JSON object can accompany the content list. Used by MCP servers for typed UI data. LLMQore preserves it end-to-end without imposing any schema.
+
+---
+
+## ObjectToolsAdapter
+
+`ObjectToolsAdapter` bridges existing QObjects to the tool system, automatically wrapping public methods as tools without requiring manual `BaseTool` subclasses. Each method becomes a tool with parameters inferred from the method signature and metadata from `Q_CLASSINFO`.
+
+### Usage
+
+```cpp
+// Create an adapter from a QObject subclass
+auto *adapter = ObjectToolsAdapter::create<MyObject>();
+
+// Register all public methods as tools
+ToolRegistry registry;
+auto tools = adapter->registerTools(&registry);
+
+// Or filter by method type and prefix
+auto filteredTools = adapter->registerTools(&registry, 
+                                            ObjectToolsAdapter::PublicSlot, 
+                                            "tool_");
+```
+
+### Method discovery and filtering
+
+Methods are discovered via Qt's meta-object system. The filter parameter controls which methods are candidates:
+
+- **`PublicInvokable`** -- `Q_INVOKABLE` methods with public access
+- **`PublicSlot`** -- public slots
+- **`AllPublic`** -- both (default)
+
+An optional prefix (e.g. `"tool_"`) narrows the search to methods starting with that string; the prefix is stripped from the resulting tool ID.
+
+### Parameter schema inference
+
+Method parameters are mapped to JSON Schema types:
+
+| C++ Type | Schema Type |
+|---|---|
+| `int` | `integer` |
+| `double` | `number` |
+| `QString` | `string` |
+| `bool` | `boolean` |
+| `QJsonObject` | `object` |
+| `QJsonArray`, `QStringList` | `array` |
+
+All parameters are required (default parameters are not supported by `QMetaMethod::invoke`).
+
+### Display name and description via Q_CLASSINFO
+
+By default, the tool ID is the method name (minus prefix) and the description is auto-generated. Override with `Q_CLASSINFO`:
+
+```cpp
+class MyObject : public QObject {
+    Q_OBJECT
+    
+    Q_CLASSINFO("myTool.displayName", "My Custom Tool")
+    Q_CLASSINFO("myTool.description", "Does something useful")
+    Q_INVOKABLE QString tool_myTool(const QString &input) { return input; }
+};
+```
+
+### Return value handling
+
+Methods can return:
+
+- **`void`** -- converted to `"The tool was called successfully."`
+- **`QString`** -- converted to text content
+- **`QJsonObject`** -- parsed as rich content if it has a recognized `"type"` field (text, image, audio, resource, resource_link); otherwise stored as structured JSON
+- **Convertible to string** -- stringified
+
+### Thread affinity
+
+`ObjectToolsAdapter::create()` enforces a key constraint: **it must be called from the main thread**. Internally, the adapter moves the wrapped object to a dedicated worker thread for thread-safe execution; method invocations use `Qt::BlockingQueuedConnection` to marshal calls across threads. This design ensures that:
+
+- The adapter and registry can be used from any thread safely
+- The wrapped object's slot code runs in a predictable thread context
+- No locking is needed in the tool methods themselves
+
+If called from a non-main thread, `create()` returns `nullptr`.
+
+### Lifecycle
+
+The adapter and its wrapped object are bound: deleting either triggers deletion of the other via queued connections. The object is moved to the worker thread for safe method invocation across thread boundaries.
