@@ -9,6 +9,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QFutureWatcher>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QPromise>
 #include <QString>
@@ -149,6 +150,27 @@ TEST_F(AcpLoopbackTest, ClientAdvertisesCapabilitiesFromProviders)
     delete clientTransport;
 }
 
+TEST_F(AcpLoopbackTest, BooleanConfigOptionsCapabilityIsOnByDefaultAndOmittedWhenOff)
+{
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
+    FakeAgent agent(serverTransport);
+    serverTransport->start();
+
+    AcpClient client(clientTransport);
+
+    const QJsonObject on = client.clientCapabilities().toJson();
+    const QJsonObject expectedOn{{"configOptions", QJsonObject{{"boolean", QJsonObject{}}}}};
+    EXPECT_EQ(on.value("session").toObject(), expectedOn);
+
+    client.setBooleanConfigOptionsSupported(false);
+    const QJsonObject off = client.clientCapabilities().toJson();
+    EXPECT_FALSE(
+        off.value("session").toObject().value("configOptions").toObject().contains("boolean"));
+
+    delete serverTransport;
+    delete clientTransport;
+}
+
 TEST_F(AcpLoopbackTest, NewSessionRegistersSessionId)
 {
     auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
@@ -165,6 +187,96 @@ TEST_F(AcpLoopbackTest, NewSessionRegistersSessionId)
     EXPECT_EQ(ns.sessionId, "sess-XYZ");
     ASSERT_EQ(client.sessionIds().size(), 1);
     EXPECT_EQ(client.sessionIds().first(), "sess-XYZ");
+
+    delete serverTransport;
+    delete clientTransport;
+}
+
+TEST_F(AcpLoopbackTest, SetConfigOptionRoundTripsAndUpdatesArrive)
+{
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
+    FakeAgent agent(serverTransport);
+    serverTransport->start();
+
+    QJsonObject seen;
+    agent.session()->setRequestHandler(
+        QLatin1String(Method::SetConfigOption), [&](const QJsonObject &params) {
+            seen = params;
+            SessionConfigOption model;
+            model.id = "model";
+            model.name = "Model";
+            model.type = "select";
+            model.value = params.value("value").toString();
+            model.options.append(SessionConfigSelectOption{"default", "Default", ""});
+            model.options.append(SessionConfigSelectOption{"sonnet", "Sonnet", ""});
+
+            SessionNotification n;
+            n.sessionId = params.value("sessionId").toString();
+            n.update.sessionUpdate
+                = QString::fromLatin1(SessionUpdateKind::ConfigOptionUpdate);
+            n.update.configOptions = {model};
+            agent.session()->sendNotification(
+                QLatin1String(Method::SessionUpdate), n.toJson());
+
+            return resolvedJson(QJsonObject{{"configOptions", configOptionsToJson({model})}});
+        });
+
+    AcpClient client(clientTransport);
+    waitForFuture(client.connectAndInitialize());
+    const NewSessionResult ns = waitForFuture(client.newSession(NewSessionParams{}));
+
+    QString updateSession;
+    QList<SessionConfigOption> updated;
+    QObject::connect(
+        &client,
+        &AcpClient::configOptionsUpdated,
+        [&](const QString &sid, const QList<SessionConfigOption> &options) {
+            updateSession = sid;
+            updated = options;
+        });
+
+    const QList<SessionConfigOption> refreshed
+        = waitForFuture(client.setConfigOption(ns.sessionId, "model", "sonnet"));
+
+    // SetSessionConfigOptionRequest, string arm: no "type" key.
+    const QJsonObject
+        expectedRequest{{"sessionId", ns.sessionId}, {"configId", "model"}, {"value", "sonnet"}};
+    EXPECT_EQ(seen, expectedRequest);
+
+    ASSERT_EQ(refreshed.size(), 1);
+    EXPECT_EQ(refreshed.first().value, "sonnet");
+    ASSERT_EQ(refreshed.first().options.size(), 2);
+
+    EXPECT_EQ(updateSession, ns.sessionId);
+    ASSERT_EQ(updated.size(), 1);
+    EXPECT_EQ(updated.first().id, "model");
+
+    delete serverTransport;
+    delete clientTransport;
+}
+
+TEST_F(AcpLoopbackTest, BooleanConfigValueCarriesItsTypeTag)
+{
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
+    FakeAgent agent(serverTransport);
+    serverTransport->start();
+
+    QJsonObject seen;
+    agent.session()->setRequestHandler(
+        QLatin1String(Method::SetConfigOption), [&](const QJsonObject &params) {
+            seen = params;
+            return resolvedJson(QJsonObject{{"configOptions", QJsonArray{}}});
+        });
+
+    AcpClient client(clientTransport);
+    waitForFuture(client.connectAndInitialize());
+    const NewSessionResult ns = waitForFuture(client.newSession(NewSessionParams{}));
+    waitForFuture(client.setConfigOption(ns.sessionId, "fast", true));
+
+    // SetSessionConfigOptionRequest, boolean arm: "type" is required.
+    const QJsonObject expectedRequest{
+        {"sessionId", ns.sessionId}, {"configId", "fast"}, {"value", true}, {"type", "boolean"}};
+    EXPECT_EQ(seen, expectedRequest);
 
     delete serverTransport;
     delete clientTransport;

@@ -490,6 +490,83 @@ TEST_F(AcpIntegrationTest, NewSessionRegistersSessionAndReportsModes)
     EXPECT_FALSE(commandNames.isEmpty()) << agentDiagnostics();
 }
 
+TEST_F(AcpIntegrationTest, NewSessionReturnsConfigOptions)
+{
+    const NewSessionResult session = openSession();
+    ASSERT_FALSE(session.sessionId.isEmpty()) << agentDiagnostics();
+
+    ASSERT_FALSE(session.configOptions.isEmpty()) << "session/new returned no configOptions\n"
+                                                  << agentDiagnostics();
+
+    for (const SessionConfigOption &option : session.configOptions) {
+        EXPECT_FALSE(option.id.isEmpty()) << agentDiagnostics();
+        EXPECT_FALSE(option.type.isEmpty())
+            << "option " << option.id.toStdString() << " has no type\n"
+            << agentDiagnostics();
+    }
+}
+
+TEST_F(AcpIntegrationTest, SetConfigOptionSwitchesModeAndNotifies)
+{
+    const NewSessionResult session = openSession();
+    drainNotifications();
+    ASSERT_FALSE(session.sessionId.isEmpty()) << agentDiagnostics();
+
+    const SessionConfigOption *modeOption = nullptr;
+    for (const SessionConfigOption &option : session.configOptions) {
+        if (option.category == QLatin1String("mode"))
+            modeOption = &option;
+    }
+    ASSERT_NE(modeOption, nullptr) << "no configOption with category \"mode\"\n"
+                                   << agentDiagnostics();
+
+    QString target;
+    for (const SessionConfigSelectOption &choice : modeOption->options) {
+        if (choice.value != modeOption->value) {
+            target = choice.value;
+            break;
+        }
+    }
+    ASSERT_FALSE(target.isEmpty()) << "mode option has no alternative value\n"
+                                   << agentDiagnostics();
+
+    QString changedSession;
+    QString changedMode;
+    const QMetaObject::Connection connection = QObject::connect(
+        s_client,
+        &AcpClient::modeChanged,
+        s_client,
+        [&](const QString &sessionId, const QString &modeId) {
+            changedSession = sessionId;
+            changedMode = modeId;
+        });
+
+    QList<SessionConfigOption> reply;
+    const SettleOutcome outcome = settleValue(
+        s_client->setConfigOption(
+            session.sessionId, modeOption->id, target, std::chrono::milliseconds(kRpcTimeoutMs)),
+        kRpcTimeoutMs + kSettleSlackMs,
+        reply);
+    drainNotifications();
+    QObject::disconnect(connection);
+
+    ASSERT_TRUE(outcome.ok()) << "session/set_config_option was rejected\n" << describe(outcome);
+
+    bool found = false;
+    for (const SessionConfigOption &option : reply) {
+        if (option.id == modeOption->id) {
+            found = true;
+            EXPECT_EQ(option.value, target) << agentDiagnostics();
+        }
+    }
+    EXPECT_TRUE(found) << "response did not include the mode option\n" << agentDiagnostics();
+
+    EXPECT_EQ(changedSession, session.sessionId)
+        << "no current_mode_update arrived after set_config_option\n"
+        << agentDiagnostics();
+    EXPECT_EQ(changedMode, target) << agentDiagnostics();
+}
+
 TEST_F(AcpIntegrationTest, SetModeIsAcceptedByTheAgent)
 {
     const NewSessionResult session = openSession();
@@ -501,6 +578,47 @@ TEST_F(AcpIntegrationTest, SetModeIsAcceptedByTheAgent)
         kRpcTimeoutMs + kSettleSlackMs);
 
     EXPECT_TRUE(outcome.ok()) << "session/set_mode was rejected\n" << describe(outcome);
+}
+
+TEST_F(AcpIntegrationTest, SetModeTriggersConfigOptionsUpdated)
+{
+    const NewSessionResult session = openSession();
+    drainNotifications();
+    ASSERT_FALSE(session.sessionId.isEmpty()) << agentDiagnostics();
+
+    QString updatedSession;
+    QList<SessionConfigOption> updatedOptions;
+    const QMetaObject::Connection connection = QObject::connect(
+        s_client,
+        &AcpClient::configOptionsUpdated,
+        s_client,
+        [&](const QString &sessionId, const QList<SessionConfigOption> &options) {
+            updatedSession = sessionId;
+            updatedOptions = options;
+        });
+
+    const SettleOutcome outcome = settleVoid(
+        s_client->setMode(
+            session.sessionId, QStringLiteral("plan"), std::chrono::milliseconds(kRpcTimeoutMs)),
+        kRpcTimeoutMs + kSettleSlackMs);
+    drainNotifications();
+    QObject::disconnect(connection);
+
+    ASSERT_TRUE(outcome.ok()) << "session/set_mode was rejected\n" << describe(outcome);
+
+    EXPECT_EQ(updatedSession, session.sessionId)
+        << "no config_option_update arrived after set_mode\n"
+        << agentDiagnostics();
+
+    bool found = false;
+    for (const SessionConfigOption &option : updatedOptions) {
+        if (option.category == QLatin1String("mode")) {
+            found = true;
+            EXPECT_EQ(option.value, QStringLiteral("plan")) << agentDiagnostics();
+        }
+    }
+    EXPECT_TRUE(found) << "config_option_update did not include the mode option\n"
+                       << agentDiagnostics();
 }
 
 TEST_F(AcpIntegrationTest, PromptStreamsChunksAndEndsTurn)

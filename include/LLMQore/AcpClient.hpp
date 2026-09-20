@@ -39,6 +39,7 @@ public:
     void setPermissionProvider(AcpPermissionProvider *provider);
     void setFileSystemProvider(AcpFileSystemProvider *provider);
     void setTerminalProvider(AcpTerminalProvider *provider);
+    void setBooleanConfigOptionsSupported(bool supported);
 
     AcpPermissionProvider *permissionProvider() const { return m_permissionProvider.data(); }
     AcpFileSystemProvider *fileSystemProvider() const { return m_fsProvider.data(); }
@@ -63,6 +64,27 @@ public:
         const QString &sessionId,
         const QString &modeId,
         std::chrono::milliseconds timeout = std::chrono::seconds(30));
+    QFuture<QList<SessionConfigOption>> setConfigOption(
+        const QString &sessionId,
+        const QString &configId,
+        bool enabled,
+        std::chrono::milliseconds timeout = std::chrono::seconds(30));
+    QFuture<QList<SessionConfigOption>> setConfigOption(
+        const QString &sessionId,
+        const QString &configId,
+        const QString &valueId,
+        std::chrono::milliseconds timeout = std::chrono::seconds(30));
+    // A string literal converts to bool for free but to QString only via a
+    // user-defined conversion, so without this exact match
+    // setConfigOption(sid, "model", "sonnet") would pick the bool overload.
+    QFuture<QList<SessionConfigOption>> setConfigOption(
+        const QString &sessionId,
+        const QString &configId,
+        const char *valueId,
+        std::chrono::milliseconds timeout = std::chrono::seconds(30))
+    {
+        return setConfigOption(sessionId, configId, QString::fromUtf8(valueId), timeout);
+    }
 
     bool isInitialized() const { return m_peer->isInitialized(); }
     const InitializeResult &agentInfo() const { return m_initResult; }
@@ -87,6 +109,8 @@ signals:
     void availableCommandsUpdated(
         const QString &sessionId, const QList<LLMQore::Acp::AvailableCommand> &commands);
     void modeChanged(const QString &sessionId, const QString &modeId);
+    void configOptionsUpdated(
+        const QString &sessionId, const QList<LLMQore::Acp::SessionConfigOption> &options);
     void usageUpdated(const QString &sessionId, const QJsonObject &usage);
     void sessionInfoUpdated(const QString &sessionId, const QString &title);
 
@@ -114,6 +138,7 @@ private:
     QPointer<AcpPermissionProvider> m_permissionProvider;
     QPointer<AcpFileSystemProvider> m_fsProvider;
     QPointer<AcpTerminalProvider> m_terminalProvider;
+    bool m_booleanConfigOptions = true;
 };
 
 } // namespace LLMQore::Acp

@@ -67,6 +67,8 @@ ClientCapabilities AcpClient::clientCapabilities() const
     caps.fs.readTextFile = !m_fsProvider.isNull();
     caps.fs.writeTextFile = !m_fsProvider.isNull() && m_fsProvider->supportsWrite();
     caps.terminal = !m_terminalProvider.isNull();
+    if (m_booleanConfigOptions)
+        caps.session.configOptions.boolean = BooleanConfigOptionCapabilities{};
     return caps;
 }
 
@@ -86,6 +88,12 @@ void AcpClient::setTerminalProvider(AcpTerminalProvider *provider)
 {
     LLMQORE_ASSERT_OWNING_THREAD();
     m_terminalProvider = provider;
+}
+
+void AcpClient::setBooleanConfigOptionsSupported(bool supported)
+{
+    LLMQORE_ASSERT_OWNING_THREAD();
+    m_booleanConfigOptions = supported;
 }
 
 QFuture<InitializeResult> AcpClient::connectAndInitialize(std::chrono::milliseconds timeout)
@@ -177,6 +185,36 @@ QFuture<void> AcpClient::setMode(
         .then(this, [](const QJsonValue &) {});
 }
 
+QFuture<QList<SessionConfigOption>> AcpClient::setConfigOption(
+    const QString &sessionId,
+    const QString &configId,
+    bool enabled,
+    std::chrono::milliseconds timeout)
+{
+    QJsonObject params{
+        {"sessionId", sessionId},
+        {"configId", configId},
+        {"value", enabled},
+        {"type", QStringLiteral("boolean")}};
+    return LLMQore::compat(m_peer->request(QLatin1String(Method::SetConfigOption), params, timeout))
+        .then(this, [](const QJsonValue &v) {
+            return configOptionsFromJson(v.toObject().value("configOptions").toArray());
+        });
+}
+
+QFuture<QList<SessionConfigOption>> AcpClient::setConfigOption(
+    const QString &sessionId,
+    const QString &configId,
+    const QString &valueId,
+    std::chrono::milliseconds timeout)
+{
+    QJsonObject params{{"sessionId", sessionId}, {"configId", configId}, {"value", valueId}};
+    return LLMQore::compat(m_peer->request(QLatin1String(Method::SetConfigOption), params, timeout))
+        .then(this, [](const QJsonValue &v) {
+            return configOptionsFromJson(v.toObject().value("configOptions").toArray());
+        });
+}
+
 void AcpClient::shutdown()
 {
     LLMQORE_ASSERT_OWNING_THREAD();
@@ -220,6 +258,8 @@ void AcpClient::handleSessionUpdate(const QJsonObject &params)
         emit availableCommandsUpdated(sid, u.availableCommands);
     } else if (kind == QLatin1String(SessionUpdateKind::CurrentModeUpdate)) {
         emit modeChanged(sid, u.currentModeId);
+    } else if (kind == QLatin1String(SessionUpdateKind::ConfigOptionUpdate)) {
+        emit configOptionsUpdated(sid, u.configOptions);
     } else if (kind == QLatin1String(SessionUpdateKind::UsageUpdate)) {
         emit usageUpdated(sid, u.usage);
     } else if (kind == QLatin1String(SessionUpdateKind::SessionInfoUpdate)) {

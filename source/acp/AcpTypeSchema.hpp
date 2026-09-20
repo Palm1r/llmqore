@@ -34,10 +34,27 @@ constexpr auto jsonSchema(const FileSystemCapability *)
         field("writeTextFile", &FileSystemCapability::writeTextFile));
 }
 
+constexpr auto jsonSchema(const BooleanConfigOptionCapabilities *)
+{
+    return std::make_tuple();
+}
+
+constexpr auto jsonSchema(const SessionConfigOptionsCapabilities *)
+{
+    return std::make_tuple(field("boolean", &SessionConfigOptionsCapabilities::boolean));
+}
+
+constexpr auto jsonSchema(const ClientSessionCapabilities *)
+{
+    return std::make_tuple(field("configOptions", &ClientSessionCapabilities::configOptions));
+}
+
 constexpr auto jsonSchema(const ClientCapabilities *)
 {
     return std::make_tuple(
-        field("fs", &ClientCapabilities::fs), field("terminal", &ClientCapabilities::terminal));
+        field("fs", &ClientCapabilities::fs),
+        field("terminal", &ClientCapabilities::terminal),
+        field("session", &ClientCapabilities::session));
 }
 
 constexpr auto jsonExtras(const ClientCapabilities *)
@@ -122,6 +139,22 @@ constexpr auto jsonSchema(const SessionModeState *)
         field("availableModes", &SessionModeState::availableModes));
 }
 
+constexpr auto jsonSchema(const SessionConfigSelectOption *)
+{
+    return std::make_tuple(
+        field("value", &SessionConfigSelectOption::value),
+        field("name", &SessionConfigSelectOption::name),
+        omitEmpty("description", &SessionConfigSelectOption::description));
+}
+
+constexpr auto jsonSchema(const SessionConfigSelectGroup *)
+{
+    return std::make_tuple(
+        field("group", &SessionConfigSelectGroup::group),
+        field("name", &SessionConfigSelectGroup::name),
+        field("options", &SessionConfigSelectGroup::options));
+}
+
 constexpr auto jsonSchema(const NewSessionParams *)
 {
     return std::make_tuple(
@@ -134,7 +167,8 @@ constexpr auto jsonSchema(const NewSessionResult *)
 {
     return std::make_tuple(
         field("sessionId", &NewSessionResult::sessionId),
-        field("modes", &NewSessionResult::modes));
+        field("modes", &NewSessionResult::modes),
+        omitEmpty("configOptions", &NewSessionResult::configOptions));
 }
 
 constexpr auto jsonExtras(const NewSessionResult *)

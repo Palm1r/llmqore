@@ -90,6 +90,36 @@ FileSystemCapability FileSystemCapability::fromJson(const QJsonObject &obj)
     return Json::fromJson<FileSystemCapability>(obj);
 }
 
+QJsonObject BooleanConfigOptionCapabilities::toJson() const
+{
+    return Json::toJson(*this);
+}
+
+BooleanConfigOptionCapabilities BooleanConfigOptionCapabilities::fromJson(const QJsonObject &obj)
+{
+    return Json::fromJson<BooleanConfigOptionCapabilities>(obj);
+}
+
+QJsonObject SessionConfigOptionsCapabilities::toJson() const
+{
+    return Json::toJson(*this);
+}
+
+SessionConfigOptionsCapabilities SessionConfigOptionsCapabilities::fromJson(const QJsonObject &obj)
+{
+    return Json::fromJson<SessionConfigOptionsCapabilities>(obj);
+}
+
+QJsonObject ClientSessionCapabilities::toJson() const
+{
+    return Json::toJson(*this);
+}
+
+ClientSessionCapabilities ClientSessionCapabilities::fromJson(const QJsonObject &obj)
+{
+    return Json::fromJson<ClientSessionCapabilities>(obj);
+}
+
 QJsonObject ClientCapabilities::toJson() const
 {
     return Json::toJson(*this);
@@ -248,6 +278,89 @@ QJsonObject SessionModeState::toJson() const
 SessionModeState SessionModeState::fromJson(const QJsonObject &obj)
 {
     return Json::fromJson<SessionModeState>(obj);
+}
+
+QJsonObject SessionConfigSelectOption::toJson() const
+{
+    return Json::toJson(*this);
+}
+
+SessionConfigSelectOption SessionConfigSelectOption::fromJson(const QJsonObject &obj)
+{
+    return Json::fromJson<SessionConfigSelectOption>(obj);
+}
+
+QJsonObject SessionConfigSelectGroup::toJson() const
+{
+    return Json::toJson(*this);
+}
+
+SessionConfigSelectGroup SessionConfigSelectGroup::fromJson(const QJsonObject &obj)
+{
+    return Json::fromJson<SessionConfigSelectGroup>(obj);
+}
+
+QJsonObject SessionConfigOption::toJson() const
+{
+    QJsonObject o{{"id", id}, {"name", name}, {"type", type}};
+    if (!description.isEmpty())
+        o.insert("description", description);
+    if (!category.isEmpty())
+        o.insert("category", category);
+    if (type == QLatin1String("boolean"))
+        o.insert("currentValue", enabled);
+    else
+        o.insert("currentValue", value);
+    if (!options.isEmpty()) {
+        QJsonArray arr;
+        for (const SessionConfigSelectOption &v : options)
+            arr.append(v.toJson());
+        o.insert("options", arr);
+    } else if (!groups.isEmpty()) {
+        QJsonArray arr;
+        for (const SessionConfigSelectGroup &g : groups)
+            arr.append(g.toJson());
+        o.insert("options", arr);
+    }
+    return o;
+}
+
+SessionConfigOption SessionConfigOption::fromJson(const QJsonObject &obj)
+{
+    SessionConfigOption o;
+    o.id = obj.value("id").toString();
+    o.name = obj.value("name").toString();
+    o.description = obj.value("description").toString();
+    o.category = obj.value("category").toString();
+    o.type = obj.value("type").toString();
+    if (o.type == QLatin1String("boolean"))
+        o.enabled = obj.value("currentValue").toBool();
+    else
+        o.value = obj.value("currentValue").toString();
+    for (const QJsonValue &v : obj.value("options").toArray()) {
+        const QJsonObject entry = v.toObject();
+        if (entry.contains("options"))
+            o.groups.append(SessionConfigSelectGroup::fromJson(entry));
+        else
+            o.options.append(SessionConfigSelectOption::fromJson(entry));
+    }
+    return o;
+}
+
+QJsonArray configOptionsToJson(const QList<SessionConfigOption> &options)
+{
+    QJsonArray arr;
+    for (const SessionConfigOption &o : options)
+        arr.append(o.toJson());
+    return arr;
+}
+
+QList<SessionConfigOption> configOptionsFromJson(const QJsonArray &arr)
+{
+    QList<SessionConfigOption> options;
+    for (const QJsonValue &v : arr)
+        options.append(SessionConfigOption::fromJson(v.toObject()));
+    return options;
 }
 
 QJsonObject NewSessionParams::toJson() const
@@ -487,6 +600,8 @@ QJsonObject SessionUpdate::toJson() const
         o.insert("availableCommands", arr);
     } else if (sessionUpdate == QLatin1String(SessionUpdateKind::CurrentModeUpdate)) {
         o.insert("currentModeId", currentModeId);
+    } else if (sessionUpdate == QLatin1String(SessionUpdateKind::ConfigOptionUpdate)) {
+        o.insert("configOptions", configOptionsToJson(configOptions));
     } else if (sessionUpdate == QLatin1String(SessionUpdateKind::UsageUpdate)) {
         for (auto it = usage.constBegin(); it != usage.constEnd(); ++it)
             o.insert(it.key(), it.value());
@@ -515,6 +630,7 @@ SessionUpdate SessionUpdate::fromJson(const QJsonObject &obj)
     for (const QJsonValue &v : obj.value("availableCommands").toArray())
         u.availableCommands.append(AvailableCommand::fromJson(v.toObject()));
     u.currentModeId = obj.value("currentModeId").toString();
+    u.configOptions = configOptionsFromJson(obj.value("configOptions").toArray());
     if (u.sessionUpdate == QLatin1String(SessionUpdateKind::UsageUpdate)) {
         u.usage = obj;
         u.usage.remove(QStringLiteral("sessionUpdate"));
