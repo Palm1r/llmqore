@@ -18,8 +18,10 @@ static QThread *ObjectToolsAdapterThread()
         thread->setObjectName("ObjectToolsAdapterThread");
 
         auto cleanup = [=]() {
-            thread->quit();
-            thread->wait();
+            if (thread->isRunning()) {
+                thread->quit();
+                thread->wait();
+            }
         };
 
         QObject::connect(qApp, &QCoreApplication::destroyed, thread, cleanup);
@@ -85,7 +87,8 @@ ObjectMethodTool::ObjectMethodTool(const QString &toolPrefix, const QMetaMethod 
     }
 
     // Lookup Q_CLASS_INFO for displayName and description
-    for (int i = metaObject->classInfoOffset(); i < metaObject->classInfoCount(); ++i) {
+    for (int i = QObject::staticMetaObject.classInfoOffset(); i < metaObject->classInfoCount();
+         ++i) {
         const QMetaClassInfo classInfo = metaObject->classInfo(i);
         const QString classInfoName = QString::fromLatin1(classInfo.name());
 
@@ -191,7 +194,7 @@ static ToolResult invokeMethod(QObject *object, const QString &objectName,
                                 args.value(6), args.value(7), args.value(8), args.value(9));
     } else {
         QMetaType returnType = method.returnMetaType();
-        void *returnData(returnType.create());
+        void *returnData = returnType.create();
 
         QGenericReturnArgument returnArg(returnType.name(), returnData);
         invoked = method.invoke(object, Qt::BlockingQueuedConnection, returnArg, args.value(0),
@@ -211,6 +214,15 @@ static ToolResult invokeMethod(QObject *object, const QString &objectName,
 
     if (response.userType() == QMetaType::QString)
         return ToolResult::text(response.toString());
+
+    if (response.userType() == QMetaType::QStringList) {
+        const QStringList list = response.toStringList();
+        ToolResult r;
+        for (const QString &s : list) {
+            r.content.append(TextContent { s });
+        }
+        return r;
+    }
 
     if (response.userType() == QMetaType::QJsonObject) {
         ToolResult r;
