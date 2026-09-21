@@ -187,7 +187,7 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(publicMethod->description(), "Calls the method publicMethod on TestObject");
     EXPECT_EQ(publicMethod->parametersSchema(),
               QJsonObject({ { "type", "object" },
-                            { "properties", QJsonObject { { "text", "string" } } },
+                            { "properties", QJsonObject { { "text", QJsonObject { { "type", "string" } } } } },
                             { "required", QJsonArray { "text" } } }));
     EXPECT_EQ(publicMethod->safety(), ToolSafety::ReadOnly);
 
@@ -200,7 +200,7 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(
             addNumbers->parametersSchema(),
             QJsonObject({ { "type", "object" },
-                          { "properties", QJsonObject { { "a", "integer" }, { "b", "integer" } } },
+                          { "properties", QJsonObject { { "a", QJsonObject { { "type", "integer" } } }, { "b", QJsonObject { { "type", "integer" } } } } },
                           { "required", QJsonArray { "a", "b" } } }));
     EXPECT_EQ(addNumbers->safety(), ToolSafety::ReadOnly);
 
@@ -227,7 +227,7 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
             QJsonObject({ { "type", "object" },
                           { "properties",
                             QJsonObject {
-                                    { "a", "integer" }, { "b", "integer" }, { "c", "integer" } } },
+                                    { "a", QJsonObject { { "type", "integer" } } }, { "b", QJsonObject { { "type", "integer" } } }, { "c", QJsonObject { { "type", "integer" } } } } },
                           { "required", QJsonArray { "a", "b", "c" } } }));
     EXPECT_EQ(calculateSum->safety(), ToolSafety::ReadOnly);
 
@@ -240,9 +240,9 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(generateImage->parametersSchema(),
               QJsonObject({ { "type", "object" },
                             { "properties",
-                              QJsonObject { { "style", "string" },
-                                            { "width", "integer" },
-                                            { "height", "integer" } } },
+                              QJsonObject { { "style", QJsonObject { { "type", "string" } } },
+                                            { "width", QJsonObject { { "type", "integer" } } },
+                                            { "height", QJsonObject { { "type", "integer" } } } } },
                             { "required", QJsonArray { "style", "width", "height" } } }));
     EXPECT_EQ(generateImage->safety(), ToolSafety::ReadOnly);
 
@@ -255,7 +255,7 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(generateAudio->parametersSchema(),
               QJsonObject({ { "type", "object" },
                             { "properties",
-                              QJsonObject { { "duration", "integer" }, { "format", "string" } } },
+                              QJsonObject { { "duration", QJsonObject { { "type", "integer" } } }, { "format", QJsonObject { { "type", "string" } } } } },
                             { "required", QJsonArray { "duration", "format" } } }));
     EXPECT_EQ(generateAudio->safety(), ToolSafety::ReadOnly);
 
@@ -269,7 +269,7 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(getResourceLink->parametersSchema(),
               QJsonObject({ { "type", "object" },
                             { "properties",
-                              QJsonObject { { "filename", "string" }, { "category", "string" } } },
+                              QJsonObject { { "filename", QJsonObject { { "type", "string" } } }, { "category", QJsonObject { { "type", "string" } } } } },
                             { "required", QJsonArray { "filename", "category" } } }));
     EXPECT_EQ(getResourceLink->safety(), ToolSafety::ReadOnly);
 
@@ -281,7 +281,7 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(publicSlot->description(), "Calls the method publicSlot on TestObject");
     EXPECT_EQ(publicSlot->parametersSchema(),
               QJsonObject({ { "type", "object" },
-                            { "properties", QJsonObject { { "text", "string" } } },
+                            { "properties", QJsonObject { { "text", QJsonObject { { "type", "string" } } } } },
                             { "required", QJsonArray { "text" } } }));
     EXPECT_EQ(publicSlot->safety(), ToolSafety::ReadOnly);
 
@@ -294,7 +294,7 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(transformText->parametersSchema(),
               QJsonObject({ { "type", "object" },
                             { "properties",
-                              QJsonObject { { "text", "string" }, { "uppercase", "boolean" } } },
+                              QJsonObject { { "text", QJsonObject { { "type", "string" } } }, { "uppercase", QJsonObject { { "type", "boolean" } } } } },
                             { "required", QJsonArray { "text", "uppercase" } } }));
     EXPECT_EQ(transformText->safety(), ToolSafety::ReadOnly);
 
@@ -331,7 +331,7 @@ TEST_F(ObjectToolsAdapterTest, RegisterPublicMethodsWithPrefixAsTool)
             QJsonObject({ { "type", "object" },
                           { "properties",
                             QJsonObject {
-                                    { "a", "integer" }, { "b", "integer" }, { "c", "integer" } } },
+                                    { "a", QJsonObject { { "type", "integer" } } }, { "b", QJsonObject { { "type", "integer" } } }, { "c", QJsonObject { { "type", "integer" } } } } },
                           { "required", QJsonArray { "a", "b", "c" } } }));
     EXPECT_EQ(calculateSum->safety(), ToolSafety::ReadOnly);
 
@@ -343,9 +343,9 @@ TEST_F(ObjectToolsAdapterTest, RegisterPublicMethodsWithPrefixAsTool)
     EXPECT_EQ(generateImage->parametersSchema(),
               QJsonObject({ { "type", "object" },
                             { "properties",
-                              QJsonObject { { "style", "string" },
-                                            { "width", "integer" },
-                                            { "height", "integer" } } },
+                              QJsonObject { { "style", QJsonObject { { "type", "string" } } },
+                                            { "width", QJsonObject { { "type", "integer" } } },
+                                            { "height", QJsonObject { { "type", "integer" } } } } },
                             { "required", QJsonArray { "style", "width", "height" } } }));
     EXPECT_EQ(generateImage->safety(), ToolSafety::ReadOnly);
 
@@ -357,7 +357,7 @@ TEST_F(ObjectToolsAdapterTest, RegisterPublicMethodsWithPrefixAsTool)
     EXPECT_EQ(generateAudio->parametersSchema(),
               QJsonObject({ { "type", "object" },
                             { "properties",
-                              QJsonObject { { "duration", "integer" }, { "format", "string" } } },
+                              QJsonObject { { "duration", QJsonObject { { "type", "integer" } } }, { "format", QJsonObject { { "type", "string" } } } } },
                             { "required", QJsonArray { "duration", "format" } } }));
     EXPECT_EQ(generateAudio->safety(), ToolSafety::ReadOnly);
 
@@ -369,7 +369,7 @@ TEST_F(ObjectToolsAdapterTest, RegisterPublicMethodsWithPrefixAsTool)
     EXPECT_EQ(getResourceLink->parametersSchema(),
               QJsonObject({ { "type", "object" },
                             { "properties",
-                              QJsonObject { { "filename", "string" }, { "category", "string" } } },
+                              QJsonObject { { "filename", QJsonObject { { "type", "string" } } }, { "category", QJsonObject { { "type", "string" } } } } },
                             { "required", QJsonArray { "filename", "category" } } }));
     EXPECT_EQ(getResourceLink->safety(), ToolSafety::ReadOnly);
 
@@ -381,7 +381,7 @@ TEST_F(ObjectToolsAdapterTest, RegisterPublicMethodsWithPrefixAsTool)
     EXPECT_EQ(transformText->parametersSchema(),
               QJsonObject({ { "type", "object" },
                             { "properties",
-                              QJsonObject { { "text", "string" }, { "uppercase", "boolean" } } },
+                              QJsonObject { { "text", QJsonObject { { "type", "string" } } }, { "uppercase", QJsonObject { { "type", "boolean" } } } } },
                             { "required", QJsonArray { "text", "uppercase" } } }));
     EXPECT_EQ(transformText->safety(), ToolSafety::ReadOnly);
 

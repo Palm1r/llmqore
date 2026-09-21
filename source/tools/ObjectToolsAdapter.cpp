@@ -116,26 +116,26 @@ ObjectMethodTool::ObjectMethodTool(const QString &toolPrefix, const QMetaMethod 
         allParameterNames << parameterName;
         switch (paramType) {
         case QMetaType::Int:
-            properties.insert(parameterName, QStringLiteral("integer"));
+            properties.insert(parameterName, QJsonObject { { "type", "integer" } });
             break;
         case QMetaType::Double:
-            properties.insert(parameterName, QStringLiteral("number"));
+            properties.insert(parameterName, QJsonObject { { "type", "number" } });
             break;
         case QMetaType::QString:
-            properties.insert(parameterName, QStringLiteral("string"));
+            properties.insert(parameterName, QJsonObject { { "type", "string" } });
             break;
         case QMetaType::Bool:
-            properties.insert(parameterName, QStringLiteral("boolean"));
+            properties.insert(parameterName, QJsonObject { { "type", "boolean" } });
             break;
         case QMetaType::QJsonObject:
-            properties.insert(parameterName, QStringLiteral("object"));
+            properties.insert(parameterName, QJsonObject { { "type", "object" } });
             break;
         case QMetaType::QJsonArray:
         case QMetaType::QStringList:
-            properties.insert(parameterName, QStringLiteral("array"));
+            properties.insert(parameterName, QJsonObject { { "type", "array" } });
             break;
         default:
-            properties.insert(parameterName, QStringLiteral("unknown"));
+            properties.insert(parameterName, QJsonObject { { "type", "unknown" } });
             break;
         }
     }
