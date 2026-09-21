@@ -293,7 +293,7 @@ QList<BaseTool *> ObjectToolsAdapter::registerTools(ToolRegistry *toolRegistry, 
     return ret;
 }
 
-ObjectToolsAdapter *ObjectToolsAdapter::create(QObject *object)
+ObjectToolsAdapter *ObjectToolsAdapter::create(QObject *object, const QVariantMap &props)
 {
     if (object == nullptr)
         return nullptr; // There has to be an object
@@ -315,6 +315,15 @@ ObjectToolsAdapter *ObjectToolsAdapter::create(QObject *object)
     }
 
     guard.dismiss();
+
+    if (!props.isEmpty()) {
+        auto it = props.constBegin();
+        auto end = props.constEnd();
+        while (it != end) {
+            object->setProperty(qPrintable(it.key()), it.value());
+            ++it;
+        }
+    }
 
     QThread *thread = ObjectToolsAdapterThread();
     QList<ObjectToolsAdapter *> adapters = thread->findChildren<ObjectToolsAdapter *>();

@@ -24,9 +24,9 @@ public:
     };
 
     template<class T>
-    static ObjectToolsAdapter *create()
+    static ObjectToolsAdapter *create(const QVariantMap &props = QVariantMap())
     {
-        return create(new T());
+        return create(new T(), props);
     }
 
     virtual ~ObjectToolsAdapter() override;
@@ -38,7 +38,7 @@ public:
                                     const QString &toolPrefix = QString());
 
 private:
-    static ObjectToolsAdapter *create(QObject *object);
+    static ObjectToolsAdapter *create(QObject *object, const QVariantMap &props = QVariantMap());
 
     explicit ObjectToolsAdapter(QObject *object);
 

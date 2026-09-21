@@ -22,7 +22,11 @@ class TestObject : public QObject
     Q_OBJECT
 
 public:
+    Q_PROPERTY(QString topic MEMBER m_topic)
+    QString m_topic = "default";
+
     // Methods without tool_ prefix
+    Q_INVOKABLE QString getTopic() const { return m_topic; }
     Q_INVOKABLE QString publicMethod(const QString &text) { return "Result: " + text; }
     Q_INVOKABLE int addNumbers(int a, int b) { return a + b; }
     Q_INVOKABLE bool returnBool() { return true; }
@@ -160,8 +164,20 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     ToolRegistry registry;
     auto tools = adapter->registerTools(&registry, ObjectToolsAdapter::AllPublic);
 
-    // Should find all 9 public methods
-    EXPECT_EQ(tools.size(), 9);
+    // Should find all 10 public methods
+    EXPECT_EQ(tools.size(), 10);
+
+    // QString getTopic() const
+    auto *getTopic = registry.tool("getTopic");
+    ASSERT_NE(getTopic, nullptr);
+    EXPECT_EQ(getTopic->id(), "getTopic");
+    EXPECT_EQ(getTopic->displayName(), "getTopic");
+    EXPECT_EQ(getTopic->description(), "Calls the method getTopic on TestObject");
+    EXPECT_EQ(getTopic->parametersSchema(),
+              QJsonObject({ { "type", "object" },
+                            { "properties", QJsonObject {} },
+                            { "required", QJsonArray {} } }));
+    EXPECT_EQ(getTopic->safety(), ToolSafety::ReadOnly);
 
     // QString publicMethod(const QString &text)
     auto *publicMethod = registry.tool("publicMethod");
@@ -469,7 +485,8 @@ TEST_F(ObjectToolsAdapterTest, CheckToolCalling)
 {
     // Adapter should be created in the main thread, but the object should be moved to a separate
     // thread
-    auto *adapter = ObjectToolsAdapter::create<TestObject>();
+    const QVariantMap props = { { "topic", "Test Topic" } };
+    auto *adapter = ObjectToolsAdapter::create<TestObject>(props);
     ASSERT_NE(adapter, nullptr);
 
     auto *obj = adapter->object();
@@ -492,6 +509,11 @@ TEST_F(ObjectToolsAdapterTest, CheckToolCalling)
     };
 
     TestObject testObject;
+
+    // Test Q_INVOKABLE QString getTopic() const call
+    auto getTopicResult = testFn("getTopic", QJsonObject());
+    EXPECT_TRUE(std::get<TextContent>(getTopicResult)
+                == TextContent { props.begin().value().toString() });
 
     // Test Q_INVOKABLE QString publicMethod(const QString &text) call
     auto publicMethodResult = testFn("publicMethod", QJsonObject({ { "text", "hello" } }));
