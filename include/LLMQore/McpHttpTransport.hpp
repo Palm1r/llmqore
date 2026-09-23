@@ -47,7 +47,7 @@ public:
     bool isOpen() const override;
     void send(const QJsonObject &message) override;
 
-    const HttpTransportConfig &config() const;
+    [[nodiscard]] const HttpTransportConfig &config() const;
     [[nodiscard]] QString sessionId() const;
 
 private:
@@ -70,7 +70,7 @@ public:
     bool isOpen() const override;
     void send(const QJsonObject &message) override;
 
-    const HttpTransportConfig &config() const;
+    [[nodiscard]] const HttpTransportConfig &config() const;
 
 private:
     struct Impl;
