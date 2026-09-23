@@ -415,8 +415,6 @@ TEST(OpenAIResponsesMessage, UnknownEventTypesAreIgnored)
     EXPECT_TRUE(msg.currentBlocks().isEmpty());
 }
 
-// --- the buffered path replays whole output items through the same code ---
-
 TEST(OpenAIResponsesMessage, BufferedResponseCollectsMessageText)
 {
     OpenAIResponsesMessage msg;
@@ -494,8 +492,6 @@ TEST(OpenAIResponsesMessage, BufferedResponseWithoutAStatusLeavesTheTurnOpen)
     EXPECT_FALSE(effects.toolsReady);
     EXPECT_EQ(msg.state(), MessageState::Building);
 }
-
-// --- serialization is unchanged by the dispatch move ---
 
 TEST(OpenAIResponsesMessage, ToItemsFormat_TextOnly)
 {
@@ -652,7 +648,6 @@ TEST(OpenAIResponsesMessage, StartNewContinuationDropsTheCorrelationTable)
     EXPECT_FALSE(msg.hasThinkingContent());
     EXPECT_TRUE(msg.accumulatedText().isEmpty());
 
-    // item_1 belonged to the previous turn: its arguments must not resurrect it.
     toolArgumentsDelta(msg, "item_1", R"({"stale":1})");
     EXPECT_TRUE(msg.currentToolUseContent().isEmpty());
 }

@@ -352,8 +352,6 @@ TEST(AskOnce, PromptRequestReturnsTheOneTurnConversationItBuilt)
 
     ASSERT_TRUE(future.isFinished());
 
-    // A bare prompt is a one-turn conversation, so the round trip comes back
-    // like any other: the caller can hand it straight to the next ask().
     const Conversation conversation = future.result().conversation;
     ASSERT_EQ(conversation.turns().size(), 2);
     EXPECT_EQ(conversation.turns()[0].role, TurnRole::User);

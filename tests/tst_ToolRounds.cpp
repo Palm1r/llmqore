@@ -547,8 +547,6 @@ TEST(ToolRounds, BufferedToolCallsProduceTheSameContinuationAsTheEquivalentStrea
     EXPECT_EQ(fromBuffered.value("tools"), fromStream.value("tools"));
 }
 
-// --- T27: a full tool round through the transport seam, once per continuation shape ---
-
 namespace {
 
 QJsonArray continuationMessages(const QJsonObject &payload, const QString &key)
@@ -703,8 +701,6 @@ TEST(ToolRounds, OllamaRunsAFullRoundOverJsonLines)
     ASSERT_GE(messages.size(), 2);
     EXPECT_EQ(messages.last().toObject().value("role").toString(), QStringLiteral("tool"));
 }
-
-// --- T27 step 2: the buffered path, once per provider that implements it ---
 
 namespace {
 

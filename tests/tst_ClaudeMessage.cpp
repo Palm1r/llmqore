@@ -277,8 +277,6 @@ TEST(ClaudeMessage, BlockStopForABlockWithoutToolInputIsHarmless)
     EXPECT_EQ(msg.currentBlocks().size(), 1);
 }
 
-// --- the buffered path replays whole blocks through the same code ---
-
 TEST(ClaudeMessage, BufferedResponseCollectsTextIntoOneChunk)
 {
     ClaudeMessage msg;
@@ -357,8 +355,6 @@ TEST(ClaudeMessage, BufferedResponseStartsANewTurn)
     ASSERT_NE(block, nullptr);
     EXPECT_EQ(block->text, "fresh");
 }
-
-// --- serialization is unchanged by the dispatch move ---
 
 TEST(ClaudeMessage, ToProviderFormat_TextOnly)
 {

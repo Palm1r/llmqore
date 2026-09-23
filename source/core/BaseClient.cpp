@@ -33,9 +33,6 @@ namespace LLMQore {
 
 namespace {
 
-// One request frames its bytes one way. Carrying both framers meant every request
-// paid for the one it never used, and both parser headers leaked into the public
-// BaseClient.hpp for the sake of a member nobody but Ollama reads.
 struct DataBuffers
 {
     std::variant<SSEParser, Rpc::LineFramer> framer;

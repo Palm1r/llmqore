@@ -118,8 +118,6 @@ protected:
         accumulator.pending.erase(it);
         const int index = accumulator.blockIndex.take(key);
 
-        // Nothing was streamed for this call: whatever the opening event carried is
-        // already the complete input, and overwriting it would empty a buffered turn.
         if (json.isEmpty())
             return;
 

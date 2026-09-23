@@ -927,8 +927,6 @@ TEST(LogCategory, AProfileCarriesItsOwnCategory)
 
 #include "tst_ReviewRegressions.moc"
 
-// --- Mistral is a profile, and it has to behave like one on the wire ---
-
 TEST(MistralProfile, StreamsTextAndReasoningThroughTheOpenAIDialect)
 {
     FakeHttpTransport transport;

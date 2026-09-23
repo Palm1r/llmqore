@@ -204,11 +204,6 @@ void OpenAIClient::processStreamChunk(const RequestID &id, const QJsonObject &ch
 
 namespace {
 
-// The buffered shape differs from the streamed one in exactly two places: the turn
-// arrives under `message` instead of `delta`, and its tool calls carry no wire `index`
-// because nothing was ever split across frames. Normalising those two makes the
-// buffered body a one-frame stream, which is the only reason the five steps below it
-// exist in a single copy.
 QJsonObject bufferedChoiceAsDelta(const QJsonObject &choice)
 {
     QJsonObject delta = choice["message"].toObject();
