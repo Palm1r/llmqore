@@ -22,8 +22,6 @@ public:
         HttpTransport *transport = nullptr,
         QObject *parent = nullptr);
 
-    using OpenAIClient::ask;
-
     QFuture<bool> isServerReady();
     QFuture<QJsonObject> serverProps();
 
