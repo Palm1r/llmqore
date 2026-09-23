@@ -7,6 +7,7 @@ target_sources(LLMQore PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/core/Log.cpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/BaseClient.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/BaseClient.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/core/ErrorEnvelope.hpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/UsageSchema.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/Usage.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/core/Usage.cpp
@@ -35,6 +36,7 @@ target_sources(LLMQore PRIVATE
 
     ${PROJECT_SOURCE_DIR}/include/LLMQore/OpenAIClient.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/clients/openai/OpenAIClient.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/clients/openai/OpenAIErrorAnnotations.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/clients/openai/OpenAIMessage.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/clients/openai/OpenAIMessage.cpp
     ${PROJECT_SOURCE_DIR}/include/LLMQore/OpenAIResponsesClient.hpp
@@ -44,7 +46,6 @@ target_sources(LLMQore PRIVATE
 
     ${PROJECT_SOURCE_DIR}/include/LLMQore/LlamaCppClient.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/clients/llamacpp/LlamaCppClient.cpp
-
 
     ${PROJECT_SOURCE_DIR}/include/LLMQore/OllamaClient.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/clients/ollama/OllamaClient.cpp

@@ -3,6 +3,10 @@
 
 #include <gtest/gtest.h>
 
+#include <functional>
+#include <memory>
+#include <vector>
+
 #include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -603,7 +607,7 @@ TEST(ToolRounds, ClaudeRunsAFullRoundAndPutsResultsInAUserTurn)
         R"(data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}})"
         "\n\n");
     pump();
-    EXPECT_EQ(completed.count(), 1);
+    EXPECT_EQ(completed.size(), 1);
 }
 
 TEST(ToolRounds, GoogleRunsAFullRoundAndUsesTheFunctionRole)
@@ -816,4 +820,457 @@ TEST(BufferedResponses, ATooluseTurnStillRunsTheRoundForEveryProvider)
     ASSERT_EQ(blocks.size(), 1);
     EXPECT_EQ(blocks[0].toObject().value("input").toObject().value("n").toInt(), 1)
         << "a buffered tool_use arrives complete; its input must survive into the replay";
+}
+
+namespace {
+
+using ClientMaker = std::function<BaseClient *(FakeHttpTransport *)>;
+
+ClientMaker claudeMaker()
+{
+    return [](FakeHttpTransport *t) -> BaseClient * {
+        return new ClaudeClient("https://fake.local", "sk-test", "claude-test", t);
+    };
+}
+
+ClientMaker openAIMaker()
+{
+    return [](FakeHttpTransport *t) -> BaseClient * {
+        return new OpenAIClient("https://fake.local/v1", "sk-test", "gpt-test", t);
+    };
+}
+
+ClientMaker googleMaker()
+{
+    return [](FakeHttpTransport *t) -> BaseClient * {
+        return new GoogleAIClient("https://fake.local", "key", "gemini-test", t);
+    };
+}
+
+ClientMaker ollamaMaker()
+{
+    return [](FakeHttpTransport *t) -> BaseClient * {
+        return new OllamaClient("https://fake.local", {}, "llama-test", t);
+    };
+}
+
+ClientMaker responsesMaker()
+{
+    return [](FakeHttpTransport *t) -> BaseClient * {
+        return new OpenAIResponsesClient("https://fake.local/v1", "sk-test", "gpt-test", t);
+    };
+}
+
+struct TwoRoundCase
+{
+    const char *provider;
+    ClientMaker make;
+    QByteArray toolRound;
+    QByteArray finalRound;
+};
+
+std::vector<TwoRoundCase> streamedTextAroundATool()
+{
+    return {
+        {"Claude",
+         claudeMaker(),
+         R"(data: {"type":"message_start","message":{"role":"assistant"}})"
+         "\n\n"
+         R"(data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})"
+         "\n\n"
+         R"(data: {"type":"content_block_delta","index":0,)"
+         R"("delta":{"type":"text_delta","text":"Let me check. "}})"
+         "\n\n"
+         R"(data: {"type":"content_block_stop","index":0})"
+         "\n\n"
+         R"(data: {"type":"content_block_start","index":1,)"
+         R"("content_block":{"type":"tool_use","id":"toolu_1","name":"echo","input":{}}})"
+         "\n\n"
+         R"(data: {"type":"content_block_stop","index":1})"
+         "\n\n"
+         R"(data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}})"
+         "\n\n",
+         R"(data: {"type":"message_start","message":{"role":"assistant"}})"
+         "\n\n"
+         R"(data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})"
+         "\n\n"
+         R"(data: {"type":"content_block_delta","index":0,)"
+         R"("delta":{"type":"text_delta","text":"Answer."}})"
+         "\n\n"
+         R"(data: {"type":"content_block_stop","index":0})"
+         "\n\n"
+         R"(data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}})"
+         "\n\n"},
+        {"OpenAI",
+         openAIMaker(),
+         R"(data: {"choices":[{"delta":{"content":"Let me check. "}}]})"
+         "\n\n"
+         R"(data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1",)"
+         R"("function":{"name":"echo","arguments":"{}"}}]}}]})"
+         "\n\n"
+         R"(data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]})"
+         "\n\n"
+         "data: [DONE]\n\n",
+         finalTurn("Answer.")},
+        {"Google",
+         googleMaker(),
+         R"(data: {"candidates":[{"content":{"parts":[{"text":"Let me check. "}]}}]})"
+         "\n\n"
+         R"(data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"echo","args":{}}}]},)"
+         R"("finishReason":"STOP"}]})"
+         "\n\n",
+         R"(data: {"candidates":[{"content":{"parts":[{"text":"Answer."}]},"finishReason":"STOP"}]})"
+         "\n\n"},
+        {"Ollama",
+         ollamaMaker(),
+         R"({"message":{"role":"assistant","content":"Let me check. "},"done":false})"
+         "\n"
+         R"({"message":{"role":"assistant","content":"",)"
+         R"("tool_calls":[{"function":{"name":"echo","arguments":{}}}]},"done":false})"
+         "\n"
+         R"({"message":{"role":"assistant","content":""},"done":true,"done_reason":"stop"})"
+         "\n",
+         R"({"message":{"role":"assistant","content":"Answer."},"done":false})"
+         "\n"
+         R"({"message":{"role":"assistant","content":""},"done":true,"done_reason":"stop"})"
+         "\n"},
+        {"Responses",
+         responsesMaker(),
+         "event: response.output_text.delta\n"
+         R"(data: {"delta":"Let me check. "})"
+         "\n\n"
+         "event: response.output_text.done\n"
+         R"(data: {"text":"Let me check. "})"
+         "\n\n"
+         "event: response.output_item.added\n"
+         R"(data: {"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"echo"}})"
+         "\n\n"
+         "event: response.function_call_arguments.done\n"
+         R"(data: {"item_id":"fc_1","arguments":"{}"})"
+         "\n\n"
+         "event: response.completed\n"
+         R"(data: {"response":{"status":"completed","output":[]}})"
+         "\n\n",
+         "event: response.output_text.delta\n"
+         R"(data: {"delta":"Answer."})"
+         "\n\n"
+         "event: response.output_text.done\n"
+         R"(data: {"text":"Answer."})"
+         "\n\n"
+         "event: response.completed\n"
+         R"(data: {"response":{"status":"completed","output":[]}})"
+         "\n\n"},
+    };
+}
+
+std::vector<TwoRoundCase> bufferedTextAroundATool()
+{
+    return {
+        {"Claude",
+         claudeMaker(),
+         R"({"content":[{"type":"text","text":"Let me check. "},)"
+         R"({"type":"tool_use","id":"toolu_1","name":"echo","input":{}}],"stop_reason":"tool_use"})",
+         R"({"content":[{"type":"text","text":"Answer."}],"stop_reason":"end_turn"})"},
+        {"OpenAI",
+         openAIMaker(),
+         R"({"choices":[{"message":{"role":"assistant","content":"Let me check. ",)"
+         R"("tool_calls":[{"id":"call_1","type":"function",)"
+         R"("function":{"name":"echo","arguments":"{}"}}]},"finish_reason":"tool_calls"}]})",
+         R"({"choices":[{"message":{"role":"assistant","content":"Answer."},)"
+         R"("finish_reason":"stop"}]})"},
+        {"Google",
+         googleMaker(),
+         R"({"candidates":[{"content":{"parts":[{"text":"Let me check. "},)"
+         R"({"functionCall":{"name":"echo","args":{}}}]},"finishReason":"STOP"}]})",
+         R"({"candidates":[{"content":{"parts":[{"text":"Answer."}]},"finishReason":"STOP"}]})"},
+        {"Ollama",
+         ollamaMaker(),
+         R"({"message":{"role":"assistant","content":"Let me check. ",)"
+         R"("tool_calls":[{"function":{"name":"echo","arguments":{}}}]},)"
+         R"("done":true,"done_reason":"stop"})",
+         R"({"message":{"role":"assistant","content":"Answer."},"done":true,"done_reason":"stop"})"},
+        {"Responses",
+         responsesMaker(),
+         R"({"status":"completed","output":[{"type":"message","role":"assistant",)"
+         R"("content":[{"type":"output_text","text":"Let me check. "}]},)"
+         R"({"type":"function_call","id":"fc_1","call_id":"call_1","name":"echo",)"
+         R"("arguments":"{}"}]})",
+         R"({"status":"completed","output":[{"type":"message","role":"assistant",)"
+         R"("content":[{"type":"output_text","text":"Answer."}]}]})"},
+    };
+}
+
+struct AnswerRecorder
+{
+    QString joinedChunks;
+    QString lastAccumulated;
+    QString completedText;
+    CompletionInfo info;
+    int completed = 0;
+    int failed = 0;
+    QString failure;
+
+    void watch(BaseClient *client)
+    {
+        QObject::connect(
+            client, &BaseClient::chunkReceived, client, [this](const RequestID &, const QString &c) {
+                joinedChunks += c;
+            });
+        QObject::connect(
+            client,
+            &BaseClient::accumulatedReceived,
+            client,
+            [this](const RequestID &, const QString &a) { lastAccumulated = a; });
+        QObject::connect(
+            client,
+            &BaseClient::requestCompleted,
+            client,
+            [this](const RequestID &, const QString &t) {
+                ++completed;
+                completedText = t;
+            });
+        QObject::connect(
+            client,
+            &BaseClient::requestFinalized,
+            client,
+            [this](const RequestID &, const CompletionInfo &i) { info = i; });
+        QObject::connect(
+            client, &BaseClient::requestFailed, client, [this](const RequestID &, const QString &e) {
+                ++failed;
+                failure = e;
+            });
+    }
+};
+
+void expectTheWholeAnswer(const AnswerRecorder &recorder)
+{
+    const QString whole = QStringLiteral("Let me check. Answer.");
+    EXPECT_EQ(recorder.completed, 1);
+    EXPECT_EQ(recorder.joinedChunks, whole);
+    EXPECT_EQ(recorder.lastAccumulated, whole) << "accumulatedReceived carries the answer so far";
+    EXPECT_EQ(recorder.completedText, whole);
+    EXPECT_EQ(recorder.info.fullText, whole);
+
+    const QList<Turn> turns = recorder.info.conversation.turns();
+    ASSERT_FALSE(turns.isEmpty());
+    EXPECT_EQ(turns.last().text(), QStringLiteral("Answer."))
+        << "the conversation still records each round as its own turn";
+}
+
+} // namespace
+
+TEST(ToolRounds, TextBeforeAToolCallStaysInTheAnswerForEveryProvider)
+{
+    for (const TwoRoundCase &round : streamedTextAroundATool()) {
+        SCOPED_TRACE(round.provider);
+
+        FakeHttpTransport transport;
+        std::unique_ptr<BaseClient> client(round.make(&transport));
+        client->tools()->addTool(new CountingTool(client.get()));
+        AnswerRecorder recorder;
+        recorder.watch(client.get());
+
+        client->ask(oneUserTurn(QStringLiteral("go")));
+        ASSERT_EQ(transport.streamCount(), 1);
+        transport.lastStream()->sendAll(round.toolRound);
+        ASSERT_TRUE(LLMQoreTest::waitForStreams(transport, 2)) << "the round did not continue";
+        transport.lastStream()->sendAll(round.finalRound);
+        pump();
+
+        expectTheWholeAnswer(recorder);
+    }
+}
+
+TEST(BufferedResponses, TextBeforeAToolCallStaysInTheAnswerForEveryProvider)
+{
+    for (const TwoRoundCase &round : bufferedTextAroundATool()) {
+        SCOPED_TRACE(round.provider);
+
+        FakeHttpTransport transport;
+        std::unique_ptr<BaseClient> client(round.make(&transport));
+        client->tools()->addTool(new CountingTool(client.get()));
+        AnswerRecorder recorder;
+        recorder.watch(client.get());
+
+        client->ask(oneUserTurn(QStringLiteral("go")), {}, RequestMode::Buffered);
+        ASSERT_EQ(transport.bufferedCount(), 1);
+        transport.respondTo(0, 200, round.toolRound);
+        pump();
+        ASSERT_EQ(transport.bufferedCount(), 2) << "the buffered round did not continue";
+        transport.respondTo(1, 200, round.finalRound);
+        pump();
+
+        expectTheWholeAnswer(recorder);
+    }
+}
+
+namespace {
+
+struct StreamErrorCase
+{
+    const char *name;
+    ClientMaker make;
+    QByteArray stream;
+    QString error;
+};
+
+std::vector<StreamErrorCase> streamErrorCases()
+{
+    return {
+        {"Claude error event",
+         claudeMaker(),
+         R"(data: {"type":"message_start","message":{"role":"assistant"}})"
+         "\n\n"
+         R"(data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}})"
+         "\n\n"
+         R"(data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"par"}})"
+         "\n\n"
+         "event: error\n"
+         R"(data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}})"
+         "\n\n",
+         QStringLiteral("Overloaded (overloaded_error)")},
+        {"Claude error before message_start",
+         claudeMaker(),
+         "event: error\n"
+         R"(data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}})"
+         "\n\n",
+         QStringLiteral("Overloaded (overloaded_error)")},
+        {"OpenAI error chunk",
+         openAIMaker(),
+         R"(data: {"choices":[{"delta":{"content":"par"}}]})"
+         "\n\n"
+         R"(data: {"error":{"message":"boom","type":"server_error"}})"
+         "\n\n",
+         QStringLiteral("boom (type: server_error)")},
+        {"Google error object",
+         googleMaker(),
+         R"(data: {"candidates":[{"content":{"parts":[{"text":"par"}]}}]})"
+         "\n\n"
+         R"(data: {"error":{"code":500,"message":"boom","status":"INTERNAL"}})"
+         "\n\n",
+         QStringLiteral("boom (code: 500) (status: INTERNAL)")},
+        {"Responses error event",
+         responsesMaker(),
+         "event: response.output_text.delta\n"
+         R"(data: {"delta":"par"})"
+         "\n\n"
+         "event: error\n"
+         R"(data: {"type":"error","code":"server_error","message":"boom","sequence_number":3})"
+         "\n\n",
+         QStringLiteral("boom (code: server_error)")},
+        {"Responses response.failed",
+         responsesMaker(),
+         "event: response.output_text.delta\n"
+         R"(data: {"delta":"par"})"
+         "\n\n"
+         "event: response.failed\n"
+         R"(data: {"response":{"status":"failed","error":{"code":"server_error","message":"boom"}}})"
+         "\n\n",
+         QStringLiteral("boom (code: server_error)")},
+        {"Ollama error line",
+         ollamaMaker(),
+         R"({"message":{"role":"assistant","content":"par"},"done":false})"
+         "\n"
+         R"({"error":"boom"})"
+         "\n",
+         QStringLiteral("boom")},
+    };
+}
+
+} // namespace
+
+TEST(StreamErrors, AnErrorInsideTheStreamFailsTheRequest)
+{
+    for (const StreamErrorCase &errorCase : streamErrorCases()) {
+        SCOPED_TRACE(errorCase.name);
+
+        FakeHttpTransport transport;
+        std::unique_ptr<BaseClient> client(errorCase.make(&transport));
+        AnswerRecorder recorder;
+        recorder.watch(client.get());
+
+        client->ask(oneUserTurn(QStringLiteral("go")));
+        ASSERT_EQ(transport.streamCount(), 1);
+        transport.lastStream()->sendAll(errorCase.stream);
+        pump();
+
+        EXPECT_EQ(recorder.completed, 0) << "a provider error must not look like an answer";
+        EXPECT_EQ(recorder.failed, 1);
+        EXPECT_EQ(recorder.failure, errorCase.error);
+    }
+}
+
+TEST(BufferedResponses, AnErrorObjectWithoutAMessageStillFailsTheRequest)
+{
+    const std::vector<std::pair<const char *, ClientMaker>> providers{
+        {"Claude", claudeMaker()},
+        {"OpenAI", openAIMaker()},
+        {"Google", googleMaker()},
+        {"Ollama", ollamaMaker()},
+        {"Responses", responsesMaker()}};
+
+    for (const auto &[provider, make] : providers) {
+        SCOPED_TRACE(provider);
+
+        FakeHttpTransport transport;
+        std::unique_ptr<BaseClient> client(make(&transport));
+        AnswerRecorder recorder;
+        recorder.watch(client.get());
+
+        client->ask(oneUserTurn(QStringLiteral("go")), {}, RequestMode::Buffered);
+        ASSERT_EQ(transport.bufferedCount(), 1);
+        transport.respondToLast(200, R"({"error":{"type":"overloaded_error"}})");
+        pump();
+
+        EXPECT_EQ(recorder.completed, 0);
+        EXPECT_EQ(recorder.failed, 1);
+        EXPECT_TRUE(recorder.failure.contains(QStringLiteral("overloaded_error")))
+            << qPrintable(recorder.failure);
+    }
+}
+
+namespace {
+
+class CleanupRecordingClient : public OpenAIClient
+{
+public:
+    using OpenAIClient::OpenAIClient;
+
+    QStringList cleanedUp;
+
+protected:
+    void cleanupDerivedData(const RequestID &id) override
+    {
+        cleanedUp.append(id);
+        OpenAIClient::cleanupDerivedData(id);
+    }
+};
+
+} // namespace
+
+TEST(BufferedResponses, AFailedContinuationReleasesThePerRequestState)
+{
+    FakeHttpTransport transport;
+    CleanupRecordingClient client("https://fake.local/v1", "sk-test", "gpt-test", &transport);
+    auto *tool = new CountingTool(&client);
+    client.tools()->addTool(tool);
+    QSignalSpy failed(&client, &BaseClient::requestFailed);
+
+    const RequestID id = client.ask(oneUserTurn(QStringLiteral("go")), {}, RequestMode::Buffered);
+    transport.respondToLast(
+        200,
+        R"({"choices":[{"message":{"role":"assistant","content":null,)"
+        R"("tool_calls":[{"id":"call_1","type":"function",)"
+        R"("function":{"name":"echo","arguments":"{}"}}]},"finish_reason":"tool_calls"}]})");
+    pump();
+    ASSERT_EQ(transport.bufferedCount(), 2) << "the buffered round did not continue";
+    ASSERT_EQ(tool->calls, 1);
+
+    client.cleanedUp.clear();
+    transport.respondToLast(200, "not json at all");
+    pump();
+
+    ASSERT_EQ(failed.size(), 1);
+    EXPECT_TRUE(client.cleanedUp.contains(id))
+        << "a failure in the buffered prologue must release what the round left behind";
 }

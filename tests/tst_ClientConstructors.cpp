@@ -175,4 +175,28 @@ TEST(MistralProfile, IsAnOpenAIClientWithDifferentPaths)
     EXPECT_EQ(client.profile().modelsPath, QStringLiteral("/v1/models"));
 }
 
+TEST(ClientConstructors, QtStyleParentOverloadsAdoptTheParent)
+{
+    QObject owner;
+    const QList<BaseClient *> clients{
+        new ClaudeClient("https://api.anthropic.com", "sk-test", "claude-sonnet-4-5", &owner),
+        new OpenAIClient("https://api.openai.com/v1", "sk-test", "gpt-test", &owner),
+        new OpenAIResponsesClient("https://api.openai.com/v1", "sk-test", "gpt-test", &owner),
+        new GoogleAIClient("https://generativelanguage.googleapis.com", "key", "gemini", &owner),
+        new OllamaClient("https://ollama.local", {}, "llama3", &owner),
+        new LlamaCppClient("https://llama.local", {}, {}, &owner),
+        new ClaudeClient(&owner),
+        new OpenAIClient(&owner),
+        new OpenAIResponsesClient(&owner),
+        new GoogleAIClient(&owner),
+        new OllamaClient(&owner),
+        new LlamaCppClient(&owner)};
+
+    for (BaseClient *client : clients)
+        EXPECT_EQ(client->parent(), &owner);
+
+    EXPECT_EQ(clients.first()->url(), QStringLiteral("https://api.anthropic.com"));
+    EXPECT_EQ(clients.first()->model(), QStringLiteral("claude-sonnet-4-5"));
+}
+
 #include "tst_ClientConstructors.moc"

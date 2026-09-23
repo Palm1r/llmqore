@@ -25,7 +25,7 @@ QJsonObject functionCallItem(
     const QString &itemId = {},
     const QString &arguments = {})
 {
-    QJsonObject item{{"type", "function_call"}, {"call_id", callId}, {"name", name}};
+    QJsonObject item = {{"type", "function_call"}, {"call_id", callId}, {"name", name}};
     if (!itemId.isEmpty())
         item.insert("id", itemId);
     if (!arguments.isEmpty())
@@ -51,7 +51,7 @@ void toolArgumentsDelta(OpenAIResponsesMessage &msg, const QString &itemId, cons
 void toolArgumentsDone(
     OpenAIResponsesMessage &msg, const QString &itemId, const QString &arguments = {})
 {
-    QJsonObject data{{"item_id", itemId}};
+    QJsonObject data = {{"item_id", itemId}};
     if (!arguments.isEmpty())
         data.insert("arguments", arguments);
     msg.applyEvent(QStringLiteral("response.function_call_arguments.done"), data);
@@ -659,4 +659,73 @@ TEST(OpenAIResponsesMessage, MultipleReasoningBlocks)
     reasoningDelta(msg, "item_2", "Second thought");
 
     EXPECT_EQ(msg.currentThinkingContent().size(), 2);
+}
+
+TEST(OpenAIResponsesMessage, AnErrorEventIsHandedBackWithoutItsEnvelopeFields)
+{
+    OpenAIResponsesMessage msg;
+    const MessageEffects effects = msg.applyEvent(
+        QStringLiteral("error"),
+        QJsonObject{
+            {"type", "error"},
+            {"code", "server_error"},
+            {"message", "boom"},
+            {"sequence_number", 4}});
+
+    ASSERT_TRUE(effects.error.has_value());
+    EXPECT_EQ(effects.error->value("message").toString(), "boom");
+    EXPECT_EQ(effects.error->value("code").toString(), "server_error");
+    EXPECT_FALSE(effects.error->contains("type"));
+    EXPECT_FALSE(effects.error->contains("sequence_number"));
+}
+
+TEST(OpenAIResponsesMessage, ResponseFailedIsAnError)
+{
+    OpenAIResponsesMessage msg;
+    const MessageEffects effects = msg.applyEvent(
+        QStringLiteral("response.failed"),
+        QJsonObject{
+            {"response",
+             QJsonObject{
+                 {"status", "failed"},
+                 {"error", QJsonObject{{"code", "server_error"}, {"message", "bad"}}}}}});
+
+    ASSERT_TRUE(effects.error.has_value());
+    EXPECT_EQ(effects.error->value("message").toString(), "bad");
+    EXPECT_EQ(msg.stopReason(), "failed");
+}
+
+TEST(OpenAIResponsesMessage, ResponseFailedWithoutDetailsStillCarriesAMessage)
+{
+    OpenAIResponsesMessage msg;
+    const MessageEffects effects = msg.applyEvent(
+        QStringLiteral("response.failed"),
+        QJsonObject{{"response", QJsonObject{{"status", "failed"}, {"error", QJsonValue()}}}});
+
+    ASSERT_TRUE(effects.error.has_value());
+    EXPECT_EQ(effects.error->value("message").toString(), "Response failed");
+}
+
+TEST(OpenAIResponsesMessage, BufferedFailedStatusIsAnError)
+{
+    OpenAIResponsesMessage msg;
+    const MessageEffects effects = msg.applyResponse(
+        QJsonObject{{"status", "failed"}, {"output", QJsonArray{}}});
+
+    ASSERT_TRUE(effects.error.has_value());
+    EXPECT_EQ(effects.error->value("message").toString(), "Response failed");
+}
+
+TEST(OpenAIResponsesMessage, TerminalFallbackIsOnlyBuiltWhenNothingWasStreamed)
+{
+    OpenAIResponsesMessage streamed;
+    textDelta(streamed, "streamed");
+    const MessageEffects afterDelta
+        = completed(streamed, QJsonObject{{"status", "completed"}, {"output", QJsonArray{messageItem("full")}}});
+    EXPECT_TRUE(afterDelta.fallbackText.isEmpty());
+
+    OpenAIResponsesMessage silent;
+    const MessageEffects withoutDelta
+        = completed(silent, QJsonObject{{"status", "completed"}, {"output", QJsonArray{messageItem("full")}}});
+    EXPECT_EQ(withoutDelta.fallbackText, "full");
 }

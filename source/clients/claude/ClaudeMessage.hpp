@@ -21,8 +21,6 @@ public:
     MessageEffects applyEvent(const QJsonObject &event);
     MessageEffects applyResponse(const QJsonObject &response);
 
-    QString stopReason() const override { return m_stopReason; }
-
     QJsonObject toProviderFormat() const;
     QJsonArray createToolResultsContent(const QHash<QString, ToolResult> &toolResults) const;
 
@@ -34,12 +32,12 @@ private:
     void clearDerivedCaches() override;
 
     void beginBlock(int index, const QJsonObject &block);
-    void applyDelta(int index, const QJsonObject &delta);
+    void applyDelta(int index, const QString &deltaType, const QJsonObject &delta);
     void endBlock(int index);
     void handleStopReason(const QString &stopReason);
 
-    QString m_stopReason;
     ToolCallAccumulator<int> m_toolCalls;
+    QHash<int, int> m_blockPositions;
 };
 
 } // namespace LLMQore

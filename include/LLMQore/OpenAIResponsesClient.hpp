@@ -9,7 +9,6 @@
 #include <QUrl>
 
 #include <LLMQore/BaseClient.hpp>
-#include <LLMQore/SSEParser.hpp>
 
 namespace LLMQore {
 
@@ -17,17 +16,20 @@ class OpenAIResponsesMessage;
 
 enum class ReasoningPersistence { Off, Replay };
 
-[[nodiscard]] LLMQORE_EXPORT ProviderProfile openAiResponsesProfile();
+[[nodiscard]] LLMQORE_EXPORT ProviderProfile openAIResponsesProfile();
 
 class LLMQORE_EXPORT OpenAIResponsesClient : public BaseClient
 {
     Q_OBJECT
 public:
+    explicit OpenAIResponsesClient(QObject *parent = nullptr);
     explicit OpenAIResponsesClient(
-        const QString &url = {},
-        const QString &apiKey = {},
-        const QString &model = {},
-        HttpTransport *transport = nullptr,
+        const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
+    explicit OpenAIResponsesClient(
+        const QString &url,
+        const QString &apiKey,
+        const QString &model,
+        HttpTransport *transport,
         QObject *parent = nullptr);
 
     RequestID sendMessage(

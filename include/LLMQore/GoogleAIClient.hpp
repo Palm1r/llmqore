@@ -12,7 +12,6 @@
 #include <QUrl>
 
 #include <LLMQore/BaseClient.hpp>
-#include <LLMQore/SSEParser.hpp>
 
 namespace LLMQore {
 
@@ -24,11 +23,14 @@ class LLMQORE_EXPORT GoogleAIClient : public BaseClient
 {
     Q_OBJECT
 public:
+    explicit GoogleAIClient(QObject *parent = nullptr);
     explicit GoogleAIClient(
-        const QString &url = {},
-        const QString &apiKey = {},
-        const QString &model = {},
-        HttpTransport *transport = nullptr,
+        const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
+    explicit GoogleAIClient(
+        const QString &url,
+        const QString &apiKey,
+        const QString &model,
+        HttpTransport *transport,
         QObject *parent = nullptr);
 
     RequestID sendMessage(
@@ -61,14 +63,12 @@ private:
     public:
         static constexpr qsizetype kMaxBytes = 64 * 1024;
 
-        std::optional<QString> append(const QByteArray &chunk);
+        std::optional<QJsonObject> append(const QByteArray &chunk);
 
     private:
         bool m_active = true;
         QByteArray m_buffer;
     };
-
-    void processStreamChunk(const RequestID &id, const QJsonObject &chunk);
 
     QHash<RequestID, QString> m_failedRequests;
     QHash<RequestID, JsonErrorSniffer> m_errorSniffers;

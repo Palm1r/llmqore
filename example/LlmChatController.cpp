@@ -23,24 +23,24 @@ LLMQore::BaseClient *makeClient(
     QObject *parent)
 {
     if (provider == "Claude")
-        return new LLMQore::ClaudeClient(url, apiKey, {}, nullptr, parent);
+        return new LLMQore::ClaudeClient(url, apiKey, {}, parent);
     if (provider == "OpenAI")
-        return new LLMQore::OpenAIClient(url, apiKey, {}, nullptr, parent);
+        return new LLMQore::OpenAIClient(url, apiKey, {}, parent);
     if (provider == "OpenAI Responses")
-        return new LLMQore::OpenAIResponsesClient(url, apiKey, {}, nullptr, parent);
+        return new LLMQore::OpenAIResponsesClient(url, apiKey, {}, parent);
     if (provider == "DeepSeek")
-        return new LLMQore::OpenAIClient(url, apiKey, {}, nullptr, parent);
+        return new LLMQore::OpenAIClient(url, apiKey, {}, parent);
     if (provider == "Mistral") {
-        auto *mistral = new LLMQore::OpenAIClient(url, apiKey, {}, nullptr, parent);
+        auto *mistral = new LLMQore::OpenAIClient(url, apiKey, {}, parent);
         mistral->setProfile(LLMQore::mistralProfile());
         return mistral;
     }
     if (provider == "Ollama")
-        return new LLMQore::OllamaClient(url, apiKey, {}, nullptr, parent);
+        return new LLMQore::OllamaClient(url, apiKey, {}, parent);
     if (provider == "Google AI")
-        return new LLMQore::GoogleAIClient(url, apiKey, {}, nullptr, parent);
+        return new LLMQore::GoogleAIClient(url, apiKey, {}, parent);
     if (provider == "LlamaCpp")
-        return new LLMQore::LlamaCppClient(url, apiKey, {}, nullptr, parent);
+        return new LLMQore::LlamaCppClient(url, apiKey, {}, parent);
     return nullptr;
 }
 

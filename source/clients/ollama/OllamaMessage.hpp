@@ -18,13 +18,8 @@ public:
 
     static const ToolDialect &toolDialect();
 
-    void handleContentDelta(const QString &content);
-    void handleToolCall(const QJsonObject &toolCall);
-    void handleThinkingDelta(const QString &thinking);
-    void handleThinkingComplete(const QString &signature);
-    void handleStopReason(bool done, const QString &doneReason = {});
-
-    QString stopReason() const override { return m_doneReason; }
+    MessageEffects applyEvent(const QJsonObject &event);
+    MessageEffects applyResponse(const QJsonObject &response);
 
     [[nodiscard]] static QJsonObject serializeTurn(
         TurnRole role, const QList<TurnContent> &blocks);
@@ -32,13 +27,16 @@ public:
     QJsonObject toProviderFormat() const;
     QJsonArray createToolResultMessages(const QHash<QString, ToolResult> &toolResults) const;
 
-    bool isAccumulatingToolCall() const;
-
 private:
     void clearDerivedCaches() override;
 
-    bool m_done = false;
-    QString m_doneReason;
+    void handleContentDelta(const QString &content);
+    void handleToolCall(const QJsonObject &toolCall);
+    void handleThinkingDelta(const QString &thinking);
+    void handleThinkingComplete(const QString &signature);
+    void handleStopReason(const QString &doneReason);
+    [[nodiscard]] bool isAccumulatingToolCall() const;
+
     QString m_accumulatedContent;
     bool m_contentAddedToTextBlock = false;
     quint64 m_toolCallSequence = 0;

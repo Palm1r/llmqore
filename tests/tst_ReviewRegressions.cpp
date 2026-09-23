@@ -171,17 +171,22 @@ TEST(ReviewRegression, StreamDeletedByTheCallerSurvivesClientTeardown)
 TEST(ReviewRegression, OllamaThinkingAfterToolCallDoesNotReuseFreedBlock)
 {
     OllamaMessage msg;
+    const auto thinkingLine = [](const QString &thinking) {
+        return QJsonObject{{"message", QJsonObject{{"thinking", thinking}}}, {"done", false}};
+    };
 
-    msg.handleThinkingDelta(QStringLiteral("first thought"));
+    msg.applyEvent(thinkingLine(QStringLiteral("first thought")));
     ASSERT_EQ(msg.currentThinkingContent().size(), 1);
 
-    msg.handleContentDelta(R"({"name":"echo","arguments":{"value":"7"}})");
-    msg.handleStopReason(true);
+    msg.applyEvent(QJsonObject{
+        {"message", QJsonObject{{"content", R"({"name":"echo","arguments":{"value":"7"}})"}}},
+        {"done", false}});
+    msg.applyEvent(QJsonObject{{"done", true}});
     ASSERT_EQ(msg.currentToolUseContent().size(), 1);
     EXPECT_TRUE(msg.currentThinkingContent().isEmpty())
         << "the tool-call path deletes every accumulated block";
 
-    msg.handleThinkingDelta(QStringLiteral("second thought"));
+    msg.applyEvent(thinkingLine(QStringLiteral("second thought")));
 
     ASSERT_EQ(msg.currentThinkingContent().size(), 1);
     EXPECT_EQ(msg.currentThinkingContent().front().thinking,
@@ -948,13 +953,13 @@ TEST(MistralProfile, StreamsTextAndReasoningThroughTheOpenAIDialect)
         "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
         "data: [DONE]\n\n");
 
-    ASSERT_EQ(completed.count(), 1);
+    ASSERT_EQ(completed.size(), 1);
     EXPECT_EQ(completed.first().at(1).toString(), QStringLiteral("Because of scattering."));
 
-    ASSERT_EQ(chunks.count(), 1) << "reasoning must not reach chunkReceived";
+    ASSERT_EQ(chunks.size(), 1) << "reasoning must not reach chunkReceived";
     EXPECT_EQ(chunks.first().at(1).toString(), QStringLiteral("Because of scattering."));
 
-    ASSERT_EQ(thinking.count(), 1) << "Magistral reasoning arrives as a thinking block";
+    ASSERT_EQ(thinking.size(), 1) << "Magistral reasoning arrives as a thinking block";
     EXPECT_EQ(thinking.first().at(1).toString(), QStringLiteral("Rayleigh scattering."));
 }
 
@@ -976,6 +981,112 @@ TEST(MistralProfile, BufferedResponseTakesTheSamePath)
     for (int i = 0; i < 32 && completed.isEmpty(); ++i)
         QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
 
-    ASSERT_EQ(completed.count(), 1);
+    ASSERT_EQ(completed.size(), 1);
     EXPECT_EQ(completed.first().at(1).toString(), QStringLiteral("pong"));
+}
+
+namespace {
+
+class CacheProbeMessage : public BaseMessage
+{
+public:
+    void think(const QString &text)
+    {
+        if (auto *thinking = blockAt<ThinkingContent>(ensureThinkingContentIndex()))
+            thinking->thinking += text;
+    }
+
+    void say(const QString &text) { appendTextDelta(text); }
+
+    void dropText()
+    {
+        removeBlocksIf(
+            [](const TurnContent &block) { return std::get_if<TextContent>(&block) != nullptr; });
+    }
+
+    void dropEverything() { clearBlocks(); }
+};
+
+} // namespace
+
+TEST(BaseMessageCaches, ThinkingIndexFollowsItsBlockWhenEarlierBlocksAreRemoved)
+{
+    CacheProbeMessage msg;
+    msg.say(QStringLiteral("draft"));
+    msg.think(QStringLiteral("x"));
+    msg.dropText();
+    msg.think(QStringLiteral("y"));
+
+    ASSERT_EQ(msg.currentBlocks().size(), 1);
+    ASSERT_EQ(msg.currentThinkingContent().size(), 1);
+    EXPECT_EQ(msg.currentThinkingContent().first().thinking, QStringLiteral("xy"));
+}
+
+TEST(BaseMessageCaches, ThinkingIndexIsForgottenWhenBlocksAreCleared)
+{
+    CacheProbeMessage msg;
+    msg.think(QStringLiteral("x"));
+    msg.dropEverything();
+    msg.say(QStringLiteral("answer"));
+    msg.think(QStringLiteral("y"));
+
+    ASSERT_EQ(msg.currentThinkingContent().size(), 1);
+    EXPECT_EQ(msg.currentThinkingContent().first().thinking, QStringLiteral("y"));
+    auto *text = std::get_if<TextContent>(&msg.currentBlocks()[0]);
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(text->text, QStringLiteral("answer"));
+}
+
+TEST(RenderToolContent, AnImageWithoutARendererBecomesAPlaceholder)
+{
+    const ToolContentNaming naming{QLatin1String("text"), {}};
+    const QJsonObject rendered
+        = renderToolContent(ImageContent::fromBytes(QByteArray("PNG"), "image/png"), naming);
+
+    EXPECT_EQ(rendered.value("type").toString(), QStringLiteral("text"));
+    EXPECT_EQ(rendered.value("text").toString(), QStringLiteral("[image: image/png]"));
+}
+
+TEST(LlamaCppInheritance, AnEmptyModelIsLeftOutOfThePayload)
+{
+    FakeHttpTransport transport;
+    LlamaCppClient client("https://fake.local", {}, {}, &transport);
+
+    client.ask(QStringLiteral("hi"));
+    ASSERT_EQ(transport.streamCount(), 1);
+    EXPECT_FALSE(transport.streamRequest(0).payload().contains("model"));
+
+    client.setModel(QStringLiteral("qwen"));
+    client.ask(QStringLiteral("hi"));
+    ASSERT_EQ(transport.streamCount(), 2);
+    EXPECT_EQ(transport.streamRequest(1).payload().value("model").toString(), QStringLiteral("qwen"));
+}
+
+TEST(ReviewRegression, GoogleSpellsOneErrorTheSameWayInBothModes)
+{
+    const QByteArray body
+        = R"({"error":{"code":429,"message":"Quota exceeded","status":"RESOURCE_EXHAUSTED"}})";
+    const QString expected
+        = QStringLiteral("Quota exceeded (code: 429) (status: RESOURCE_EXHAUSTED)");
+
+    FakeHttpTransport streamedTransport;
+    GoogleAIClient streamed("https://fake.local", "key", "gemini-test", &streamedTransport);
+    QSignalSpy streamedFailed(&streamed, &BaseClient::requestFailed);
+    streamed.ask(QStringLiteral("hi"));
+    ASSERT_EQ(streamedTransport.streamCount(), 1);
+    streamedTransport.lastStream()->sendAll(body);
+    ASSERT_EQ(streamedFailed.size(), 1);
+
+    FakeHttpTransport bufferedTransport;
+    GoogleAIClient buffered("https://fake.local", "key", "gemini-test", &bufferedTransport);
+    QSignalSpy bufferedFailed(&buffered, &BaseClient::requestFailed);
+    buffered.ask(QStringLiteral("hi"), RequestMode::Buffered);
+    ASSERT_EQ(bufferedTransport.bufferedCount(), 1);
+    bufferedTransport.respondToLast(200, body);
+    for (int i = 0; i < 20 && bufferedFailed.isEmpty(); ++i)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    ASSERT_EQ(bufferedFailed.size(), 1);
+
+    EXPECT_EQ(streamedFailed.first().at(1).toString(), expected);
+    EXPECT_EQ(bufferedFailed.first().at(1).toString(), expected);
 }

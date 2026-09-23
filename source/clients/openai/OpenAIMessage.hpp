@@ -28,15 +28,8 @@ public:
 
     static const ToolDialect &toolDialect();
 
-    void handleContentDelta(const QString &content);
-    void handleReasoningDelta(const QString &reasoning);
-    void handleToolCallStart(int index, const QString &id, const QString &name);
-    void handleToolCallDelta(int index, const QString &argumentsDelta);
-    void handleToolCallComplete(int index);
-    void completeAllPendingToolCalls();
-    void handleStopReason(const QString &finishReason);
-
-    QString stopReason() const override { return m_finishReason; }
+    MessageEffects applyEvent(const QJsonObject &chunk);
+    MessageEffects applyResponse(const QJsonObject &response);
 
     [[nodiscard]] static QJsonObject serializeTurn(
         TurnRole role, const QList<TurnContent> &blocks);
@@ -47,7 +40,13 @@ public:
 private:
     void clearDerivedCaches() override;
 
-    QString m_finishReason;
+    QString takeReasoningAndText(const QJsonObject &source);
+    void handleContentDelta(const QString &content);
+    void handleReasoningDelta(const QString &reasoning);
+    void handleToolCallStart(int index, const QString &id, const QString &name);
+    void handleToolCallDelta(int index, const QString &argumentsDelta);
+    void handleStopReason(const QString &finishReason);
+
     ToolCallAccumulator<int> m_toolCalls;
 };
 

@@ -9,6 +9,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 
+#include "core/ErrorEnvelope.hpp"
+
 namespace LLMQore {
 
 namespace {
@@ -82,6 +84,116 @@ OpenAIMessage::OpenAIMessage(QObject *parent)
     : BaseMessage(parent)
 {}
 
+MessageEffects OpenAIMessage::applyEvent(const QJsonObject &chunk)
+{
+    MessageEffects effects;
+
+    if (const std::optional<QJsonObject> error = errorIn(chunk)) {
+        effects.error = *error;
+        return effects;
+    }
+
+    if (chunk.value("usage").isObject())
+        effects.usage = chunk;
+
+    const QJsonArray choices = chunk.value("choices").toArray();
+    if (choices.isEmpty())
+        return effects;
+
+    const QJsonObject choice = choices.first().toObject();
+    const QJsonObject delta = choice.value("delta").toObject();
+    const QString finishReason = choice.value("finish_reason").toString();
+
+    const QString text = takeReasoningAndText(delta);
+    if (!text.isEmpty()) {
+        effects.thinkingCompleted = true;
+        handleContentDelta(text);
+        effects.chunk = text;
+    }
+
+    const QJsonArray toolCalls = delta.value("tool_calls").toArray();
+    for (const QJsonValue &toolCallValue : toolCalls) {
+        const QJsonObject toolCall = toolCallValue.toObject();
+        const int index = toolCall.value("index").toInt();
+        const QJsonObject function = toolCall.value("function").toObject();
+
+        const QString toolCallId = toolCall.value("id").toString();
+        if (!toolCallId.isEmpty())
+            handleToolCallStart(index, toolCallId, function.value("name").toString());
+
+        if (function.contains("arguments"))
+            handleToolCallDelta(index, function.value("arguments").toString());
+    }
+
+    if (!finishReason.isEmpty() && finishReason != QLatin1String("null")) {
+        effects.thinkingCompleted = true;
+        completeAllToolCalls(m_toolCalls);
+        handleStopReason(finishReason);
+        effects.toolsReady = true;
+    }
+
+    return effects;
+}
+
+namespace {
+
+QJsonObject bufferedChoiceAsDelta(const QJsonObject &choice)
+{
+    QJsonObject delta = choice.value("message").toObject();
+
+    const QJsonArray toolCalls = delta.value("tool_calls").toArray();
+    if (!toolCalls.isEmpty()) {
+        QJsonArray indexed;
+        for (int position = 0; position < toolCalls.size(); ++position) {
+            QJsonObject call = toolCalls.at(position).toObject();
+            call["index"] = position;
+            if (call.value("id").toString().isEmpty())
+                call["id"] = QStringLiteral("call_%1").arg(position);
+            indexed.append(call);
+        }
+        delta["tool_calls"] = indexed;
+    }
+
+    QJsonObject normalized = choice;
+    normalized.remove("message");
+    normalized["delta"] = delta;
+    return normalized;
+}
+
+} // namespace
+
+MessageEffects OpenAIMessage::applyResponse(const QJsonObject &response)
+{
+    const QJsonArray choices = response.value("choices").toArray();
+    if (choices.isEmpty()) {
+        MessageEffects effects;
+        effects.error = QJsonObject{
+            {QStringLiteral("message"), QStringLiteral("Empty choices in buffered response")}};
+        return effects;
+    }
+
+    QJsonObject replayed = response;
+    replayed["choices"] = QJsonArray{bufferedChoiceAsDelta(choices.first().toObject())};
+    return applyEvent(replayed);
+}
+
+QString OpenAIMessage::takeReasoningAndText(const QJsonObject &source)
+{
+    const QJsonValue reasoning = source.value("reasoning_content");
+    if (!reasoning.isUndefined() && !reasoning.isNull())
+        handleReasoningDelta(reasoning.toString());
+
+    const QJsonValue content = source.value("content");
+    if (content.isUndefined() || content.isNull())
+        return {};
+
+    const ContentParts parts = splitContentParts(content);
+    if (!parts.thinking.isEmpty())
+        handleReasoningDelta(parts.thinking);
+
+    return parts.text;
+}
+
 void OpenAIMessage::handleContentDelta(const QString &content)
 {
     appendTextDelta(content);
@@ -89,7 +201,7 @@ void OpenAIMessage::handleContentDelta(const QString &content)
 
 void OpenAIMessage::handleReasoningDelta(const QString &reasoning)
 {
-    const int index = getOrCreateThinkingContentIndex();
+    const int index = ensureThinkingContentIndex();
     if (auto *thinkingContent = blockAt<ThinkingContent>(index))
         thinkingContent->thinking += reasoning;
 }
@@ -107,16 +219,6 @@ void OpenAIMessage::handleToolCallDelta(int index, const QString &argumentsDelta
     m_toolCalls.delta(index, argumentsDelta);
 }
 
-void OpenAIMessage::handleToolCallComplete(int index)
-{
-    completeToolCall(m_toolCalls, index);
-}
-
-void OpenAIMessage::completeAllPendingToolCalls()
-{
-    completeAllToolCalls(m_toolCalls);
-}
-
 void OpenAIMessage::handleStopReason(const QString &finishReason)
 {
     static const StopReasonMap kMap{
@@ -127,8 +229,7 @@ void OpenAIMessage::handleStopReason(const QString &finishReason)
         MessageState::Complete,
         false};
 
-    m_finishReason = finishReason;
-    m_state = resolveState(m_finishReason, kMap);
+    recordStopReason(finishReason, kMap);
 }
 
 QJsonObject OpenAIMessage::serializeTurn(TurnRole role, const QList<TurnContent> &blocks)
@@ -222,7 +323,6 @@ QJsonArray OpenAIMessage::createToolResultMessages(
 void OpenAIMessage::clearDerivedCaches()
 {
     m_toolCalls.clear();
-    m_finishReason.clear();
 }
 
 } // namespace LLMQore

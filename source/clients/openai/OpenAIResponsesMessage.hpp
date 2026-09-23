@@ -21,8 +21,6 @@ public:
     MessageEffects applyEvent(const QString &eventType, const QJsonObject &data);
     MessageEffects applyResponse(const QJsonObject &response);
 
-    QString stopReason() const override { return m_status; }
-
     [[nodiscard]] static QList<QJsonObject> serializeTurn(
         TurnRole role, const QList<TurnContent> &blocks, ReasoningPersistence reasoning);
 
@@ -57,7 +55,6 @@ private:
     static QString aggregatedTextOf(const QJsonObject &response);
     static QString reasoningTextOf(const QJsonObject &item);
 
-    QString m_status;
     ToolCallAccumulator<QString> m_toolCalls;
     QHash<QString, int> m_thinkingBlocks;
     QHash<QString, QString> m_itemIdToCallId;

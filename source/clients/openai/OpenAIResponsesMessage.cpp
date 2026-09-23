@@ -104,14 +104,18 @@ void OpenAIResponsesMessage::handleStopReason(const QString &status)
         MessageState::Building,
         false};
 
-    m_status = status;
-    m_state = resolveState(m_status, kMap);
+    recordStopReason(status, kMap);
 }
 
 namespace {
 
 const QLatin1String kStreamingReasoningPlaceholder(
     "[Reasoning process completed, but detailed thinking is not available in streaming mode.]");
+
+QJsonObject responseFailedError()
+{
+    return QJsonObject{{QStringLiteral("message"), QStringLiteral("Response failed")}};
+}
 
 } // namespace
 
@@ -171,6 +175,17 @@ MessageEffects OpenAIResponsesMessage::applyEvent(const QString &eventType, cons
 
     } else if (eventType == "response.incomplete") {
         applyTerminal(data["response"].toObject(), QStringLiteral("incomplete"), effects);
+
+    } else if (eventType == "response.failed") {
+        handleStopReason(QStringLiteral("failed"));
+        const QJsonObject error = data["response"].toObject()["error"].toObject();
+        effects.error = error.isEmpty() ? responseFailedError() : error;
+
+    } else if (eventType == "error") {
+        QJsonObject error = data;
+        error.remove(QStringLiteral("type"));
+        error.remove(QStringLiteral("sequence_number"));
+        effects.error = error;
     }
 
     return effects;
@@ -191,6 +206,8 @@ MessageEffects OpenAIResponsesMessage::applyResponse(const QJsonObject &response
         handleStopReason(status);
         effects.toolsReady = true;
     }
+    if (status == QLatin1String("failed"))
+        effects.error = responseFailedError();
 
     effects.usage = response;
     return effects;
@@ -274,7 +291,8 @@ void OpenAIResponsesMessage::applyTerminal(
     if (response.isEmpty()) {
         handleStopReason(fallbackStatus);
     } else {
-        effects.fallbackText = aggregatedTextOf(response);
+        if (accumulatedText().isEmpty())
+            effects.fallbackText = aggregatedTextOf(response);
         handleStopReason(response["status"].toString());
         effects.usage = response;
     }
@@ -466,7 +484,6 @@ void OpenAIResponsesMessage::clearDerivedCaches()
     m_toolCalls.clear();
     m_thinkingBlocks.clear();
     m_itemIdToCallId.clear();
-    m_status.clear();
 }
 
 } // namespace LLMQore

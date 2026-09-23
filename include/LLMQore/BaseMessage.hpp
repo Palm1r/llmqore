@@ -4,10 +4,11 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 
 #include <QHash>
 #include <QJsonArray>
-#include <QJsonDocument>
+#include <QJsonObject>
 #include <QObject>
 #include <QSet>
 #include <QStringList>
@@ -31,6 +32,7 @@ struct LLMQORE_EXPORT MessageEffects
     QString fullText;
     QString fallbackText;
     QJsonObject usage;
+    std::optional<QJsonObject> error = std::nullopt;
     bool thinkingCompleted = false;
     bool toolsReady = false;
 };
@@ -64,7 +66,7 @@ public:
     MessageState state() const { return m_state; }
     const QList<TurnContent> &currentBlocks() const { return m_currentBlocks; }
 
-    virtual QString stopReason() const { return {}; }
+    QString stopReason() const { return m_stopReason; }
 
     QList<ToolUseContent> currentToolUseContent() const;
     QList<ThinkingContent> currentThinkingContent() const;
@@ -95,8 +97,6 @@ protected:
                 *it += fragment;
         }
 
-        [[nodiscard]] bool isOpen(const Key &key) const { return pending.contains(key); }
-
         void clear()
         {
             blockIndex.clear();
@@ -116,7 +116,8 @@ protected:
 
         const QString json = finalArguments.isEmpty() ? *it : finalArguments;
         accumulator.pending.erase(it);
-        const int index = accumulator.blockIndex.take(key);
+        const int index = accumulator.blockIndex.value(key, -1);
+        accumulator.blockIndex.remove(key);
 
         if (json.isEmpty())
             return;
@@ -133,7 +134,7 @@ protected:
             completeToolCall(accumulator, key);
     }
 
-    [[nodiscard]] MessageState resolveState(const QString &reason, const StopReasonMap &map) const;
+    void recordStopReason(const QString &reason, const StopReasonMap &map);
 
     using ToolResultEmitter
         = std::function<void(const ToolUseContent &, const ToolResult &, QJsonArray &)>;
@@ -143,11 +144,9 @@ protected:
     MessageState m_state = MessageState::Building;
     QList<TurnContent> m_currentBlocks;
 
-    int getOrCreateTextContentIndex();
-    int getOrCreateThinkingContentIndex();
+    int ensureTextContentIndex();
+    int ensureThinkingContentIndex();
     void appendTextDelta(const QString &delta);
-
-    int m_currentThinkingIndex = -1;
 
     void removeBlocksIf(const std::function<bool(const TurnContent &)> &predicate);
     void clearBlocks();
@@ -186,7 +185,11 @@ protected:
     }
 
 private:
+    [[nodiscard]] MessageState resolveState(const QString &reason, const StopReasonMap &map) const;
+
     QSet<int> m_notifiedThinking;
+    int m_currentThinkingIndex = -1;
+    QString m_stopReason;
 };
 
 } // namespace LLMQore

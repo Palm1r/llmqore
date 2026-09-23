@@ -566,3 +566,56 @@ TEST(ClaudeMessage, HandleMixedContent_TextImageToolUse)
     EXPECT_TRUE(std::holds_alternative<ImageContent>(msg.currentBlocks()[1]));
     EXPECT_TRUE(std::holds_alternative<ToolUseContent>(msg.currentBlocks()[2]));
 }
+
+TEST(ClaudeMessage, AToolUseAfterAnUnknownBlockKeepsItsArguments)
+{
+    ClaudeMessage msg;
+    msg.applyEvent(messageStart());
+    msg.applyEvent(blockStart(
+        0,
+        QJsonObject{
+            {"type", "server_tool_use"},
+            {"id", "srvtoolu_1"},
+            {"name", "web_search"},
+            {"input", QJsonObject{}}}));
+    msg.applyEvent(blockStop(0));
+
+    msg.applyEvent(blockStart(1, toolUseBlock("toolu_1", "echo")));
+    msg.applyEvent(
+        blockDelta(1, QJsonObject{{"type", "input_json_delta"}, {"partial_json", R"({"value":)"}}));
+    msg.applyEvent(
+        blockDelta(1, QJsonObject{{"type", "input_json_delta"}, {"partial_json", R"("7"})"}}));
+    msg.applyEvent(blockStop(1));
+    msg.applyEvent(messageDelta("tool_use"));
+
+    ASSERT_EQ(msg.currentToolUseContent().size(), 1);
+    EXPECT_EQ(msg.currentToolUseContent().first().input.value("value").toString(), "7")
+        << "the wire index runs ahead of the block list once a block is skipped";
+    EXPECT_EQ(msg.state(), MessageState::RequiresToolExecution);
+}
+
+TEST(ClaudeMessage, TextAfterAnUnknownBlockLandsInItsOwnBlock)
+{
+    ClaudeMessage msg;
+    msg.applyEvent(messageStart());
+    msg.applyEvent(blockStart(0, QJsonObject{{"type", "web_search_tool_result"}}));
+    msg.applyEvent(blockStop(0));
+    startText(msg, 1, "found it");
+
+    ASSERT_EQ(msg.currentBlocks().size(), 1);
+    auto *text = std::get_if<TextContent>(&msg.currentBlocks()[0]);
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(text->text, "found it");
+}
+
+TEST(ClaudeMessage, AnErrorEventIsHandedBackAsAnError)
+{
+    ClaudeMessage msg;
+    const MessageEffects effects = msg.applyEvent(QJsonObject{
+        {"type", "error"},
+        {"error", QJsonObject{{"type", "overloaded_error"}, {"message", "Overloaded"}}}});
+
+    ASSERT_TRUE(effects.error.has_value());
+    EXPECT_EQ(effects.error->value("message").toString(), "Overloaded");
+    EXPECT_EQ(effects.error->value("type").toString(), "overloaded_error");
+}

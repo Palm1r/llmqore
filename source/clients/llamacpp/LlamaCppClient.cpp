@@ -10,9 +10,16 @@
 #include <LLMQore/HttpTransport.hpp>
 #include <LLMQore/Log.hpp>
 
-#include "core/ThreadAffinity.hpp"
-
 namespace LLMQore {
+
+ProviderProfile llamaCppProfile()
+{
+    ProviderProfile profile = openAIProfile();
+    profile.chatPath = QStringLiteral("/v1/chat/completions");
+    profile.modelsPath = QStringLiteral("/v1/models");
+    profile.log = &llmLlamaCppLog();
+    return profile;
+}
 
 namespace {
 
@@ -25,6 +32,15 @@ const UsageSchema kLlamaCppNativeUsage{
 
 } // namespace
 
+LlamaCppClient::LlamaCppClient(QObject *parent)
+    : LlamaCppClient({}, {}, {}, parent)
+{}
+
+LlamaCppClient::LlamaCppClient(
+    const QString &url, const QString &apiKey, const QString &model, QObject *parent)
+    : LlamaCppClient(url, apiKey, model, nullptr, parent)
+{}
+
 LlamaCppClient::LlamaCppClient(
     const QString &url,
     const QString &apiKey,
@@ -33,11 +49,15 @@ LlamaCppClient::LlamaCppClient(
     QObject *parent)
     : OpenAIClient(url, apiKey, model, transport, parent)
 {
-    ProviderProfile profile = openAiProfile();
-    profile.log = &llmLlamaCppLog();
-    profile.chatPath = QStringLiteral("/v1/chat/completions");
-    profile.modelsPath = QStringLiteral("/v1/models");
-    setProfile(profile);
+    setProfile(llamaCppProfile());
+}
+
+QJsonObject LlamaCppClient::buildConversationPayload(const Conversation &conversation) const
+{
+    QJsonObject payload = OpenAIClient::buildConversationPayload(conversation);
+    if (model().isEmpty())
+        payload.remove(QStringLiteral("model"));
+    return payload;
 }
 
 QFuture<bool> LlamaCppClient::isServerReady()

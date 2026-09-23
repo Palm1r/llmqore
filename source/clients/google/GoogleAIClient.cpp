@@ -10,20 +10,17 @@
 #include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/HttpTransport.hpp>
 #include <LLMQore/Log.hpp>
-#include <LLMQore/SSEParser.hpp>
 
-#include "core/ThreadAffinity.hpp"
+#include "core/ErrorEnvelope.hpp"
 
 namespace LLMQore {
 
 ProviderProfile googleProfile()
 {
     return ProviderProfile{
-        {},
-        QStringLiteral("/models"),
-        &llmGoogleLog(),
-        {},
-        {{QStringLiteral("Content-Type"), QStringLiteral("application/json")}}};
+        .modelsPath = QStringLiteral("/models"),
+        .log = &llmGoogleLog(),
+        .auth = {.placement = AuthScheme::Placement::QueryParam, .name = QStringLiteral("key")}};
 }
 
 namespace {
@@ -37,6 +34,15 @@ const UsageSchema kGoogleUsage{
 
 } // namespace
 
+GoogleAIClient::GoogleAIClient(QObject *parent)
+    : GoogleAIClient({}, {}, {}, parent)
+{}
+
+GoogleAIClient::GoogleAIClient(
+    const QString &url, const QString &apiKey, const QString &model, QObject *parent)
+    : GoogleAIClient(url, apiKey, model, nullptr, parent)
+{}
+
 GoogleAIClient::GoogleAIClient(
     const QString &url,
     const QString &apiKey,
@@ -46,9 +52,6 @@ GoogleAIClient::GoogleAIClient(
     : BaseClient(url, apiKey, model, transport, parent)
 {
     setProfile(googleProfile());
-    setAuthScheme(
-        {.placement = AuthScheme::Placement::QueryParam, .name = QStringLiteral("key")});
-    setHeaders({{QStringLiteral("Content-Type"), QStringLiteral("application/json")}});
 }
 
 RequestID GoogleAIClient::sendMessage(
@@ -147,7 +150,7 @@ QList<BaseClient::ErrorAnnotation> GoogleAIClient::errorAnnotations() const
         {QStringLiteral("status"), QStringLiteral("status")}};
 }
 
-std::optional<QString> GoogleAIClient::JsonErrorSniffer::append(const QByteArray &chunk)
+std::optional<QJsonObject> GoogleAIClient::JsonErrorSniffer::append(const QByteArray &chunk)
 {
     if (!m_active)
         return std::nullopt;
@@ -172,14 +175,7 @@ std::optional<QString> GoogleAIClient::JsonErrorSniffer::append(const QByteArray
     m_active = false;
     m_buffer.clear();
 
-    const QJsonObject obj = doc.object();
-    if (!obj.contains("error"))
-        return std::nullopt;
-
-    const QJsonObject error = obj.value("error").toObject();
-    return QString("Google AI API Error %1: %2")
-        .arg(error.value("code").toInt())
-        .arg(error.value("message").toString());
+    return errorIn(doc.object());
 }
 
 void GoogleAIClient::processData(const RequestID &id, const QByteArray &data)
@@ -190,9 +186,10 @@ void GoogleAIClient::processData(const RequestID &id, const QByteArray &data)
     if (!hasRequest(id))
         return;
 
-    if (const auto error = m_errorSniffers[id].append(data)) {
-        qCDebug(llmGoogleLog).noquote() << *error;
-        m_failedRequests.insert(id, *error);
+    if (const std::optional<QJsonObject> error = m_errorSniffers[id].append(data)) {
+        const QString message = describeError(*error);
+        qCDebug(llmGoogleLog).noquote() << message;
+        m_failedRequests.insert(id, message);
         return;
     }
 
@@ -202,7 +199,11 @@ void GoogleAIClient::processData(const RequestID &id, const QByteArray &data)
 void GoogleAIClient::processSseEvent(
     const RequestID &id, const SSEEvent &, const QJsonObject &chunk)
 {
-    processStreamChunk(id, chunk);
+    auto *message = qobject_cast<GoogleMessage *>(messageForRequest(id));
+    if (!message || chunk.contains("candidates"))
+        message = ensureMessage<GoogleMessage>(id);
+
+    applyEffects(id, message->applyEvent(chunk));
 }
 
 std::optional<QString> GoogleAIClient::takePendingStreamError(const RequestID &id)
@@ -215,79 +216,10 @@ std::optional<QString> GoogleAIClient::takePendingStreamError(const RequestID &i
 
 void GoogleAIClient::onStreamDrained(const RequestID &id)
 {
-    notifyPendingThinkingBlocks(id);
-    executeToolsFromMessage(id);
-}
-
-void GoogleAIClient::processStreamChunk(const RequestID &id, const QJsonObject &chunk)
-{
-    applyUsage(id, chunk);
-
-    if (!chunk.contains("candidates"))
-        return;
-
-    GoogleMessage *message = ensureMessage<GoogleMessage>(id);
-
-    QJsonArray candidates = chunk["candidates"].toArray();
-    for (const QJsonValue &candidate : candidates) {
-        QJsonObject candidateObj = candidate.toObject();
-
-        if (candidateObj.contains("content")) {
-            QJsonObject content = candidateObj["content"].toObject();
-            if (content.contains("parts")) {
-                QJsonArray parts = content["parts"].toArray();
-                for (const QJsonValue &part : parts) {
-                    QJsonObject partObj = part.toObject();
-
-                    if (partObj.contains("text")) {
-                        QString text = partObj["text"].toString();
-                        bool isThought = partObj.value("thought").toBool(false);
-
-                        if (isThought) {
-                            message->handleThoughtDelta(text);
-
-                            if (partObj.contains("signature"))
-                                message->handleThoughtSignature(partObj["signature"].toString());
-                        } else {
-                            notifyPendingThinkingBlocks(id);
-                            message->handleContentDelta(text);
-                            addChunk(id, text);
-                        }
-                    }
-
-                    if (partObj.contains("thoughtSignature"))
-                        message->handleThoughtSignature(partObj["thoughtSignature"].toString());
-
-                    if (partObj.contains("functionCall")) {
-                        notifyPendingThinkingBlocks(id);
-
-                        QJsonObject functionCall = partObj["functionCall"].toObject();
-                        QString name = functionCall["name"].toString();
-                        QJsonObject args = functionCall["args"].toObject();
-
-                        message->handleToolCallStart(name);
-                        message->handleToolCallDelta(
-                            QString::fromUtf8(QJsonDocument(args).toJson(QJsonDocument::Compact)));
-                        message->handleToolCallComplete();
-                    }
-                }
-            }
-        }
-
-        if (candidateObj.contains("finishReason")) {
-            QString finishReason = candidateObj["finishReason"].toString();
-            message->handleStopReason(finishReason);
-
-            if (message->isErrorFinishReason()) {
-                QString errorMessage = message->getErrorMessage();
-                qCDebug(llmGoogleLog).noquote() << QString("Google AI error: %1").arg(errorMessage);
-                m_failedRequests.insert(id, errorMessage);
-                cleanupFullRequest(id);
-                failRequest(id, errorMessage);
-                return;
-            }
-        }
-    }
+    MessageEffects effects;
+    effects.thinkingCompleted = true;
+    effects.toolsReady = true;
+    applyEffects(id, effects);
 }
 
 void GoogleAIClient::cleanupDerivedData(const RequestID &id)
@@ -323,7 +255,7 @@ QJsonObject GoogleAIClient::buildContinuationPayload(
 
 void GoogleAIClient::processBufferedBody(const RequestID &id, const QJsonObject &response)
 {
-    processStreamChunk(id, response);
+    applyEffects(id, ensureMessage<GoogleMessage>(id)->applyResponse(response));
 }
 
 } // namespace LLMQore

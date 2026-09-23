@@ -9,7 +9,6 @@
 #include <QUrl>
 
 #include <LLMQore/BaseClient.hpp>
-#include <LLMQore/SSEParser.hpp>
 
 namespace LLMQore {
 
@@ -21,11 +20,14 @@ class LLMQORE_EXPORT ClaudeClient : public BaseClient
 {
     Q_OBJECT
 public:
+    explicit ClaudeClient(QObject *parent = nullptr);
     explicit ClaudeClient(
-        const QString &url = {},
-        const QString &apiKey = {},
-        const QString &model = {},
-        HttpTransport *transport = nullptr,
+        const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
+    explicit ClaudeClient(
+        const QString &url,
+        const QString &apiKey,
+        const QString &model,
+        HttpTransport *transport,
         QObject *parent = nullptr);
 
     RequestID sendMessage(

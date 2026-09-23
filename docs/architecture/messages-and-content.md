@@ -24,20 +24,20 @@ A `BaseMessage` moves through four states during its lifetime:
 
 `BaseMessage` is the base class for per-provider streaming response parsers. It owns all `ContentBlock` instances (heap-allocated, deleted on destruction or when cleared for a continuation turn). Provider subclasses populate it by adding content blocks as SSE/JSON-lines events arrive.
 
-The message exposes its current block list, and provides filtered accessors for tool-use blocks and thinking blocks. It also carries a raw stop-reason string that varies by provider -- each provider's message subclass sets it from the wire format. `BaseClient` captures this string before the message is cleaned up.
+The message exposes its current block list, and provides filtered accessors for tool-use blocks and thinking blocks. It also carries a raw stop-reason string that varies by provider -- each translator records it from the wire format with `recordStopReason(reason, map)`, which stores the string and resolves the state in one step. `stopReason()` is a plain accessor on the base, so no translator keeps a copy of its own. `BaseClient` captures the string before the message is cleaned up.
 
 When a continuation turn begins, the message deletes all current blocks, empties its list, and resets to the Building state.
 
-`startNewContinuation()` is **not** virtual, and that is the point. Every cache a translator keeps -- an index into the block list, a pending-arguments buffer, an item-id table -- points at blocks the base is about to delete, so it has to be dropped *first*. When the reset was an override, that ordering was a convention two of five translators got wrong, and the resulting bug (a thinking block reattached across a tool round) was caught in production, not review. The base now calls `clearDerivedCaches()` and only then deletes: a translator that forgets to override it loses nothing, and a translator that overrides it cannot run too late.
+`startNewContinuation()` is **not** virtual, and that is the point. Every cache a translator keeps -- an index into the block list, a pending-arguments buffer, an item-id table -- points at blocks the base is about to delete, so it has to be dropped *first*. When the reset was an override, that ordering was a convention two of five translators got wrong, and the resulting bug (a thinking block reattached across a tool round) was caught in production, not review. The base now calls `clearDerivedCaches()` and only then deletes, and it clears the stop reason itself: a translator that forgets to override it loses nothing, and a translator that overrides it cannot run too late.
 
 ### Shared translator machinery
 
 Four things every translator needed, so `BaseMessage` owns them:
 
 - **`ToolCallAccumulator<Key>`** -- open a call, append argument fragments, close it. The key type is the provider's (`int` index for Claude and OpenAI Chat, `QString` call id for Responses); the tail -- parse the accumulated JSON and write it into the block -- is `completeToolCall`, which exists once. It deliberately leaves the block alone when nothing was accumulated: a buffered turn arrives with its arguments already complete, and overwriting them with an empty parse is exactly how the buffered path used to lose them.
-- **`StopReasonMap`** -- the stop-reason automaton as provider data (`toolReasons`, `completeReasons`, `finalReasons`, `openReasons`, a fallback state, and a flag for providers whose terminal event carries no reason at all). `resolveState` is the one implementation. Same trick as `UsageSchema`.
-- **`renderToolContent(block, naming)`** -- one renderer for MCP-shaped tool results. Only two things vary: the provider's word for a text block, and the image shape, which is a callback because the two shapes share no structure.
-- **`getOrCreateThinkingContentIndex()`** -- next to `getOrCreateTextContentIndex()`, with the cached index living in the base so the reset above can clear it.
+- **`StopReasonMap`** -- the stop-reason automaton as provider data (`toolReasons`, `completeReasons`, `finalReasons`, `openReasons`, a fallback state, and a flag for providers whose terminal event carries no reason at all). `recordStopReason` is the one implementation. Same trick as `UsageSchema`.
+- **`renderToolContent(block, naming)`** -- one renderer for MCP-shaped tool results. Only two things vary: the provider's word for a text block, and the image shape, which is a callback because the two shapes share no structure. A naming without an image callback renders an image as a text placeholder rather than throwing.
+- **`ensureThinkingContentIndex()`** -- next to `ensureTextContentIndex()`, with the cached index living in the base so the reset above can clear it. `removeBlocksIf()` and `clearBlocks()` keep that index pointing at the same block (or forget it), so a translator never resets it by hand.
 
 ---
 
@@ -45,7 +45,7 @@ Four things every translator needed, so `BaseMessage` owns them:
 
 A translator is the per-provider `BaseMessage` subclass. Every one of them models the same lifecycle -- a block starts, deltas arrive, the block completes, and the turn ends -- so they spell it the same way. A reader who knows one translator can navigate the next without a second dictionary.
 
-**Entry points.** `applyEvent(...)` takes one raw wire event, whole and unparsed beyond JSON, and returns `MessageEffects`. `applyResponse(body)` does the same for a whole non-streamed body. Both are the *only* public mutators: the dispatch ladder over the provider's event names lives inside the translator, once, and the client never re-derives it. A client that reads `event["type"]` for anything but a guard has taken dispatch back.
+**Entry points.** `applyEvent(...)` takes one raw wire event, whole and unparsed beyond JSON, and returns `MessageEffects`. `applyResponse(body)` does the same for a whole non-streamed body. Both are the *only* public mutators, in all five translators: the dispatch ladder over the provider's event names lives inside the translator, once, and the client never re-derives it. A client that reads `event["type"]` for anything but a guard has taken dispatch back. The one stream with no translator is llama.cpp's native `/completion` shape, which carries plain text and no blocks; `LlamaCppClient` handles it directly.
 
 **Phases.** `handleToolCallStart` / `handleToolCallDelta` / `handleToolCallComplete` for tool calls, `handleContentDelta` for assistant text, `handleStopReason` for the terminal event. Key types legitimately differ -- an `int` index for Claude and OpenAI Chat, a `QString` call id for Responses, an implicit current call for Google, a whole object for Ollama -- and so do arities; the phase word does not. There is deliberately no common base interface: nobody calls a translator polymorphically, and forcing one signature would buy a shim, not a seam.
 
@@ -53,7 +53,7 @@ A translator is the per-provider `BaseMessage` subclass. Every one of them model
 
 **Thinking is not aligned, on purpose.** Claude's `thinking`, OpenAI's `reasoning`, and Google's `thought` blocks carry genuinely different continuation tokens -- a signature, an encrypted item, a thought signature -- with different rules about when they may be dropped. Each translator keeps its provider's word so the difference stays visible at the call site.
 
-**MessageEffects** is what a translator returns instead of reaching into the client: `chunk` (text for `chunkReceived`), `fullText` / `fallbackText` (a whole answer that replaces, or fills in for, what was streamed), `usage` (an object for `applyUsage`), and the `thinkingCompleted` / `toolsReady` flags. `BaseClient::applyEffects` is the one place that turns them into calls, in one order, for every provider.
+**MessageEffects** is what a translator returns instead of reaching into the client: `chunk` (text for `chunkReceived`), `fullText` / `fallbackText` (a whole answer that replaces, or fills in for, what was streamed in the current round -- earlier rounds of the request are never touched), `usage` (an object for `applyUsage`), `error` (a provider error object; the request fails after any text of the same event is delivered), and the `thinkingCompleted` / `toolsReady` flags. `BaseClient::applyEffects` is the one place that turns them into calls, in one order, for every provider.
 
 ---
 

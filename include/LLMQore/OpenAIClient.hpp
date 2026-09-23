@@ -11,24 +11,26 @@
 #include <QLoggingCategory>
 
 #include <LLMQore/BaseClient.hpp>
-#include <LLMQore/SSEParser.hpp>
 
 namespace LLMQore {
 
 class OpenAIMessage;
 
-[[nodiscard]] LLMQORE_EXPORT ProviderProfile openAiProfile();
+[[nodiscard]] LLMQORE_EXPORT ProviderProfile openAIProfile();
 [[nodiscard]] LLMQORE_EXPORT ProviderProfile mistralProfile();
 
 class LLMQORE_EXPORT OpenAIClient : public BaseClient
 {
     Q_OBJECT
 public:
+    explicit OpenAIClient(QObject *parent = nullptr);
     explicit OpenAIClient(
-        const QString &url = {},
-        const QString &apiKey = {},
-        const QString &model = {},
-        HttpTransport *transport = nullptr,
+        const QString &url, const QString &apiKey, const QString &model, QObject *parent = nullptr);
+    explicit OpenAIClient(
+        const QString &url,
+        const QString &apiKey,
+        const QString &model,
+        HttpTransport *transport,
         QObject *parent = nullptr);
 
     RequestID sendMessage(
@@ -51,11 +53,6 @@ protected:
 
     void processSseEvent(
         const RequestID &id, const SSEEvent &event, const QJsonObject &json) override;
-
-private:
-    static QString takeReasoningAndText(OpenAIMessage *message, const QJsonObject &source);
-    void processStreamChunk(const RequestID &id, const QJsonObject &chunk);
-
 };
 
 } // namespace LLMQore

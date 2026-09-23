@@ -69,6 +69,8 @@ When building tool definitions for the provider, `ToolsManager` wraps each enabl
 
 `sendMessage(QJsonObject)` remains the hand-built path, and it stays literal: nothing is attached to a payload the host wrote itself. That is what `ToolsManager::getToolsDefinitions()` is public for.
 
+Only enabled tools count, so a request that must go out without any -- a local model that rejects the `tools` key -- is one where every tool is disabled with `BaseTool::setEnabled(false)`, or one built by hand and sent through `sendMessage`.
+
 ### Execution queue
 
 Each in-flight request has its own tool queue. When `BaseClient` detects pending tool calls in a response, it dispatches each one through `ToolsManager`, which appends them to the request's queue and runs them through `ToolHandler`. Tools execute asynchronously and their futures are monitored for completion. On success, the result is stored; on failure (thrown exception or future error), an error result is recorded so the model sees the failure. Once all tools in the round complete, the round's ledger is closed and cleared, and a batch-level completion signal delivers that round's results to the client, which enforces the round limit, builds the continuation payload, and resends. Clearing at the boundary is what lets a model reuse a tool-call id in the next round without the call being deduplicated away.

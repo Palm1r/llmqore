@@ -10,21 +10,18 @@
 #include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/HttpTransport.hpp>
 #include <LLMQore/Log.hpp>
-#include <LLMQore/SSEParser.hpp>
-
-#include "core/ThreadAffinity.hpp"
 
 namespace LLMQore {
 
 ProviderProfile claudeProfile()
 {
-    return ProviderProfile{
-        QStringLiteral("/v1/messages"),
-        QStringLiteral("/v1/models"),
-        &llmClaudeLog(),
-        AuthScheme{AuthScheme::Placement::Header, QStringLiteral("x-api-key"), {}},
-        {{QStringLiteral("Content-Type"), QStringLiteral("application/json")},
-         {QStringLiteral("anthropic-version"), QStringLiteral("2023-06-01")}}};
+    ProviderProfile profile = {
+        .chatPath = QStringLiteral("/v1/messages"),
+        .modelsPath = QStringLiteral("/v1/models"),
+        .log = &llmClaudeLog(),
+        .auth = {.placement = AuthScheme::Placement::Header, .name = QStringLiteral("x-api-key")}};
+    profile.headers.insert(QStringLiteral("anthropic-version"), QStringLiteral("2023-06-01"));
+    return profile;
 }
 
 namespace {
@@ -37,6 +34,15 @@ const UsageSchema kClaudeUsage{
     {}};
 
 } // namespace
+
+ClaudeClient::ClaudeClient(QObject *parent)
+    : ClaudeClient({}, {}, {}, parent)
+{}
+
+ClaudeClient::ClaudeClient(
+    const QString &url, const QString &apiKey, const QString &model, QObject *parent)
+    : ClaudeClient(url, apiKey, model, nullptr, parent)
+{}
 
 ClaudeClient::ClaudeClient(
     const QString &url,
@@ -170,18 +176,16 @@ QJsonObject ClaudeClient::buildContinuationPayload(
 
 void ClaudeClient::processSseEvent(const RequestID &id, const SSEEvent &, const QJsonObject &event)
 {
-    const QString eventType = event["type"].toString();
-
-    if (eventType == "message_stop")
-        return;
-
     auto *message = qobject_cast<ClaudeMessage *>(messageForRequest(id));
     if (!message) {
-        if (eventType != "message_start") {
-            qCWarning(llmClaudeLog).noquote()
-                << QString("Dropping event '%1' for request %2: no active message (missing "
-                           "message_start?)")
-                       .arg(eventType, id);
+        const QString eventType = event["type"].toString();
+        if (eventType != "message_start" && eventType != "error") {
+            if (eventType != "message_stop") {
+                qCWarning(llmClaudeLog).noquote()
+                    << QString("Dropping event '%1' for request %2: no active message (missing "
+                               "message_start?)")
+                           .arg(eventType, id);
+            }
             return;
         }
         message = ensureMessage<ClaudeMessage>(id);

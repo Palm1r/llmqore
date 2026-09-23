@@ -53,8 +53,9 @@ MessageEffects ClaudeMessage::applyEvent(const QJsonObject &event)
 
     } else if (type == "content_block_delta") {
         const QJsonObject delta = event["delta"].toObject();
-        applyDelta(event["index"].toInt(), delta);
-        if (delta["type"].toString() == "text_delta")
+        const QString deltaType = delta["type"].toString();
+        applyDelta(event["index"].toInt(), deltaType, delta);
+        if (deltaType == "text_delta")
             effects.chunk = delta["text"].toString();
 
     } else if (type == "content_block_stop") {
@@ -68,6 +69,9 @@ MessageEffects ClaudeMessage::applyEvent(const QJsonObject &event)
             effects.toolsReady = true;
         }
         effects.usage = event;
+
+    } else if (type == "error") {
+        effects.error = event["error"].toObject();
     }
 
     return effects;
@@ -111,70 +115,69 @@ void ClaudeMessage::beginBlock(int index, const QJsonObject &data)
         << QString("beginBlock index=%1, blockType=%2").arg(index).arg(blockType);
 
     if (blockType == "text") {
-        addCurrentContent(TextContent{data["text"].toString()});
+        m_blockPositions[index] = addCurrentContent(TextContent{data["text"].toString()});
 
     } else if (blockType == "image") {
         const QJsonObject source = data["source"].toObject();
         const QString sourceType = source["type"].toString();
 
         if (sourceType == "url") {
-            addCurrentContent(ImageContent::fromUrl(QUrl(source["url"].toString())));
+            m_blockPositions[index]
+                = addCurrentContent(ImageContent::fromUrl(QUrl(source["url"].toString())));
         } else {
-            addCurrentContent(ImageContent::fromBase64(
+            m_blockPositions[index] = addCurrentContent(ImageContent::fromBase64(
                 source["data"].toString(), source["media_type"].toString()));
         }
 
     } else if (blockType == "tool_use") {
-        m_toolCalls.start(
-            index,
-            addCurrentContent(
-                ToolUseContent{
-                    data["id"].toString(), data["name"].toString(), data["input"].toObject()}));
+        const int position = addCurrentContent(
+            ToolUseContent{
+                data["id"].toString(), data["name"].toString(), data["input"].toObject()});
+        m_blockPositions[index] = position;
+        m_toolCalls.start(index, position);
 
     } else if (blockType == "thinking") {
         const QString signature = data["signature"].toString();
         qCDebug(llmClaudeLog).noquote()
             << QString("Creating thinking block with signature length=%1").arg(signature.length());
-        addCurrentContent(ThinkingContent{.thinking = data["thinking"].toString(),
-                                          .signature = signature});
+        m_blockPositions[index] = addCurrentContent(
+            ThinkingContent{.thinking = data["thinking"].toString(), .signature = signature});
 
     } else if (blockType == "redacted_thinking") {
         const QString signature = data["signature"].toString();
         qCDebug(llmClaudeLog).noquote()
             << QString("Creating redacted_thinking block with signature length=%1")
                    .arg(signature.length());
-        addCurrentContent(RedactedThinkingContent{.signature = signature});
+        m_blockPositions[index] = addCurrentContent(RedactedThinkingContent{.signature = signature});
     }
 }
 
-void ClaudeMessage::applyDelta(int index, const QJsonObject &delta)
+void ClaudeMessage::applyDelta(int index, const QString &deltaType, const QJsonObject &delta)
 {
-    if (index >= m_currentBlocks.size()) {
+    const int position = m_blockPositions.value(index, -1);
+    if (position < 0)
         return;
-    }
-
-    const QString deltaType = delta["type"].toString();
 
     if (deltaType == "text_delta") {
-        if (auto *textContent = blockAt<TextContent>(index))
+        if (auto *textContent = blockAt<TextContent>(position))
             textContent->text += delta["text"].toString();
 
     } else if (deltaType == "input_json_delta") {
         m_toolCalls.delta(index, delta["partial_json"].toString());
 
     } else if (deltaType == "thinking_delta") {
-        if (auto *thinkingContent = blockAt<ThinkingContent>(index))
+        if (auto *thinkingContent = blockAt<ThinkingContent>(position))
             thinkingContent->thinking += delta["thinking"].toString();
 
     } else if (deltaType == "signature_delta") {
         const QString signature = delta["signature"].toString();
-        if (auto *thinkingContent = blockAt<ThinkingContent>(index)) {
+        if (auto *thinkingContent = blockAt<ThinkingContent>(position)) {
             thinkingContent->signature = signature;
             qCDebug(llmClaudeLog).noquote()
                 << QString("Set signature for thinking block %1: length=%2")
                        .arg(index)
                        .arg(signature.length());
-        } else if (auto *redactedContent = blockAt<RedactedThinkingContent>(index)) {
+        } else if (auto *redactedContent = blockAt<RedactedThinkingContent>(position)) {
             redactedContent->signature = signature;
             qCDebug(llmClaudeLog).noquote()
                 << QString("Set signature for redacted_thinking block %1: length=%2")
@@ -199,8 +202,7 @@ void ClaudeMessage::handleStopReason(const QString &stopReason)
         MessageState::Complete,
         false};
 
-    m_stopReason = stopReason;
-    m_state = resolveState(m_stopReason, kMap);
+    recordStopReason(stopReason, kMap);
 }
 
 namespace {
@@ -345,7 +347,7 @@ QList<RedactedThinkingContent> ClaudeMessage::currentRedactedThinkingContent() c
 void ClaudeMessage::clearDerivedCaches()
 {
     m_toolCalls.clear();
-    m_stopReason.clear();
+    m_blockPositions.clear();
 }
 
 } // namespace LLMQore

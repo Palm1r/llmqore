@@ -2,7 +2,7 @@
 
 ## Summary table
 
-The **default auth** column is what each client seeds in its constructor. None of it is fixed: `setAuthScheme` moves the key to any header or query parameter, and `setHeader` / `setHeaders` replace the default header set. See [BaseClient contract](base-client.md).
+The **default auth** column is what each client's profile carries (`claudeProfile()`, `googleProfile()`, ...). None of it is fixed: `setAuthScheme` moves the key to any header or query parameter, and `setHeader` / `setHeaders` replace the default header set. See [BaseClient contract](base-client.md).
 
 | Provider | Client class | Message class | Stream framing | Default auth |
 |---|---|---|---|---|
@@ -37,7 +37,7 @@ Streams via SSE with the API key passed as a query parameter -- the one client w
 
 ## Mistral (a profile, not a class)
 
-OpenAI-compatible with no dedicated client class. Construct an `OpenAIClient` and hand it `mistralProfile()`, which is the whole of what `MistralClient` used to be: `/v1/chat/completions`, `/v1/models`, and the `llmqore.mistral` logging category. Pass `/fim/completions` as the `endpoint` argument to `sendMessage` to target the Codestral fill-in-the-middle endpoint. Bearer-token auth and the standard OpenAI error envelope apply.
+OpenAI-compatible with no dedicated client class. Construct an `OpenAIClient` and hand it `mistralProfile()`, which is the whole of what `MistralClient` used to be: `/v1/chat/completions`, `/v1/models`, and the `llmqore.mistral` logging category. Pass `/v1/fim/completions` as the `endpoint` argument to `sendMessage` to target the Codestral fill-in-the-middle endpoint; like the profile's paths, it is appended to the host URL (`https://api.mistral.ai`). Bearer-token auth and the standard OpenAI error envelope apply.
 
 A provider earns a class when it has behaviour -- a different wire format, framing, or event vocabulary. Paths, headers, auth and a logging category are a `ProviderProfile`.
 

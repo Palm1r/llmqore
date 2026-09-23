@@ -4,31 +4,24 @@
 #include <LLMQore/OpenAIResponsesClient.hpp>
 
 #include <LLMQore/HttpTransport.hpp>
-#include <LLMQore/SSEParser.hpp>
 
 #include <algorithm>
 
 #include <QJsonArray>
 
+#include "OpenAIErrorAnnotations.hpp"
 #include "OpenAIResponsesMessage.hpp"
 #include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/Log.hpp>
-
-#include "core/ThreadAffinity.hpp"
+#include <LLMQore/OpenAIClient.hpp>
 
 namespace LLMQore {
 
-ProviderProfile openAiResponsesProfile()
+ProviderProfile openAIResponsesProfile()
 {
-    return ProviderProfile{
-        QStringLiteral("/responses"),
-        QStringLiteral("/models"),
-        &llmOpenAILog(),
-        AuthScheme{
-            AuthScheme::Placement::Header,
-            QStringLiteral("Authorization"),
-            QStringLiteral("Bearer ")},
-        {{QStringLiteral("Content-Type"), QStringLiteral("application/json")}}};
+    ProviderProfile profile = openAIProfile();
+    profile.chatPath = QStringLiteral("/responses");
+    return profile;
 }
 
 namespace {
@@ -42,6 +35,15 @@ const UsageSchema kResponsesUsage{
 
 } // namespace
 
+OpenAIResponsesClient::OpenAIResponsesClient(QObject *parent)
+    : OpenAIResponsesClient({}, {}, {}, parent)
+{}
+
+OpenAIResponsesClient::OpenAIResponsesClient(
+    const QString &url, const QString &apiKey, const QString &model, QObject *parent)
+    : OpenAIResponsesClient(url, apiKey, model, nullptr, parent)
+{}
+
 OpenAIResponsesClient::OpenAIResponsesClient(
     const QString &url,
     const QString &apiKey,
@@ -50,7 +52,7 @@ OpenAIResponsesClient::OpenAIResponsesClient(
     QObject *parent)
     : BaseClient(url, apiKey, model, transport, parent)
 {
-    setProfile(openAiResponsesProfile());
+    setProfile(openAIResponsesProfile());
 }
 
 RequestID OpenAIResponsesClient::sendMessage(
@@ -128,9 +130,7 @@ QFuture<QList<ModelInfo>> OpenAIResponsesClient::listModels(const QString &endpo
 
 QList<BaseClient::ErrorAnnotation> OpenAIResponsesClient::errorAnnotations() const
 {
-    return {
-        {QStringLiteral("type"), QStringLiteral("type")},
-        {QStringLiteral("code"), QStringLiteral("code")}};
+    return openAIErrorAnnotations();
 }
 
 void OpenAIResponsesClient::setReasoningPersistence(ReasoningPersistence mode)
