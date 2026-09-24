@@ -294,6 +294,23 @@ inline void waitWithTimeout(
     loop.exec();
 }
 
+[[nodiscard]] inline bool isRateLimitError(const QString &error)
+{
+    return error.startsWith(QLatin1String("HTTP 429"))
+           || error.contains(QLatin1String("(code: 429)"))
+           || error.contains(QLatin1String("rate_limit"), Qt::CaseInsensitive);
+}
+
+[[nodiscard]] inline bool isRateLimited(const TestResult &result)
+{
+    return result.failed && isRateLimitError(result.errorMessage);
+}
+
+#define LLMQORE_SKIP_IF_RATE_LIMITED(result)                                                   \
+    if (::LLMQore::IntegrationTest::isRateLimited(result))                                      \
+    GTEST_SKIP() << "provider rate limit, not a code failure: "                                 \
+                 << (result).errorMessage.toStdString()
+
 class ProviderTestBase : public ::testing::Test
 {
 protected:
@@ -344,6 +361,7 @@ inline void expectMultiTurnAccepted(BaseClient *client)
 
     QEventLoop firstLoop;
     TestResult first = runConversation(client, conversation, firstLoop);
+    LLMQORE_SKIP_IF_RATE_LIMITED(first);
 
     ASSERT_FALSE(first.timedOut) << "First turn timed out\n" << first.diagnostics();
     ASSERT_TRUE(first.completed) << first.diagnostics();
@@ -359,6 +377,7 @@ inline void expectMultiTurnAccepted(BaseClient *client)
 
     QEventLoop secondLoop;
     TestResult second = runConversation(client, carried, secondLoop);
+    LLMQORE_SKIP_IF_RATE_LIMITED(second);
 
     ASSERT_FALSE(second.timedOut) << "Second turn timed out\n" << second.diagnostics();
     ASSERT_TRUE(second.completed) << "Provider rejected the replayed history\n"
@@ -393,6 +412,8 @@ inline void expectAskOnceResolves(BaseClient *client)
     loop.exec();
 
     ASSERT_TRUE(settled) << "askOnce future never settled";
+    if (isRateLimitError(error))
+        GTEST_SKIP() << "provider rate limit, not a code failure: " << error.toStdString();
     ASSERT_TRUE(error.isEmpty()) << "askOnce rejected: " << error.toStdString();
     EXPECT_FALSE(received.fullText.isEmpty());
 }

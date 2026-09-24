@@ -57,6 +57,7 @@ TEST_F(OllamaIntegrationTest, SimpleTextResponse)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -76,6 +77,7 @@ TEST_F(OllamaIntegrationTest, SimpleStringPrompt)
     client->ask("Reply with exactly one word: Pong");
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -103,6 +105,7 @@ TEST_F(OllamaIntegrationTest, StreamingChunks)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -125,6 +128,7 @@ TEST_F(OllamaIntegrationTest, ToolUse_EchoTool)
     client->ask(conversation);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -147,6 +151,7 @@ TEST_F(OllamaIntegrationTest, ToolUse_Calculator)
     client->ask(conversation);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -173,6 +178,7 @@ TEST_F(OllamaIntegrationTest, ThinkingBlocks)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -209,6 +215,7 @@ TEST_F(OllamaIntegrationTest, ImageMessage_Base64)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_FALSE(result.failed) << result.diagnostics();
@@ -233,6 +240,7 @@ TEST_F(OllamaIntegrationTest, BufferedTextResponse)
     client->sendMessage(payload, {}, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -252,6 +260,7 @@ TEST_F(OllamaIntegrationTest, BufferedStringPrompt)
     client->ask("Reply with exactly one word: Pong", RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kOllamaTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();

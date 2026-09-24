@@ -126,6 +126,7 @@ TEST_F(ClaudeMcpIntegrationTest, ClaudeCallsMcpEchoTool)
     claude->ask(conversation, QJsonObject{{"max_tokens", 500}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -157,6 +158,7 @@ TEST_F(ClaudeMcpIntegrationTest, ClaudeCallsMcpCalculatorTool)
     claude->ask(conversation, QJsonObject{{"max_tokens", 500}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();

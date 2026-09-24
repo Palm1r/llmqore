@@ -48,6 +48,7 @@ TEST_F(ClaudeIntegrationTest, SimpleTextResponse)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -68,6 +69,7 @@ TEST_F(ClaudeIntegrationTest, SimpleStringPrompt)
     client->ask("Reply with exactly one word: Pong");
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -99,6 +101,7 @@ TEST_F(ClaudeIntegrationTest, StreamingChunks)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -123,6 +126,7 @@ TEST_F(ClaudeIntegrationTest, ToolUse_EchoTool)
     client->ask(conversation, QJsonObject{{"max_tokens", 500}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -147,6 +151,7 @@ TEST_F(ClaudeIntegrationTest, ToolUse_Calculator)
     client->ask(conversation, QJsonObject{{"max_tokens", 500}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -174,6 +179,7 @@ TEST_F(ClaudeIntegrationTest, ExtendedThinking)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -210,6 +216,7 @@ TEST_F(ClaudeIntegrationTest, ImageMessage_Base64)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_FALSE(result.failed) << result.diagnostics();
@@ -237,6 +244,7 @@ TEST_F(ClaudeIntegrationTest, BufferedTextResponse)
     client->sendMessage(payload, {}, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -256,6 +264,7 @@ TEST_F(ClaudeIntegrationTest, BufferedStringPrompt)
     client->ask("Reply with exactly one word: Pong", RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();

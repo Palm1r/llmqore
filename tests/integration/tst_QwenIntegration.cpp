@@ -47,6 +47,7 @@ TEST_F(QwenIntegrationTest, SimpleTextResponse)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -70,6 +71,7 @@ TEST_F(QwenIntegrationTest, StreamingChunks)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -92,6 +94,7 @@ TEST_F(QwenIntegrationTest, BufferedTextResponse)
     client->sendMessage(payload, {}, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -115,6 +118,7 @@ TEST_F(QwenIntegrationTest, ToolUse_Calculator)
     client->ask(conversation);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();

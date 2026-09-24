@@ -47,6 +47,7 @@ TEST_F(GoogleAIIntegrationTest, SimpleTextResponse)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -66,6 +67,7 @@ TEST_F(GoogleAIIntegrationTest, SimpleStringPrompt)
     client->ask("Reply with exactly one word: Pong");
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -90,6 +92,7 @@ TEST_F(GoogleAIIntegrationTest, StreamingChunks)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -112,6 +115,7 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_EchoTool)
     client->ask(conversation);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -144,6 +148,7 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_ImageReturningTool)
     client->ask(conversation);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -171,6 +176,7 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_Calculator)
     client->ask(conversation);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -201,6 +207,7 @@ TEST_F(GoogleAIIntegrationTest, ThinkingBlocks)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -234,6 +241,7 @@ TEST_F(GoogleAIIntegrationTest, ImageMessage_InlineData)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_FALSE(result.failed) << result.diagnostics();
@@ -259,6 +267,7 @@ TEST_F(GoogleAIIntegrationTest, BufferedTextResponse)
     client->sendMessage(payload, {}, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -278,6 +287,7 @@ TEST_F(GoogleAIIntegrationTest, BufferedStringPrompt)
     client->ask("Reply with exactly one word: Pong", RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();

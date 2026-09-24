@@ -59,6 +59,7 @@ TEST_F(MistralIntegrationTest, SimpleTextResponse)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -78,6 +79,7 @@ TEST_F(MistralIntegrationTest, SimpleStringPrompt)
     client->ask("Reply with exactly one word: Pong");
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -102,6 +104,7 @@ TEST_F(MistralIntegrationTest, StreamingChunks)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -125,6 +128,7 @@ TEST_F(MistralIntegrationTest, ToolUse_EchoTool)
     client->ask(conversation, QJsonObject{{"max_tokens", 300}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -149,6 +153,7 @@ TEST_F(MistralIntegrationTest, ToolUse_Calculator)
     client->ask(conversation, QJsonObject{{"max_tokens", 300}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -185,6 +190,7 @@ TEST_F(MistralIntegrationTest, ImageMessage_Base64)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_FALSE(result.failed) << result.diagnostics();
@@ -209,6 +215,7 @@ TEST_F(MistralIntegrationTest, BufferedTextResponse)
     client->sendMessage(payload, {}, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -228,6 +235,7 @@ TEST_F(MistralIntegrationTest, BufferedStringPrompt)
     client->ask("Reply with exactly one word: Pong", RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -277,6 +285,7 @@ TEST_F(MistralIntegrationTest, FimCompletion_Streaming)
     client->sendMessage(payload, kFimEndpoint);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -302,6 +311,7 @@ TEST_F(MistralIntegrationTest, FimCompletion_NoSuffix)
     client->sendMessage(payload, kFimEndpoint);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -326,6 +336,7 @@ TEST_F(MistralIntegrationTest, FimCompletion_Buffered)
     client->sendMessage(payload, kFimEndpoint, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
