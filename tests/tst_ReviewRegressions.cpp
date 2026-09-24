@@ -542,6 +542,48 @@ TEST(ParseHttpError, BodyWithoutAnErrorObjectFallsBackToTheSnippet)
               QStringLiteral("HTTP 502: <html>bad gateway</html>"));
 }
 
+TEST(ParseHttpError, MistralTopLevelEnvelopeIsReadWithItsAnnotations)
+{
+    FakeHttpTransport transport;
+    OpenAIClient client("https://fake.local", "sk-test", "mistral-small-latest", &transport);
+    client.setProfile(mistralProfile());
+
+    QSignalSpy failed(&client, &BaseClient::requestFailed);
+
+    client.ask(QStringLiteral("hi"));
+    auto *stream = transport.lastStream();
+    stream->sendHeaders(429);
+    stream->sendChunk(
+        R"({"object":"error","message":"Rate limit exceeded","type":"rate_limited",)"
+        R"("param":null,"code":"1300","raw_status_code":429})");
+    stream->sendFinished();
+
+    ASSERT_EQ(failed.size(), 1);
+    EXPECT_EQ(
+        failed.first().at(1).toString(),
+        QStringLiteral("HTTP 429: Rate limit exceeded (type: rate_limited) (code: 1300)"));
+}
+
+TEST(ParseHttpError, ATopLevelMessageWithoutTheErrorMarkerStaysASnippet)
+{
+    FakeHttpTransport transport;
+    OpenAIClient client("https://fake.local", "sk-test", "mistral-small-latest", &transport);
+    client.setProfile(mistralProfile());
+
+    QSignalSpy failed(&client, &BaseClient::requestFailed);
+
+    client.ask(QStringLiteral("hi"));
+    auto *stream = transport.lastStream();
+    stream->sendHeaders(401);
+    stream->sendChunk(R"({"message":"Unauthorized","request_id":"r1"})");
+    stream->sendFinished();
+
+    ASSERT_EQ(failed.size(), 1);
+    EXPECT_EQ(
+        failed.first().at(1).toString(),
+        QStringLiteral(R"(HTTP 401: {"message":"Unauthorized","request_id":"r1"})"));
+}
+
 // --- LlamaCpp now inherits the OpenAI dialect instead of copying it ---
 
 TEST(LlamaCppInheritance, RunsTheOpenAIToolLoop)

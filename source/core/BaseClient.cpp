@@ -545,20 +545,17 @@ QList<BaseClient::ErrorAnnotation> BaseClient::errorAnnotations() const
 
 QString BaseClient::errorMessageFrom(const QJsonObject &body) const
 {
-    const QJsonValue error = body.value(QLatin1String("error"));
-    if (error.isString())
-        return error.toString();
-    if (!error.isObject())
+    const std::optional<QJsonObject> error = errorIn(body);
+    if (!error)
         return {};
 
-    const QJsonObject object = error.toObject();
-    QString out = object.value(QLatin1String("message")).toString();
+    QString out = error->value(QLatin1String("message")).toString();
     if (out.isEmpty())
         return {};
 
     const QList<ErrorAnnotation> annotations = errorAnnotations();
     for (const ErrorAnnotation &annotation : annotations) {
-        const QJsonValue value = object.value(annotation.field);
+        const QJsonValue value = error->value(annotation.field);
         QString text;
         if (value.isString())
             text = value.toString();

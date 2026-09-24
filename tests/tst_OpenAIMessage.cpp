@@ -242,6 +242,17 @@ TEST(OpenAIMessage, AnErrorChunkIsHandedBackAsAnError)
     EXPECT_TRUE(msg.currentBlocks().isEmpty());
 }
 
+TEST(OpenAIMessage, ATopLevelErrorObjectInTheStreamIsHandedBackAsAnError)
+{
+    OpenAIMessage msg;
+    const MessageEffects effects = msg.applyEvent(QJsonObject{
+        {"object", "error"}, {"message", "Rate limit exceeded"}, {"type", "rate_limited"}});
+
+    ASSERT_TRUE(effects.error.has_value());
+    EXPECT_EQ(effects.error->value("message").toString(), "Rate limit exceeded");
+    EXPECT_TRUE(msg.currentBlocks().isEmpty());
+}
+
 TEST(OpenAIMessage, BufferedResponseReplaysTheChoiceAsAStreamChunk)
 {
     OpenAIMessage msg;

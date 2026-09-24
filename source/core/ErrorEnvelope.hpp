@@ -17,6 +17,8 @@ namespace LLMQore {
         return error.toObject();
     if (error.isString() && !error.toString().isEmpty())
         return QJsonObject{{QStringLiteral("message"), error.toString()}};
+    if (body.value(QLatin1String("object")).toString() == QLatin1String("error"))
+        return body;
     return std::nullopt;
 }
 
