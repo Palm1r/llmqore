@@ -11,6 +11,32 @@
 
 namespace LLMQore {
 class ToolRegistry;
+class ObjectMethodTool;
+class ObjectToolsAdapter;
+
+class LLMQORE_EXPORT AbstractToolObject : public QObject
+{
+    Q_OBJECT
+
+public:
+    ~AbstractToolObject() override;
+
+    QString name() const;
+
+protected:
+    friend class ObjectMethodTool;
+    friend class ObjectToolsAdapter;
+
+    virtual QString toolPrefix() const { return QString(); }
+
+    virtual bool queryMethodInfo(const QMetaMethod &method, QString &id, QString &displayName,
+                                 QString &description);
+
+    explicit AbstractToolObject();
+
+private:
+    mutable QString m_name;
+};
 
 class LLMQORE_EXPORT ObjectToolsAdapter : public QObject
 {
@@ -26,7 +52,10 @@ public:
     template<class T>
     static ObjectToolsAdapter *create(const QVariantMap &props = QVariantMap())
     {
-        return create(new T(), props);
+        if (T::staticMetaObject.superClass() == &AbstractToolObject::staticMetaObject)
+            return create(new T(), props);
+
+        return nullptr;
     }
 
     virtual ~ObjectToolsAdapter() override;
@@ -34,16 +63,16 @@ public:
     QObject *object() const { return m_object; }
 
     QList<BaseTool *> registerTools(ToolRegistry *toolRegistry,
-                                    MethodFilter filter = MethodFilter::AllPublic,
-                                    const QString &toolPrefix = QString());
+                                    MethodFilter filter = MethodFilter::AllPublic);
 
 private:
-    static ObjectToolsAdapter *create(QObject *object, const QVariantMap &props = QVariantMap());
+    static ObjectToolsAdapter *create(AbstractToolObject *object,
+                                      const QVariantMap &props = QVariantMap());
 
-    explicit ObjectToolsAdapter(QObject *object);
+    explicit ObjectToolsAdapter(AbstractToolObject *object);
 
 private:
-    QObject *m_object = nullptr;
+    AbstractToolObject *m_object = nullptr;
     const QMetaObject *m_metaObject = nullptr;
 };
 

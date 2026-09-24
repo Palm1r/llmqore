@@ -33,10 +33,84 @@ static QThread *ObjectToolsAdapterThread()
     return thread;
 }
 
+AbstractToolObject::AbstractToolObject() : QObject(nullptr) { }
+
+AbstractToolObject::~AbstractToolObject() { }
+
+QString AbstractToolObject::name() const
+{
+    if (m_name.isEmpty()) {
+        // Infer the object name
+        const QMetaObject *metaObject = this->metaObject();
+        if (this->objectName().isEmpty()) {
+            m_name = QString::fromLatin1(metaObject->className());
+        } else {
+            m_name = this->objectName();
+        }
+    }
+
+    return m_name;
+}
+
+bool AbstractToolObject::queryMethodInfo(const QMetaMethod &method, QString &id,
+                                         QString &displayName, QString &description)
+{
+    // First verify that the method belongs to this object
+    const QMetaObject *metaObject = this->metaObject();
+    bool validMethod = false;
+    while (metaObject) {
+        if (method.enclosingMetaObject() == metaObject) {
+            validMethod = true;
+            break;
+        }
+        metaObject = metaObject->superClass();
+    }
+    metaObject = this->metaObject();
+
+    if (!validMethod)
+        return false;
+
+    if ((method.methodType() != QMetaMethod::Method && method.methodType() != QMetaMethod::Slot)
+        || method.access() != QMetaMethod::Public)
+        return false;
+
+    // ID is the method name without the tool prefix (if any)
+    const QString prefix = this->toolPrefix();
+    id = QString::fromLatin1(method.name());
+    if (!prefix.isEmpty() && id.startsWith(prefix)) {
+        id.remove(0, prefix.length());
+    }
+
+    // Lookup Q_CLASS_INFO for displayName and description
+    for (int i = metaObject->classInfoOffset(); i < metaObject->classInfoCount(); ++i) {
+        const QMetaClassInfo classInfo = metaObject->classInfo(i);
+        const QString classInfoName = QString::fromLatin1(classInfo.name());
+
+        if (classInfoName == id + QStringLiteral(".displayName")) {
+            displayName = QString::fromLatin1(classInfo.value());
+        } else if (classInfoName == id + QStringLiteral(".description")) {
+            description = QString::fromLatin1(classInfo.value());
+        }
+    }
+
+    // If displayName empty, use the method name as displayName
+    if (displayName.isEmpty()) {
+        displayName = id;
+    }
+
+    return !id.isEmpty() && !displayName.isEmpty() && !description.isEmpty();
+}
+
 class ObjectMethodTool : public BaseTool
 {
 public:
     virtual ~ObjectMethodTool() override;
+
+    bool isValid() const
+    {
+        return m_method.isValid() && !m_id.isEmpty() && !m_displayName.isEmpty()
+                && !m_description.isEmpty();
+    }
 
     QString id() const override { return m_id; }
     QString displayName() const override { return m_displayName; }
@@ -47,67 +121,32 @@ public:
     QFuture<LLMQore::ToolResult> executeAsync(const QJsonObject &input) override;
 
 private:
-    explicit ObjectMethodTool(const QString &toolPrefix, const QMetaMethod &method, QObject *object,
+    explicit ObjectMethodTool(const QMetaMethod &method, AbstractToolObject *object,
                               QObject *parent = nullptr);
 
     void onObjectDestroyed(QObject *ptr);
 
 private:
     QString m_id;
-    QString m_objectName;
     QString m_displayName;
     QString m_description;
     QJsonObject m_parametersSchema;
 
     QMetaMethod m_method;
-    QObject *m_object = nullptr;
+    AbstractToolObject *m_object = nullptr;
 
     friend class ObjectToolsAdapter;
 };
 
 // ObjectMethodTool
-ObjectMethodTool::ObjectMethodTool(const QString &toolPrefix, const QMetaMethod &method,
-                                   QObject *object, QObject *parent)
+ObjectMethodTool::ObjectMethodTool(const QMetaMethod &method, AbstractToolObject *object,
+                                   QObject *parent)
     : BaseTool(parent), m_method(method), m_object(object)
 {
     connect(m_object, &QObject::destroyed, this, &ObjectMethodTool::onObjectDestroyed);
 
-    // ID is the method name without the tool prefix (if any)
-    m_id = QString::fromLatin1(m_method.name());
-    if (!toolPrefix.isEmpty() && m_id.startsWith(toolPrefix)) {
-        m_id.remove(0, toolPrefix.length());
-    }
-
-    // Infer the object name
-    const QMetaObject *metaObject = m_object->metaObject();
-    if (m_object->objectName().isEmpty()) {
-        m_objectName = QString::fromLatin1(metaObject->className());
-    } else {
-        m_objectName = m_object->objectName();
-    }
-
-    // Lookup Q_CLASS_INFO for displayName and description
-    for (int i = QObject::staticMetaObject.classInfoOffset(); i < metaObject->classInfoCount();
-         ++i) {
-        const QMetaClassInfo classInfo = metaObject->classInfo(i);
-        const QString classInfoName = QString::fromLatin1(classInfo.name());
-
-        if (classInfoName == m_id + QStringLiteral(".displayName")) {
-            m_displayName = QString::fromLatin1(classInfo.value());
-        } else if (classInfoName == m_id + QStringLiteral(".description")) {
-            m_description = QString::fromLatin1(classInfo.value());
-        }
-    }
-
-    // If displayName or description is empty, use the method name as displayName and an empty
-    // string as description
-    if (m_displayName.isEmpty()) {
-        m_displayName = m_id;
-    }
-    if (m_description.isEmpty()) {
-        m_description =
-                QStringLiteral("Calls the method ") + m_id + QStringLiteral(" on ") + m_objectName;
-    }
+    if (!object->queryMethodInfo(method, m_id, m_displayName, m_description))
+        return;
 
     // Infer parameters schema from the method's parameters
     const QList<QByteArray> parameterNames = m_method.parameterNames();
@@ -247,19 +286,18 @@ static ToolResult invokeMethod(QObject *object, const QString &objectName,
 
 QFuture<LLMQore::ToolResult> ObjectMethodTool::executeAsync(const QJsonObject &input)
 {
-    return QtConcurrent::run(invokeMethod, m_object, m_objectName, m_method, input);
+    return QtConcurrent::run(invokeMethod, m_object, m_object->name(), m_method, input);
 }
 
 // ObjectToolsAdapter
-ObjectToolsAdapter::ObjectToolsAdapter(QObject *object)
+ObjectToolsAdapter::ObjectToolsAdapter(AbstractToolObject *object)
     : QObject(ObjectToolsAdapterThread()), m_object(object), m_metaObject(object->metaObject())
 {
 }
 
 ObjectToolsAdapter::~ObjectToolsAdapter() { }
 
-QList<BaseTool *> ObjectToolsAdapter::registerTools(ToolRegistry *toolRegistry, MethodFilter filter,
-                                                    const QString &toolPrefix)
+QList<BaseTool *> ObjectToolsAdapter::registerTools(ToolRegistry *toolRegistry, MethodFilter filter)
 {
     QList<BaseTool *> ret;
     if (toolRegistry == nullptr || m_object == nullptr)
@@ -267,7 +305,7 @@ QList<BaseTool *> ObjectToolsAdapter::registerTools(ToolRegistry *toolRegistry, 
 
     // Loop through the object's meta-methods and create ObjectMethodTool instances for each method
     // that matches the filter
-    for (int i = QObject::staticMetaObject.methodCount(); i < m_metaObject->methodCount(); ++i) {
+    for (int i = m_metaObject->methodOffset(); i < m_metaObject->methodCount(); ++i) {
         QMetaMethod method = m_metaObject->method(i);
 
         // QMetaMethod::invoke() allows us to pass up to 10 args. So
@@ -286,14 +324,17 @@ QList<BaseTool *> ObjectToolsAdapter::registerTools(ToolRegistry *toolRegistry, 
             useMethod = true;
 
         // Apply prefix filter if enabled
+        const QString toolPrefix = m_object->toolPrefix();
         if (useMethod && !toolPrefix.isEmpty()) {
             const QString methodName = QString::fromLatin1(method.name());
             useMethod = methodName.startsWith(toolPrefix);
         }
 
         if (useMethod) {
-            auto tool = new ObjectMethodTool(toolPrefix, method, m_object, toolRegistry);
-            if (toolRegistry->tool(tool->id())) {
+            auto tool = new ObjectMethodTool(method, m_object, toolRegistry);
+            if (!tool->isValid()) {
+                delete tool;
+            } else if (toolRegistry->tool(tool->id())) {
                 delete tool; // Duplicate tool
             } else {
                 toolRegistry->addTool(tool);
@@ -305,10 +346,13 @@ QList<BaseTool *> ObjectToolsAdapter::registerTools(ToolRegistry *toolRegistry, 
     return ret;
 }
 
-ObjectToolsAdapter *ObjectToolsAdapter::create(QObject *object, const QVariantMap &props)
+ObjectToolsAdapter *ObjectToolsAdapter::create(AbstractToolObject *object, const QVariantMap &props)
 {
     if (object == nullptr)
         return nullptr; // There has to be an object
+
+    if (object->metaObject()->superClass() != &AbstractToolObject::staticMetaObject)
+        return nullptr; // Only direct subclasses of AbstractToolObject allowed
 
     auto guard = qScopeGuard([object]() { object->deleteLater(); });
 
@@ -361,4 +405,5 @@ ObjectToolsAdapter *ObjectToolsAdapter::create(QObject *object, const QVariantMa
 
     return adapter;
 }
+
 } // namespace LLMQore

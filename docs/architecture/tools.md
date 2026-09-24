@@ -121,20 +121,50 @@ An optional JSON object can accompany the content list. Used by MCP servers for 
 
 `ObjectToolsAdapter` bridges existing QObjects to the tool system, automatically wrapping public methods as tools without requiring manual `BaseTool` subclasses. Each method becomes a tool with parameters inferred from the method signature and metadata from `Q_CLASSINFO`.
 
+**Security note:** Only direct subclasses of `AbstractToolObject` are permitted. This restriction prevents unintended exposure of methods from arbitrary `QObject` subclasses.
+
 ### Usage
 
 ```cpp
-// Create an adapter from a QObject subclass
+// Create an adapter from an AbstractToolObject subclass
 auto *adapter = ObjectToolsAdapter::create<MyObject>();
 
 // Register all public methods as tools
 ToolRegistry registry;
 auto tools = adapter->registerTools(&registry);
 
-// Or filter by method type and prefix
+// Or filter by method type (e.g., only public slots)
 auto filteredTools = adapter->registerTools(&registry, 
-                                            ObjectToolsAdapter::PublicSlot, 
-                                            "tool_");
+                                            ObjectToolsAdapter::PublicSlot);
+```
+
+The prefix for method filtering is defined by overriding `toolPrefix()` on the `AbstractToolObject` subclass (see below).
+
+### Base class requirement
+
+Objects must directly inherit from `AbstractToolObject` (not just any `QObject`):
+
+```cpp
+class MyObject : public LLMQore::AbstractToolObject {
+    Q_OBJECT
+    
+public:
+    Q_INVOKABLE QString myMethod(const QString &input) { return input; }
+};
+```
+
+`ObjectToolsAdapter::create<T>()` will return `nullptr` if `T` does not directly inherit from `AbstractToolObject`.
+
+**Object naming:**
+
+The `name()` method returns the object's name (for use in tool descriptions and error messages):
+- If `QObject::objectName()` is set, it is returned
+- Otherwise, the class name is used
+- The result is cached after the first call
+
+```cpp
+auto *obj = ObjectToolsAdapter::create<MyObject>();
+qDebug() << obj->object()->name();  // "MyObject" (class name) or custom name if set
 ```
 
 ### Method discovery and filtering
@@ -145,7 +175,20 @@ Methods are discovered via Qt's meta-object system. The filter parameter control
 - **`PublicSlot`** -- public slots
 - **`AllPublic`** -- both (default)
 
-An optional prefix (e.g. `"tool_"`) narrows the search to methods starting with that string; the prefix is stripped from the resulting tool ID.
+**Method prefix filtering:**
+
+Override `toolPrefix()` to specify a prefix for method filtering:
+
+```cpp
+class MyObject : public LLMQore::AbstractToolObject {
+    Q_OBJECT
+
+protected:
+    QString toolPrefix() const override { return "tool_"; }
+};
+```
+
+If a non-empty prefix is returned, only methods starting with that prefix will be considered for registration. The prefix is automatically stripped from the resulting tool ID (e.g., `tool_myMethod` becomes `myMethod`).
 
 ### Parameter schema inference
 
@@ -164,17 +207,74 @@ All parameters are required (default parameters are not supported by `QMetaMetho
 
 ### Display name and description via Q_CLASSINFO
 
-By default, the tool ID is the method name (minus prefix) and the description is auto-generated. Override with `Q_CLASSINFO`:
+Both `displayName` and `description` must be provided for a method to be registered as a tool. If either is missing, the method is skipped.
+
+By default:
+- The tool ID is the method name (minus prefix)
+- The `displayName` defaults to the method name if a custom one is not provided via `Q_CLASSINFO`
+- The `description` has **no default** -- it must be explicitly provided
+
+Provide metadata via `Q_CLASSINFO`:
 
 ```cpp
-class MyObject : public QObject {
+class MyObject : public LLMQore::AbstractToolObject {
     Q_OBJECT
     
     Q_CLASSINFO("myTool.displayName", "My Custom Tool")
     Q_CLASSINFO("myTool.description", "Does something useful")
-    Q_INVOKABLE QString tool_myTool(const QString &input) { return input; }
+    Q_INVOKABLE QString myTool(const QString &input) { return input; }
 };
 ```
+
+**Custom metadata via `queryMethodInfo()`:**
+
+In most cases, the default `queryMethodInfo()` implementation is sufficient when using `Q_CLASSINFO` for metadata. Override only when you need custom filtering logic (e.g., allowing only specific methods by name, complex metadata discovery, or conditional tool registration).
+
+Overrides must independently construct `id`, `displayName`, and `description`, and should filter which methods become tools. Access `toolPrefix()` and `name()` from the object itself:
+
+```cpp
+class MyObject : public LLMQore::AbstractToolObject {
+    Q_OBJECT
+    
+public:
+    Q_INVOKABLE QString myTool(const QString &input) { return input; }
+    Q_INVOKABLE QString anotherTool() { return "result"; }
+    Q_INVOKABLE QString internalMethod() { return "internal"; }
+
+protected:
+    bool queryMethodInfo(const QMetaMethod &method, QString &id, QString &displayName,
+                         QString &description) override
+    {
+        // Validate method: must be public method or slot
+        if ((method.methodType() != QMetaMethod::Method && method.methodType() != QMetaMethod::Slot)
+            || method.access() != QMetaMethod::Public)
+            return false;
+        
+        // Filter: only allow specific methods by name
+        QString methodName = QString::fromLatin1(method.name());
+        static const QStringList allowedMethods = { "myTool", "anotherTool" };
+        if (!allowedMethods.contains(methodName))
+            return false;
+        
+        // Build id from method name, stripping prefix if present
+        id = methodName;
+        const QString prefix = this->toolPrefix();
+        if (!prefix.isEmpty() && id.startsWith(prefix)) {
+            id.remove(0, prefix.length());
+        }
+        
+        // Set displayName (may come from Q_CLASSINFO or custom logic)
+        displayName = id;  // Default: use id as displayName
+        
+        // Set description (must be explicit; no default)
+        description = QString("Calls %1 on %2").arg(id, this->name());
+        
+        return !id.isEmpty() && !displayName.isEmpty() && !description.isEmpty();
+    }
+};
+```
+
+Return `true` only if the method should be wrapped as a tool and all three (`id`, `displayName`, `description`) are non-empty; return `false` to skip the method.
 
 ### Return value handling
 

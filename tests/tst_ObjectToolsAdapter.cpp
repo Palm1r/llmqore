@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QScopedValueRollback>
 #include <QSignalSpy>
 #include <QThread>
 #include <QtConcurrentRun>
@@ -17,11 +18,13 @@
 
 using namespace LLMQore;
 
-class TestObject : public QObject
+class TestObject : public AbstractToolObject
 {
     Q_OBJECT
 
 public:
+    static QString prefix;
+
     Q_PROPERTY(QString topic MEMBER m_topic)
     QString m_topic = "default";
 
@@ -79,7 +82,23 @@ public slots:
 
 private:
     Q_INVOKABLE QString privateMethod() { return "private"; }
+
+protected:
+    // AbstractToolObject interface
+    QString toolPrefix() const { return prefix; }
+    bool queryMethodInfo(const QMetaMethod &method, QString &id, QString &displayName,
+                         QString &description)
+    {
+        AbstractToolObject::queryMethodInfo(method, id, displayName, description);
+        if (description.isEmpty())
+            description = QStringLiteral("Calls the method ") + id + QStringLiteral(" on ")
+                    + this->name();
+
+        return true;
+    }
 };
+
+QString TestObject::prefix = QString();
 
 class ObjectToolsAdapterTest : public ::testing::Test
 {
@@ -187,7 +206,8 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(publicMethod->description(), "Calls the method publicMethod on TestObject");
     EXPECT_EQ(publicMethod->parametersSchema(),
               QJsonObject({ { "type", "object" },
-                            { "properties", QJsonObject { { "text", QJsonObject { { "type", "string" } } } } },
+                            { "properties",
+                              QJsonObject { { "text", QJsonObject { { "type", "string" } } } } },
                             { "required", QJsonArray { "text" } } }));
     EXPECT_EQ(publicMethod->safety(), ToolSafety::ReadOnly);
 
@@ -197,11 +217,12 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(addNumbers->id(), "addNumbers");
     EXPECT_EQ(addNumbers->displayName(), "addNumbers");
     EXPECT_EQ(addNumbers->description(), "Calls the method addNumbers on TestObject");
-    EXPECT_EQ(
-            addNumbers->parametersSchema(),
-            QJsonObject({ { "type", "object" },
-                          { "properties", QJsonObject { { "a", QJsonObject { { "type", "integer" } } }, { "b", QJsonObject { { "type", "integer" } } } } },
-                          { "required", QJsonArray { "a", "b" } } }));
+    EXPECT_EQ(addNumbers->parametersSchema(),
+              QJsonObject({ { "type", "object" },
+                            { "properties",
+                              QJsonObject { { "a", QJsonObject { { "type", "integer" } } },
+                                            { "b", QJsonObject { { "type", "integer" } } } } },
+                            { "required", QJsonArray { "a", "b" } } }));
     EXPECT_EQ(addNumbers->safety(), ToolSafety::ReadOnly);
 
     // bool returnBool()
@@ -222,13 +243,13 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(calculateSum->id(), "tool_calculateSum");
     EXPECT_EQ(calculateSum->displayName(), "tool_calculateSum");
     EXPECT_EQ(calculateSum->description(), "Calls the method tool_calculateSum on TestObject");
-    EXPECT_EQ(
-            calculateSum->parametersSchema(),
-            QJsonObject({ { "type", "object" },
-                          { "properties",
-                            QJsonObject {
-                                    { "a", QJsonObject { { "type", "integer" } } }, { "b", QJsonObject { { "type", "integer" } } }, { "c", QJsonObject { { "type", "integer" } } } } },
-                          { "required", QJsonArray { "a", "b", "c" } } }));
+    EXPECT_EQ(calculateSum->parametersSchema(),
+              QJsonObject({ { "type", "object" },
+                            { "properties",
+                              QJsonObject { { "a", QJsonObject { { "type", "integer" } } },
+                                            { "b", QJsonObject { { "type", "integer" } } },
+                                            { "c", QJsonObject { { "type", "integer" } } } } },
+                            { "required", QJsonArray { "a", "b", "c" } } }));
     EXPECT_EQ(calculateSum->safety(), ToolSafety::ReadOnly);
 
     // ImageContent tool_generateImage(const QString &style, int width, int height)
@@ -255,7 +276,8 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(generateAudio->parametersSchema(),
               QJsonObject({ { "type", "object" },
                             { "properties",
-                              QJsonObject { { "duration", QJsonObject { { "type", "integer" } } }, { "format", QJsonObject { { "type", "string" } } } } },
+                              QJsonObject { { "duration", QJsonObject { { "type", "integer" } } },
+                                            { "format", QJsonObject { { "type", "string" } } } } },
                             { "required", QJsonArray { "duration", "format" } } }));
     EXPECT_EQ(generateAudio->safety(), ToolSafety::ReadOnly);
 
@@ -266,11 +288,13 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(getResourceLink->displayName(), "tool_getResourceLink");
     EXPECT_EQ(getResourceLink->description(),
               "Calls the method tool_getResourceLink on TestObject");
-    EXPECT_EQ(getResourceLink->parametersSchema(),
-              QJsonObject({ { "type", "object" },
-                            { "properties",
-                              QJsonObject { { "filename", QJsonObject { { "type", "string" } } }, { "category", QJsonObject { { "type", "string" } } } } },
-                            { "required", QJsonArray { "filename", "category" } } }));
+    EXPECT_EQ(
+            getResourceLink->parametersSchema(),
+            QJsonObject({ { "type", "object" },
+                          { "properties",
+                            QJsonObject { { "filename", QJsonObject { { "type", "string" } } },
+                                          { "category", QJsonObject { { "type", "string" } } } } },
+                          { "required", QJsonArray { "filename", "category" } } }));
     EXPECT_EQ(getResourceLink->safety(), ToolSafety::ReadOnly);
 
     // QString publicSlot(const QString &text)
@@ -281,7 +305,8 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(publicSlot->description(), "Calls the method publicSlot on TestObject");
     EXPECT_EQ(publicSlot->parametersSchema(),
               QJsonObject({ { "type", "object" },
-                            { "properties", QJsonObject { { "text", QJsonObject { { "type", "string" } } } } },
+                            { "properties",
+                              QJsonObject { { "text", QJsonObject { { "type", "string" } } } } },
                             { "required", QJsonArray { "text" } } }));
     EXPECT_EQ(publicSlot->safety(), ToolSafety::ReadOnly);
 
@@ -292,10 +317,12 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
     EXPECT_EQ(transformText->displayName(), "tool_transformText");
     EXPECT_EQ(transformText->description(), "Calls the method tool_transformText on TestObject");
     EXPECT_EQ(transformText->parametersSchema(),
-              QJsonObject({ { "type", "object" },
-                            { "properties",
-                              QJsonObject { { "text", QJsonObject { { "type", "string" } } }, { "uppercase", QJsonObject { { "type", "boolean" } } } } },
-                            { "required", QJsonArray { "text", "uppercase" } } }));
+              QJsonObject(
+                      { { "type", "object" },
+                        { "properties",
+                          QJsonObject { { "text", QJsonObject { { "type", "string" } } },
+                                        { "uppercase", QJsonObject { { "type", "boolean" } } } } },
+                        { "required", QJsonArray { "text", "uppercase" } } }));
     EXPECT_EQ(transformText->safety(), ToolSafety::ReadOnly);
 
     // Private methods should not be registered
@@ -306,11 +333,13 @@ TEST_F(ObjectToolsAdapterTest, RegisterAllPublicAsTools)
 
 TEST_F(ObjectToolsAdapterTest, RegisterPublicMethodsWithPrefixAsTool)
 {
+    QScopedValueRollback<QString> rollback(TestObject::prefix, "tool_");
+
     auto *adapter = ObjectToolsAdapter::create<TestObject>();
     ASSERT_NE(adapter, nullptr);
 
     ToolRegistry registry;
-    auto tools = adapter->registerTools(&registry, ObjectToolsAdapter::AllPublic, "tool_");
+    auto tools = adapter->registerTools(&registry, ObjectToolsAdapter::AllPublic);
 
     // Should find only 5 public methods with tool_ prefix
     EXPECT_EQ(tools.size(), 5);
@@ -326,13 +355,13 @@ TEST_F(ObjectToolsAdapterTest, RegisterPublicMethodsWithPrefixAsTool)
     EXPECT_EQ(calculateSum->id(), "calculateSum");
     EXPECT_EQ(calculateSum->displayName(), "Calculate Sum");
     EXPECT_EQ(calculateSum->description(), "Calculates the sum of three numbers");
-    EXPECT_EQ(
-            calculateSum->parametersSchema(),
-            QJsonObject({ { "type", "object" },
-                          { "properties",
-                            QJsonObject {
-                                    { "a", QJsonObject { { "type", "integer" } } }, { "b", QJsonObject { { "type", "integer" } } }, { "c", QJsonObject { { "type", "integer" } } } } },
-                          { "required", QJsonArray { "a", "b", "c" } } }));
+    EXPECT_EQ(calculateSum->parametersSchema(),
+              QJsonObject({ { "type", "object" },
+                            { "properties",
+                              QJsonObject { { "a", QJsonObject { { "type", "integer" } } },
+                                            { "b", QJsonObject { { "type", "integer" } } },
+                                            { "c", QJsonObject { { "type", "integer" } } } } },
+                            { "required", QJsonArray { "a", "b", "c" } } }));
     EXPECT_EQ(calculateSum->safety(), ToolSafety::ReadOnly);
 
     auto *generateImage = registry.tool("generateImage");
@@ -357,7 +386,8 @@ TEST_F(ObjectToolsAdapterTest, RegisterPublicMethodsWithPrefixAsTool)
     EXPECT_EQ(generateAudio->parametersSchema(),
               QJsonObject({ { "type", "object" },
                             { "properties",
-                              QJsonObject { { "duration", QJsonObject { { "type", "integer" } } }, { "format", QJsonObject { { "type", "string" } } } } },
+                              QJsonObject { { "duration", QJsonObject { { "type", "integer" } } },
+                                            { "format", QJsonObject { { "type", "string" } } } } },
                             { "required", QJsonArray { "duration", "format" } } }));
     EXPECT_EQ(generateAudio->safety(), ToolSafety::ReadOnly);
 
@@ -366,11 +396,13 @@ TEST_F(ObjectToolsAdapterTest, RegisterPublicMethodsWithPrefixAsTool)
     EXPECT_EQ(getResourceLink->id(), "getResourceLink");
     EXPECT_EQ(getResourceLink->displayName(), "getResourceLink");
     EXPECT_EQ(getResourceLink->description(), "Calls the method getResourceLink on TestObject");
-    EXPECT_EQ(getResourceLink->parametersSchema(),
-              QJsonObject({ { "type", "object" },
-                            { "properties",
-                              QJsonObject { { "filename", QJsonObject { { "type", "string" } } }, { "category", QJsonObject { { "type", "string" } } } } },
-                            { "required", QJsonArray { "filename", "category" } } }));
+    EXPECT_EQ(
+            getResourceLink->parametersSchema(),
+            QJsonObject({ { "type", "object" },
+                          { "properties",
+                            QJsonObject { { "filename", QJsonObject { { "type", "string" } } },
+                                          { "category", QJsonObject { { "type", "string" } } } } },
+                          { "required", QJsonArray { "filename", "category" } } }));
     EXPECT_EQ(getResourceLink->safety(), ToolSafety::ReadOnly);
 
     auto *transformText = registry.tool("transformText");
@@ -379,10 +411,12 @@ TEST_F(ObjectToolsAdapterTest, RegisterPublicMethodsWithPrefixAsTool)
     EXPECT_EQ(transformText->displayName(), "transformText");
     EXPECT_EQ(transformText->description(), "Calls the method transformText on TestObject");
     EXPECT_EQ(transformText->parametersSchema(),
-              QJsonObject({ { "type", "object" },
-                            { "properties",
-                              QJsonObject { { "text", QJsonObject { { "type", "string" } } }, { "uppercase", QJsonObject { { "type", "boolean" } } } } },
-                            { "required", QJsonArray { "text", "uppercase" } } }));
+              QJsonObject(
+                      { { "type", "object" },
+                        { "properties",
+                          QJsonObject { { "text", QJsonObject { { "type", "string" } } },
+                                        { "uppercase", QJsonObject { { "type", "boolean" } } } } },
+                        { "required", QJsonArray { "text", "uppercase" } } }));
     EXPECT_EQ(transformText->safety(), ToolSafety::ReadOnly);
 
     // Methods with tool_ prefix should not be found with tool_ prefix in the registry
@@ -433,11 +467,13 @@ TEST_F(ObjectToolsAdapterTest, RegisterPublicSlots)
 
 TEST_F(ObjectToolsAdapterTest, PublicMethodsWithUnknownPrefixNotRegistered)
 {
+    QScopedValueRollback<QString> rollback(TestObject::prefix, "unknown_");
+
     auto *adapter = ObjectToolsAdapter::create<TestObject>();
     ASSERT_NE(adapter, nullptr);
 
     ToolRegistry registry;
-    auto tools = adapter->registerTools(&registry, ObjectToolsAdapter::AllPublic, "unknown_");
+    auto tools = adapter->registerTools(&registry, ObjectToolsAdapter::AllPublic);
 
     // Private methods should not be registered
     EXPECT_EQ(tools.size(), 0);
