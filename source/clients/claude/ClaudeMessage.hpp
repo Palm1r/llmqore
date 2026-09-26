@@ -18,12 +18,8 @@ public:
     // How this provider spells tool schemas on the way out.
     static const ToolDialect &toolDialect();
 
-    void handleContentBlockStart(int index, const QString &blockType, const QJsonObject &data);
-    void handleContentBlockDelta(int index, const QString &deltaType, const QJsonObject &delta);
-    void handleContentBlockStop(int index);
-    void handleStopReason(const QString &stopReason);
-
-    QString stopReason() const override { return m_stopReason; }
+    MessageEffects applyEvent(const QJsonObject &event);
+    MessageEffects applyResponse(const QJsonObject &response);
 
     QJsonObject toProviderFormat() const;
     QJsonArray createToolResultsContent(const QHash<QString, ToolResult> &toolResults) const;
@@ -32,13 +28,16 @@ public:
 
     static QJsonValue serializeTurnContent(const TurnContent &block);
 
-    void startNewContinuation() override;
-
 private:
-    QString m_stopReason;
-    QHash<int, QString> m_pendingToolInputs;
+    void clearDerivedCaches() override;
 
-    void updateStateFromStopReason();
+    void beginBlock(int index, const QJsonObject &block);
+    void applyDelta(int index, const QString &deltaType, const QJsonObject &delta);
+    void endBlock(int index);
+    void handleStopReason(const QString &stopReason);
+
+    ToolCallAccumulator<int> m_toolCalls;
+    QHash<int, int> m_blockPositions;
 };
 
 } // namespace LLMQore

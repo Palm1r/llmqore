@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "IntegrationTestHelpers.hpp"
+#include <LLMQore/Conversation.hpp>
 #include <LLMQore/OpenAIResponsesClient.hpp>
 #include <LLMQore/ToolResult.hpp>
 #include <LLMQore/ToolsManager.hpp>
@@ -23,8 +24,7 @@ protected:
 
     std::unique_ptr<OpenAIResponsesClient> createClient()
     {
-        return std::make_unique<OpenAIResponsesClient>(
-            m_url, m_apiKey, m_model);
+        return std::make_unique<OpenAIResponsesClient>(m_url, m_apiKey, m_model);
     }
 
     QString m_apiKey;
@@ -48,6 +48,7 @@ TEST_F(OpenAIResponsesIntegrationTest, SimpleTextResponse)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -67,6 +68,7 @@ TEST_F(OpenAIResponsesIntegrationTest, SimpleStringPrompt)
     client->ask("Reply with exactly one word: Pong");
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -92,6 +94,7 @@ TEST_F(OpenAIResponsesIntegrationTest, StreamingChunks)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -108,16 +111,14 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_EchoTool)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["input"]
-        = "Use the echo tool to echo 'responses integration test'. Then tell me the result.";
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
+    Conversation conversation;
+    conversation.addUser(
+        "Use the echo tool to echo 'responses integration test'. Then tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -136,15 +137,13 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_Calculator)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["input"] = "Use the calculator to add 123 and 456. Tell me the result.";
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
+    Conversation conversation;
+    conversation.addUser("Use the calculator to add 123 and 456. Tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -172,24 +171,22 @@ TEST_F(OpenAIResponsesIntegrationTest, ToolUse_ImageReturningTool)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["input"]
-        = "Call the get_sample_image tool (no arguments) and then tell me what "
-          "colour the returned image is. Reply with a single lowercase colour "
-          "word like 'red' or 'blue'.";
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
+    Conversation conversation;
+    conversation.addUser(
+        "Call the get_sample_image tool (no arguments) and then tell me what "
+        "colour the returned image is. Reply with a single lowercase colour "
+        "word like 'red' or 'blue'.");
 
-    client->sendMessage(payload);
+    client->ask(conversation);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
     EXPECT_FALSE(result.failed) << result.diagnostics();
-    EXPECT_FALSE(result.toolCalls.isEmpty())
-        << "Model did not invoke the image-returning tool\n" << result.diagnostics();
+    EXPECT_FALSE(result.toolCalls.isEmpty()) << "Model did not invoke the image-returning tool\n"
+                                             << result.diagnostics();
     // Model should have something non-empty in its final response — we
     // don't assert the exact colour because tiny bitmaps are hard for the
     // default nano model. The important invariant is that the multi-turn
@@ -228,6 +225,7 @@ TEST_F(OpenAIResponsesIntegrationTest, ImageMessage_InputImage)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_FALSE(result.failed) << result.diagnostics();
@@ -253,6 +251,7 @@ TEST_F(OpenAIResponsesIntegrationTest, BufferedTextResponse)
     client->sendMessage(payload, {}, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -272,6 +271,7 @@ TEST_F(OpenAIResponsesIntegrationTest, BufferedStringPrompt)
     client->ask("Reply with exactly one word: Pong", RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();

@@ -30,8 +30,11 @@ LLMQore::BaseClient *makeClient(
         return new LLMQore::OpenAIResponsesClient(url, apiKey, {}, parent);
     if (provider == "DeepSeek")
         return new LLMQore::OpenAIClient(url, apiKey, {}, parent);
-    if (provider == "Mistral")
-        return new LLMQore::MistralClient(url, apiKey, {}, parent);
+    if (provider == "Mistral") {
+        auto *mistral = new LLMQore::OpenAIClient(url, apiKey, {}, parent);
+        mistral->setProfile(LLMQore::mistralProfile());
+        return mistral;
+    }
     if (provider == "Ollama")
         return new LLMQore::OllamaClient(url, apiKey, {}, parent);
     if (provider == "Google AI")

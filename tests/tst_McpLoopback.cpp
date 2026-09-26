@@ -322,13 +322,6 @@ public:
         return id;
     }
 
-    RequestID ask(
-        const QString &prompt,
-        RequestMode mode = RequestMode::Streaming) override
-    {
-        return sendMessage(QJsonObject{{"prompt", prompt}}, {}, mode);
-    }
-
     QJsonObject buildConversationPayload(const Conversation &conversation) const override
     {
         return conversation.toJson();
@@ -347,7 +340,7 @@ protected:
     const ToolDialect &toolDialect() const override { return OpenAIMessage::toolDialect(); }
     const UsageSchema &usageSchema() const override { return kNoUsageSchema; }
     void processData(const RequestID &, const QByteArray &) override {}
-    void processBufferedResponse(const RequestID &, const QByteArray &) override {}
+    void processBufferedBody(const RequestID &, const QJsonObject &) override {}
     QJsonObject buildContinuationPayload(
         const QJsonObject &,
         BaseMessage *,

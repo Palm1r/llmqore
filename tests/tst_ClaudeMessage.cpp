@@ -10,6 +10,69 @@
 
 using namespace LLMQore;
 
+namespace {
+
+QJsonObject messageStart()
+{
+    return QJsonObject{
+        {"type", "message_start"},
+        {"message",
+         QJsonObject{
+             {"type", "message"},
+             {"role", "assistant"},
+             {"content", QJsonArray{}},
+             {"usage", QJsonObject{{"input_tokens", 12}, {"output_tokens", 1}}}}}};
+}
+
+QJsonObject blockStart(int index, const QJsonObject &block)
+{
+    return QJsonObject{{"type", "content_block_start"}, {"index", index}, {"content_block", block}};
+}
+
+QJsonObject blockDelta(int index, const QJsonObject &delta)
+{
+    return QJsonObject{{"type", "content_block_delta"}, {"index", index}, {"delta", delta}};
+}
+
+QJsonObject blockStop(int index)
+{
+    return QJsonObject{{"type", "content_block_stop"}, {"index", index}};
+}
+
+QJsonObject messageDelta(const QString &stopReason)
+{
+    return QJsonObject{
+        {"type", "message_delta"},
+        {"delta", QJsonObject{{"stop_reason", stopReason}, {"stop_sequence", QJsonValue()}}},
+        {"usage", QJsonObject{{"output_tokens", 42}}}};
+}
+
+QJsonObject textBlock(const QString &text = {})
+{
+    return QJsonObject{{"type", "text"}, {"text", text}};
+}
+
+QJsonObject toolUseBlock(const QString &id, const QString &name, const QJsonObject &input = {})
+{
+    return QJsonObject{{"type", "tool_use"}, {"id", id}, {"name", name}, {"input", input}};
+}
+
+QJsonObject base64ImageBlock(const QString &data, const QString &mediaType)
+{
+    return QJsonObject{
+        {"type", "image"},
+        {"source", QJsonObject{{"type", "base64"}, {"data", data}, {"media_type", mediaType}}}};
+}
+
+void startText(ClaudeMessage &msg, int index, const QString &text)
+{
+    msg.applyEvent(blockStart(index, textBlock()));
+    if (!text.isEmpty())
+        msg.applyEvent(blockDelta(index, QJsonObject{{"type", "text_delta"}, {"text", text}}));
+}
+
+} // namespace
+
 TEST(ClaudeMessage, InitialState)
 {
     ClaudeMessage msg;
@@ -20,117 +83,288 @@ TEST(ClaudeMessage, InitialState)
     EXPECT_TRUE(msg.currentRedactedThinkingContent().isEmpty());
 }
 
-TEST(ClaudeMessage, HandleTextBlock)
+TEST(ClaudeMessage, MessageStartCarriesUsageAndResetsTheTurn)
 {
     ClaudeMessage msg;
-    msg.handleContentBlockStart(0, "text", {});
-    EXPECT_EQ(msg.currentBlocks().size(), 1);
-    EXPECT_TRUE(std::holds_alternative<TextContent>(msg.currentBlocks()[0]));
+    startText(msg, 0, "stale");
+    msg.applyEvent(messageDelta("end_turn"));
+    ASSERT_EQ(msg.state(), MessageState::Final);
 
-    msg.handleContentBlockDelta(0, "text_delta", QJsonObject{{"text", "Hello "}});
-    msg.handleContentBlockDelta(0, "text_delta", QJsonObject{{"text", "world"}});
+    const MessageEffects effects = msg.applyEvent(messageStart());
 
-    auto *textBlock = std::get_if<TextContent>(&msg.currentBlocks()[0]);
+    EXPECT_EQ(msg.state(), MessageState::Building);
+    EXPECT_TRUE(msg.currentBlocks().isEmpty());
+    EXPECT_EQ(effects.usage["usage"].toObject()["input_tokens"].toInt(), 12)
+        << "message_start hands the client the message envelope, not the event";
+}
+
+TEST(ClaudeMessage, TextDeltasAccumulateAndAreHandedBackAsChunks)
+{
+    ClaudeMessage msg;
+    msg.applyEvent(blockStart(0, textBlock()));
+
+    const MessageEffects first = msg.applyEvent(
+        blockDelta(0, QJsonObject{{"type", "text_delta"}, {"text", "Hello "}}));
+    const MessageEffects second = msg.applyEvent(
+        blockDelta(0, QJsonObject{{"type", "text_delta"}, {"text", "world"}}));
+
+    EXPECT_EQ(first.chunk, "Hello ");
+    EXPECT_EQ(second.chunk, "world");
+
+    ASSERT_EQ(msg.currentBlocks().size(), 1);
+    const auto *textBlock = std::get_if<TextContent>(&msg.currentBlocks()[0]);
     ASSERT_NE(textBlock, nullptr);
     EXPECT_EQ(textBlock->text, "Hello world");
 }
 
-TEST(ClaudeMessage, HandleToolUseBlock)
+TEST(ClaudeMessage, NonTextDeltasProduceNoChunk)
 {
     ClaudeMessage msg;
-    QJsonObject data{{"id", "tool-123"}, {"name", "read_file"}, {"input", QJsonObject{}}};
-    msg.handleContentBlockStart(0, "tool_use", data);
+    msg.applyEvent(
+        blockStart(0, QJsonObject{{"type", "thinking"}, {"thinking", ""}, {"signature", ""}}));
 
-    EXPECT_EQ(msg.currentBlocks().size(), 1);
-    EXPECT_EQ(msg.currentToolUseContent().size(), 1);
+    const MessageEffects effects = msg.applyEvent(
+        blockDelta(0, QJsonObject{{"type", "thinking_delta"}, {"thinking", "hm"}}));
 
-    auto toolBlock = msg.currentToolUseContent()[0];
-    EXPECT_EQ(toolBlock.id, "tool-123");
-    EXPECT_EQ(toolBlock.name, "read_file");
+    EXPECT_TRUE(effects.chunk.isEmpty()) << "thinking never reaches chunkReceived";
 }
 
-TEST(ClaudeMessage, HandleToolUseBlock_StreamedInput)
+TEST(ClaudeMessage, ToolUseBlockStartsFromTheWireEvent)
 {
     ClaudeMessage msg;
-    QJsonObject data{{"id", "tool-1"}, {"name", "write"}, {"input", QJsonObject{}}};
-    msg.handleContentBlockStart(0, "tool_use", data);
+    msg.applyEvent(blockStart(0, toolUseBlock("tool-123", "read_file")));
 
-    msg.handleContentBlockDelta(0, "input_json_delta", QJsonObject{{"partial_json", R"({"path":)"}});
-    msg.handleContentBlockDelta(0, "input_json_delta", QJsonObject{{"partial_json", R"("/tmp/f"})"}});
-    msg.handleContentBlockStop(0);
-
-    auto toolBlock = msg.currentToolUseContent()[0];
-    EXPECT_EQ(toolBlock.input["path"].toString(), "/tmp/f");
+    ASSERT_EQ(msg.currentToolUseContent().size(), 1);
+    EXPECT_EQ(msg.currentToolUseContent()[0].id, "tool-123");
+    EXPECT_EQ(msg.currentToolUseContent()[0].name, "read_file");
 }
 
-TEST(ClaudeMessage, HandleThinkingBlock)
+TEST(ClaudeMessage, StreamedToolInputIsParsedOnBlockStop)
 {
     ClaudeMessage msg;
-    QJsonObject data{{"thinking", ""}, {"signature", ""}};
-    msg.handleContentBlockStart(0, "thinking", data);
+    msg.applyEvent(blockStart(0, toolUseBlock("tool-1", "write")));
+    msg.applyEvent(
+        blockDelta(0, QJsonObject{{"type", "input_json_delta"}, {"partial_json", R"({"path":)"}}));
+    msg.applyEvent(
+        blockDelta(0, QJsonObject{{"type", "input_json_delta"}, {"partial_json", R"("/tmp/f"})"}}));
+    msg.applyEvent(blockStop(0));
 
-    msg.handleContentBlockDelta(0, "thinking_delta", QJsonObject{{"thinking", "Let me think..."}});
-    msg.handleContentBlockDelta(0, "signature_delta", QJsonObject{{"signature", "sig123"}});
-
-    auto thinkingBlocks = msg.currentThinkingContent();
-    EXPECT_EQ(thinkingBlocks.size(), 1);
-    EXPECT_EQ(thinkingBlocks[0].thinking, "Let me think...");
-    EXPECT_EQ(thinkingBlocks[0].signature, "sig123");
+    EXPECT_EQ(msg.currentToolUseContent()[0].input["path"].toString(), "/tmp/f");
 }
 
-TEST(ClaudeMessage, HandleRedactedThinkingBlock)
+TEST(ClaudeMessage, UnparseableStreamedToolInputYieldsAnEmptyObject)
 {
     ClaudeMessage msg;
-    QJsonObject data{{"signature", "redacted-sig"}};
-    msg.handleContentBlockStart(0, "redacted_thinking", data);
+    msg.applyEvent(blockStart(0, toolUseBlock("tool-1", "write")));
+    msg.applyEvent(
+        blockDelta(0, QJsonObject{{"type", "input_json_delta"}, {"partial_json", R"({"path":)"}}));
+    msg.applyEvent(blockStop(0));
 
-    auto redactedBlocks = msg.currentRedactedThinkingContent();
-    EXPECT_EQ(redactedBlocks.size(), 1);
-    EXPECT_EQ(redactedBlocks[0].signature, "redacted-sig");
+    EXPECT_TRUE(msg.currentToolUseContent()[0].input.isEmpty());
 }
 
-TEST(ClaudeMessage, HandleStopReason_EndTurn)
+TEST(ClaudeMessage, ThinkingBlockCollectsTextAndSignature)
 {
     ClaudeMessage msg;
-    msg.handleContentBlockStart(0, "text", {});
-    msg.handleStopReason("end_turn");
+    msg.applyEvent(
+        blockStart(0, QJsonObject{{"type", "thinking"}, {"thinking", ""}, {"signature", ""}}));
+    msg.applyEvent(
+        blockDelta(0, QJsonObject{{"type", "thinking_delta"}, {"thinking", "Let me think..."}}));
+    msg.applyEvent(blockDelta(0, QJsonObject{{"type", "signature_delta"}, {"signature", "sig123"}}));
+
+    ASSERT_EQ(msg.currentThinkingContent().size(), 1);
+    EXPECT_EQ(msg.currentThinkingContent()[0].thinking, "Let me think...");
+    EXPECT_EQ(msg.currentThinkingContent()[0].signature, "sig123");
+}
+
+TEST(ClaudeMessage, RedactedThinkingBlockKeepsItsSignature)
+{
+    ClaudeMessage msg;
+    msg.applyEvent(
+        blockStart(0, QJsonObject{{"type", "redacted_thinking"}, {"signature", "redacted-sig"}}));
+
+    ASSERT_EQ(msg.currentRedactedThinkingContent().size(), 1);
+    EXPECT_EQ(msg.currentRedactedThinkingContent()[0].signature, "redacted-sig");
+}
+
+TEST(ClaudeMessage, BlockStopAsksTheClientToFlushThinkingNotifications)
+{
+    ClaudeMessage msg;
+    msg.applyEvent(blockStart(0, textBlock()));
+
+    EXPECT_TRUE(msg.applyEvent(blockStop(0)).thinkingCompleted);
+}
+
+TEST(ClaudeMessage, StopReasonEndTurnIsFinal)
+{
+    ClaudeMessage msg;
+    startText(msg, 0, "hi");
+
+    const MessageEffects effects = msg.applyEvent(messageDelta("end_turn"));
+
     EXPECT_EQ(msg.state(), MessageState::Final);
+    EXPECT_EQ(msg.stopReason(), "end_turn");
+    EXPECT_TRUE(effects.toolsReady) << "the client dispatches on the message state, not on a flag";
+    EXPECT_EQ(effects.usage["usage"].toObject()["output_tokens"].toInt(), 42);
 }
 
-TEST(ClaudeMessage, HandleStopReason_ToolUse)
+TEST(ClaudeMessage, StopReasonToolUseRequiresExecution)
 {
     ClaudeMessage msg;
-    QJsonObject data{{"id", "t1"}, {"name", "tool"}, {"input", QJsonObject{}}};
-    msg.handleContentBlockStart(0, "tool_use", data);
-    msg.handleStopReason("tool_use");
+    msg.applyEvent(blockStart(0, toolUseBlock("t1", "tool")));
+    msg.applyEvent(messageDelta("tool_use"));
+
     EXPECT_EQ(msg.state(), MessageState::RequiresToolExecution);
 }
 
-TEST(ClaudeMessage, HandleStopReason_ToolUseWithoutToolBlocks)
+TEST(ClaudeMessage, StopReasonToolUseWithoutToolBlocksIsMerelyComplete)
 {
     ClaudeMessage msg;
-    msg.handleContentBlockStart(0, "text", {});
-    msg.handleStopReason("tool_use");
+    startText(msg, 0, "hi");
+    msg.applyEvent(messageDelta("tool_use"));
+
     EXPECT_EQ(msg.state(), MessageState::Complete);
 }
 
-TEST(ClaudeMessage, HandleStopReason_Other)
+TEST(ClaudeMessage, StopReasonMaxTokensIsComplete)
 {
     ClaudeMessage msg;
-    msg.handleStopReason("max_tokens");
+    msg.applyEvent(messageDelta("max_tokens"));
+
     EXPECT_EQ(msg.state(), MessageState::Complete);
+}
+
+TEST(ClaudeMessage, MessageDeltaWithoutAStopReasonStillCarriesUsage)
+{
+    ClaudeMessage msg;
+    const MessageEffects effects = msg.applyEvent(
+        QJsonObject{
+            {"type", "message_delta"},
+            {"delta", QJsonObject{}},
+            {"usage", QJsonObject{{"output_tokens", 7}}}});
+
+    EXPECT_FALSE(effects.toolsReady);
+    EXPECT_EQ(effects.usage["usage"].toObject()["output_tokens"].toInt(), 7);
+    EXPECT_EQ(msg.state(), MessageState::Building);
+}
+
+TEST(ClaudeMessage, UnknownEventTypesAreIgnored)
+{
+    ClaudeMessage msg;
+    const MessageEffects effects = msg.applyEvent(QJsonObject{{"type", "ping"}});
+
+    EXPECT_TRUE(effects.chunk.isEmpty());
+    EXPECT_TRUE(effects.usage.isEmpty());
+    EXPECT_FALSE(effects.thinkingCompleted);
+    EXPECT_FALSE(effects.toolsReady);
+    EXPECT_TRUE(msg.currentBlocks().isEmpty());
+}
+
+TEST(ClaudeMessage, DeltaForAnUnopenedBlockIsDropped)
+{
+    ClaudeMessage msg;
+    msg.applyEvent(blockDelta(99, QJsonObject{{"type", "text_delta"}, {"text", "orphan"}}));
+
+    EXPECT_TRUE(msg.currentBlocks().isEmpty());
+}
+
+TEST(ClaudeMessage, BlockStopForABlockWithoutToolInputIsHarmless)
+{
+    ClaudeMessage msg;
+    msg.applyEvent(blockStart(0, textBlock()));
+    msg.applyEvent(blockStop(0));
+
+    EXPECT_EQ(msg.currentBlocks().size(), 1);
+}
+
+TEST(ClaudeMessage, BufferedResponseCollectsTextIntoOneChunk)
+{
+    ClaudeMessage msg;
+
+    const MessageEffects effects = msg.applyResponse(
+        QJsonObject{
+            {"content", QJsonArray{textBlock("Hello "), textBlock("world")}},
+            {"stop_reason", "end_turn"},
+            {"usage", QJsonObject{{"input_tokens", 3}, {"output_tokens", 5}}}});
+
+    EXPECT_EQ(effects.chunk, "Hello world");
+    EXPECT_TRUE(effects.toolsReady);
+    EXPECT_EQ(effects.usage["usage"].toObject()["output_tokens"].toInt(), 5);
+    EXPECT_EQ(msg.state(), MessageState::Final);
+    ASSERT_EQ(msg.currentBlocks().size(), 2);
+}
+
+TEST(ClaudeMessage, BufferedToolUseKeepsItsCompleteInput)
+{
+    ClaudeMessage msg;
+
+    msg.applyResponse(
+        QJsonObject{
+            {"content",
+             QJsonArray{toolUseBlock("t1", "get_weather", QJsonObject{{"city", "Berlin"}})}},
+            {"stop_reason", "tool_use"}});
+
+    ASSERT_EQ(msg.currentToolUseContent().size(), 1);
+    EXPECT_EQ(msg.currentToolUseContent()[0].input["city"].toString(), "Berlin")
+        << "a buffered tool_use arrives complete -- there are no input_json_deltas to wait for";
+    EXPECT_EQ(msg.state(), MessageState::RequiresToolExecution);
+}
+
+TEST(ClaudeMessage, BufferedThinkingIsNotReplayedTwice)
+{
+    ClaudeMessage msg;
+
+    const MessageEffects effects = msg.applyResponse(
+        QJsonObject{
+            {"content",
+             QJsonArray{
+                 QJsonObject{{"type", "thinking"}, {"thinking", "step one"}, {"signature", "sig"}},
+                 textBlock("answer")}},
+            {"stop_reason", "end_turn"}});
+
+    EXPECT_TRUE(effects.thinkingCompleted);
+    EXPECT_EQ(effects.chunk, "answer");
+    ASSERT_EQ(msg.currentThinkingContent().size(), 1);
+    EXPECT_EQ(msg.currentThinkingContent()[0].thinking, "step one")
+        << "the complete block already carries the text; replaying it would double it";
+    EXPECT_EQ(msg.currentThinkingContent()[0].signature, "sig");
+}
+
+TEST(ClaudeMessage, BufferedResponseWithoutAStopReasonLeavesTheTurnOpen)
+{
+    ClaudeMessage msg;
+
+    const MessageEffects effects = msg.applyResponse(
+        QJsonObject{{"content", QJsonArray{textBlock("partial")}}});
+
+    EXPECT_FALSE(effects.toolsReady);
+    EXPECT_EQ(msg.state(), MessageState::Building);
+}
+
+TEST(ClaudeMessage, BufferedResponseStartsANewTurn)
+{
+    ClaudeMessage msg;
+    startText(msg, 0, "previous");
+    msg.applyEvent(messageDelta("tool_use"));
+
+    msg.applyResponse(
+        QJsonObject{{"content", QJsonArray{textBlock("fresh")}}, {"stop_reason", "end_turn"}});
+
+    ASSERT_EQ(msg.currentBlocks().size(), 1);
+    const auto *block = std::get_if<TextContent>(&msg.currentBlocks()[0]);
+    ASSERT_NE(block, nullptr);
+    EXPECT_EQ(block->text, "fresh");
 }
 
 TEST(ClaudeMessage, ToProviderFormat_TextOnly)
 {
     ClaudeMessage msg;
-    msg.handleContentBlockStart(0, "text", {});
-    msg.handleContentBlockDelta(0, "text_delta", QJsonObject{{"text", "Hello"}});
+    startText(msg, 0, "Hello");
 
-    QJsonObject result = msg.toProviderFormat();
+    const QJsonObject result = msg.toProviderFormat();
     EXPECT_EQ(result["role"].toString(), "assistant");
-    QJsonArray content = result["content"].toArray();
-    EXPECT_EQ(content.size(), 1);
+    const QJsonArray content = result["content"].toArray();
+    ASSERT_EQ(content.size(), 1);
     EXPECT_EQ(content[0].toObject()["type"].toString(), "text");
     EXPECT_EQ(content[0].toObject()["text"].toString(), "Hello");
 }
@@ -138,14 +372,13 @@ TEST(ClaudeMessage, ToProviderFormat_TextOnly)
 TEST(ClaudeMessage, ToProviderFormat_MixedBlocks)
 {
     ClaudeMessage msg;
-    msg.handleContentBlockStart(0, "thinking", QJsonObject{{"thinking", ""}, {"signature", ""}});
-    msg.handleContentBlockDelta(0, "thinking_delta", QJsonObject{{"thinking", "hmm"}});
-    msg.handleContentBlockStart(1, "text", {});
-    msg.handleContentBlockDelta(1, "text_delta", QJsonObject{{"text", "answer"}});
+    msg.applyEvent(
+        blockStart(0, QJsonObject{{"type", "thinking"}, {"thinking", ""}, {"signature", ""}}));
+    msg.applyEvent(blockDelta(0, QJsonObject{{"type", "thinking_delta"}, {"thinking", "hmm"}}));
+    startText(msg, 1, "answer");
 
-    QJsonObject result = msg.toProviderFormat();
-    QJsonArray content = result["content"].toArray();
-    EXPECT_EQ(content.size(), 2);
+    const QJsonArray content = msg.toProviderFormat()["content"].toArray();
+    ASSERT_EQ(content.size(), 2);
     EXPECT_EQ(content[0].toObject()["type"].toString(), "thinking");
     EXPECT_EQ(content[1].toObject()["type"].toString(), "text");
 }
@@ -153,21 +386,19 @@ TEST(ClaudeMessage, ToProviderFormat_MixedBlocks)
 TEST(ClaudeMessage, CreateToolResultsContent)
 {
     ClaudeMessage msg;
-    QJsonObject data1{{"id", "t1"}, {"name", "read"}, {"input", QJsonObject{}}};
-    QJsonObject data2{{"id", "t2"}, {"name", "write"}, {"input", QJsonObject{}}};
-    msg.handleContentBlockStart(0, "tool_use", data1);
-    msg.handleContentBlockStart(1, "tool_use", data2);
+    msg.applyEvent(blockStart(0, toolUseBlock("t1", "read")));
+    msg.applyEvent(blockStart(1, toolUseBlock("t2", "write")));
 
     QHash<QString, ToolResult> results;
     results["t1"] = ToolResult::text("file content");
     results["t2"] = ToolResult::text("write ok");
 
-    QJsonArray toolResults = msg.createToolResultsContent(results);
-    EXPECT_EQ(toolResults.size(), 2);
+    const QJsonArray toolResults = msg.createToolResultsContent(results);
+    ASSERT_EQ(toolResults.size(), 2);
 
     bool foundT1 = false, foundT2 = false;
     for (const auto &val : toolResults) {
-        QJsonObject obj = val.toObject();
+        const QJsonObject obj = val.toObject();
         EXPECT_EQ(obj["type"].toString(), "tool_result");
         // Single-text-block fast path: content is a bare string.
         if (obj["tool_use_id"].toString() == "t1") {
@@ -186,21 +417,23 @@ TEST(ClaudeMessage, CreateToolResultsContent)
 TEST(ClaudeMessage, CreateToolResultsContentWithImageBlock)
 {
     ClaudeMessage msg;
-    QJsonObject data{{"id", "img"}, {"name", "read_image"}, {"input", QJsonObject{}}};
-    msg.handleContentBlockStart(0, "tool_use", data);
+    msg.applyEvent(blockStart(0, toolUseBlock("img", "read_image")));
 
     // A rich result: a description + an image block. Claude should emit a
     // tool_result whose `content` is a JSON array (not a bare string),
     // containing a text block and an image block with base64-encoded data.
     ToolResult r;
     r.content.append(TextContent{"here is the screenshot"});
-    const QByteArray pngBytes = QByteArray("\x89PNG\r\n\x1a\n" "fake", 12);
+    const QByteArray pngBytes = QByteArray(
+        "\x89PNG\r\n\x1a\n"
+        "fake",
+        12);
     r.content.append(ImageContent::fromBytes(pngBytes, "image/png"));
 
     QHash<QString, ToolResult> results;
     results["img"] = r;
 
-    QJsonArray toolResults = msg.createToolResultsContent(results);
+    const QJsonArray toolResults = msg.createToolResultsContent(results);
     ASSERT_EQ(toolResults.size(), 1);
 
     const QJsonObject wrap = toolResults.first().toObject();
@@ -211,30 +444,26 @@ TEST(ClaudeMessage, CreateToolResultsContentWithImageBlock)
     const QJsonArray content = wrap["content"].toArray();
     ASSERT_EQ(content.size(), 2);
 
-    // First block: text
     EXPECT_EQ(content[0].toObject()["type"].toString(), "text");
     EXPECT_EQ(content[0].toObject()["text"].toString(), "here is the screenshot");
 
-    // Second block: image with base64 source
     const QJsonObject imgBlock = content[1].toObject();
     EXPECT_EQ(imgBlock["type"].toString(), "image");
     const QJsonObject source = imgBlock["source"].toObject();
     EXPECT_EQ(source["type"].toString(), "base64");
     EXPECT_EQ(source["media_type"].toString(), "image/png");
-    EXPECT_EQ(
-        QByteArray::fromBase64(source["data"].toString().toUtf8()), pngBytes);
+    EXPECT_EQ(QByteArray::fromBase64(source["data"].toString().toUtf8()), pngBytes);
 }
 
 TEST(ClaudeMessage, CreateToolResultsContentMarksErrors)
 {
     ClaudeMessage msg;
-    QJsonObject data{{"id", "err"}, {"name", "broken"}, {"input", QJsonObject{}}};
-    msg.handleContentBlockStart(0, "tool_use", data);
+    msg.applyEvent(blockStart(0, toolUseBlock("err", "broken")));
 
     QHash<QString, ToolResult> results;
     results["err"] = ToolResult::error("nope");
 
-    QJsonArray toolResults = msg.createToolResultsContent(results);
+    const QJsonArray toolResults = msg.createToolResultsContent(results);
     ASSERT_EQ(toolResults.size(), 1);
     const QJsonObject wrap = toolResults.first().toObject();
     EXPECT_EQ(wrap["content"].toString(), "nope");
@@ -244,41 +473,26 @@ TEST(ClaudeMessage, CreateToolResultsContentMarksErrors)
 TEST(ClaudeMessage, StartNewContinuation)
 {
     ClaudeMessage msg;
-    msg.handleContentBlockStart(0, "text", {});
-    msg.handleContentBlockDelta(0, "text_delta", QJsonObject{{"text", "old"}});
-    msg.handleStopReason("end_turn");
+    startText(msg, 0, "old");
+    msg.applyEvent(messageDelta("end_turn"));
     EXPECT_EQ(msg.state(), MessageState::Final);
 
     msg.startNewContinuation();
     EXPECT_EQ(msg.state(), MessageState::Building);
     EXPECT_TRUE(msg.currentBlocks().isEmpty());
-}
-
-TEST(ClaudeMessage, HandleContentBlockDelta_OutOfBounds)
-{
-    ClaudeMessage msg;
-    msg.handleContentBlockDelta(99, "text_delta", QJsonObject{{"text", "orphan"}});
-    EXPECT_TRUE(msg.currentBlocks().isEmpty());
-}
-
-TEST(ClaudeMessage, HandleContentBlockStop_NoToolInput)
-{
-    ClaudeMessage msg;
-    msg.handleContentBlockStart(0, "text", {});
-    msg.handleContentBlockStop(0);
+    EXPECT_TRUE(msg.stopReason().isEmpty());
 }
 
 TEST(ClaudeMessage, HandleImageBlock)
 {
     ClaudeMessage msg;
-    QJsonObject source{{"type", "base64"}, {"data", "abc"}, {"media_type", "image/png"}};
-    QJsonObject data{{"source", source}};
-    msg.handleContentBlockStart(0, "image", data);
+    msg.applyEvent(blockStart(0, base64ImageBlock("abc", "image/png")));
 
-    EXPECT_EQ(msg.currentBlocks().size(), 1);
-    auto *imgBlock = std::get_if<ImageContent>(&msg.currentBlocks()[0]);
+    ASSERT_EQ(msg.currentBlocks().size(), 1);
+    const auto *imgBlock = std::get_if<ImageContent>(&msg.currentBlocks()[0]);
     ASSERT_NE(imgBlock, nullptr);
-    EXPECT_EQ(imgBlock->base64(), QString::fromUtf8(QByteArray::fromBase64(QByteArray("abc")).toBase64()));
+    EXPECT_EQ(
+        imgBlock->base64(), QString::fromUtf8(QByteArray::fromBase64(QByteArray("abc")).toBase64()));
     EXPECT_EQ(imgBlock->mimeType, "image/png");
     EXPECT_FALSE(imgBlock->isUrl());
 }
@@ -286,12 +500,14 @@ TEST(ClaudeMessage, HandleImageBlock)
 TEST(ClaudeMessage, HandleImageBlock_Url)
 {
     ClaudeMessage msg;
-    QJsonObject source{{"type", "url"}, {"url", "https://example.com/photo.jpg"}};
-    QJsonObject data{{"source", source}};
-    msg.handleContentBlockStart(0, "image", data);
+    msg.applyEvent(blockStart(
+        0,
+        QJsonObject{
+            {"type", "image"},
+            {"source", QJsonObject{{"type", "url"}, {"url", "https://example.com/photo.jpg"}}}}));
 
-    EXPECT_EQ(msg.currentBlocks().size(), 1);
-    auto *imgBlock = std::get_if<ImageContent>(&msg.currentBlocks()[0]);
+    ASSERT_EQ(msg.currentBlocks().size(), 1);
+    const auto *imgBlock = std::get_if<ImageContent>(&msg.currentBlocks()[0]);
     ASSERT_NE(imgBlock, nullptr);
     EXPECT_EQ(imgBlock->url().toString(), "https://example.com/photo.jpg");
     EXPECT_TRUE(imgBlock->isUrl());
@@ -300,11 +516,9 @@ TEST(ClaudeMessage, HandleImageBlock_Url)
 TEST(ClaudeMessage, HandleImageBlock_JpegMediaType)
 {
     ClaudeMessage msg;
-    QJsonObject source{{"type", "base64"}, {"data", "jpegbytes"}, {"media_type", "image/jpeg"}};
-    QJsonObject data{{"source", source}};
-    msg.handleContentBlockStart(0, "image", data);
+    msg.applyEvent(blockStart(0, base64ImageBlock("jpegbytes", "image/jpeg")));
 
-    auto *imgBlock = std::get_if<ImageContent>(&msg.currentBlocks()[0]);
+    const auto *imgBlock = std::get_if<ImageContent>(&msg.currentBlocks()[0]);
     ASSERT_NE(imgBlock, nullptr);
     EXPECT_EQ(imgBlock->mimeType, "image/jpeg");
 }
@@ -312,16 +526,13 @@ TEST(ClaudeMessage, HandleImageBlock_JpegMediaType)
 TEST(ClaudeMessage, ToProviderFormat_WithImage)
 {
     ClaudeMessage msg;
-    msg.handleContentBlockStart(0, "text", {});
-    msg.handleContentBlockDelta(0, "text_delta", QJsonObject{{"text", "Here is an image:"}});
+    startText(msg, 0, "Here is an image:");
 
     const QString base64 = QString::fromUtf8(QByteArray("imgdata").toBase64());
-    QJsonObject source = {{"type", "base64"}, {"data", base64}, {"media_type", "image/png"}};
-    msg.handleContentBlockStart(1, "image", QJsonObject{{"source", source}});
+    msg.applyEvent(blockStart(1, base64ImageBlock(base64, "image/png")));
 
-    QJsonObject result = msg.toProviderFormat();
-    QJsonArray content = result["content"].toArray();
-    EXPECT_EQ(content.size(), 2);
+    const QJsonArray content = msg.toProviderFormat()["content"].toArray();
+    ASSERT_EQ(content.size(), 2);
     EXPECT_EQ(content[0].toObject()["type"].toString(), "text");
     EXPECT_EQ(content[1].toObject()["type"].toString(), "image");
     EXPECT_EQ(content[1].toObject()["source"].toObject()["data"].toString(), base64);
@@ -330,14 +541,15 @@ TEST(ClaudeMessage, ToProviderFormat_WithImage)
 TEST(ClaudeMessage, ToProviderFormat_MultipleImages)
 {
     ClaudeMessage msg;
-    QJsonObject source1{{"type", "base64"}, {"data", "img1"}, {"media_type", "image/png"}};
-    QJsonObject source2{{"type", "url"}, {"url", "https://example.com/img.jpg"}};
-    msg.handleContentBlockStart(0, "image", QJsonObject{{"source", source1}});
-    msg.handleContentBlockStart(1, "image", QJsonObject{{"source", source2}});
+    msg.applyEvent(blockStart(0, base64ImageBlock("img1", "image/png")));
+    msg.applyEvent(blockStart(
+        1,
+        QJsonObject{
+            {"type", "image"},
+            {"source", QJsonObject{{"type", "url"}, {"url", "https://example.com/img.jpg"}}}}));
 
-    QJsonObject result = msg.toProviderFormat();
-    QJsonArray content = result["content"].toArray();
-    EXPECT_EQ(content.size(), 2);
+    const QJsonArray content = msg.toProviderFormat()["content"].toArray();
+    ASSERT_EQ(content.size(), 2);
     EXPECT_EQ(content[0].toObject()["source"].toObject()["type"].toString(), "base64");
     EXPECT_EQ(content[1].toObject()["source"].toObject()["type"].toString(), "url");
 }
@@ -345,17 +557,65 @@ TEST(ClaudeMessage, ToProviderFormat_MultipleImages)
 TEST(ClaudeMessage, HandleMixedContent_TextImageToolUse)
 {
     ClaudeMessage msg;
-    msg.handleContentBlockStart(0, "text", {});
-    msg.handleContentBlockDelta(0, "text_delta", QJsonObject{{"text", "Look at this:"}});
+    startText(msg, 0, "Look at this:");
+    msg.applyEvent(blockStart(1, base64ImageBlock("pic", "image/webp")));
+    msg.applyEvent(blockStart(2, toolUseBlock("t1", "analyze")));
 
-    QJsonObject source{{"type", "base64"}, {"data", "pic"}, {"media_type", "image/webp"}};
-    msg.handleContentBlockStart(1, "image", QJsonObject{{"source", source}});
-
-    QJsonObject toolData{{"id", "t1"}, {"name", "analyze"}, {"input", QJsonObject{}}};
-    msg.handleContentBlockStart(2, "tool_use", toolData);
-
-    EXPECT_EQ(msg.currentBlocks().size(), 3);
+    ASSERT_EQ(msg.currentBlocks().size(), 3);
     EXPECT_TRUE(std::holds_alternative<TextContent>(msg.currentBlocks()[0]));
     EXPECT_TRUE(std::holds_alternative<ImageContent>(msg.currentBlocks()[1]));
     EXPECT_TRUE(std::holds_alternative<ToolUseContent>(msg.currentBlocks()[2]));
+}
+
+TEST(ClaudeMessage, AToolUseAfterAnUnknownBlockKeepsItsArguments)
+{
+    ClaudeMessage msg;
+    msg.applyEvent(messageStart());
+    msg.applyEvent(blockStart(
+        0,
+        QJsonObject{
+            {"type", "server_tool_use"},
+            {"id", "srvtoolu_1"},
+            {"name", "web_search"},
+            {"input", QJsonObject{}}}));
+    msg.applyEvent(blockStop(0));
+
+    msg.applyEvent(blockStart(1, toolUseBlock("toolu_1", "echo")));
+    msg.applyEvent(
+        blockDelta(1, QJsonObject{{"type", "input_json_delta"}, {"partial_json", R"({"value":)"}}));
+    msg.applyEvent(
+        blockDelta(1, QJsonObject{{"type", "input_json_delta"}, {"partial_json", R"("7"})"}}));
+    msg.applyEvent(blockStop(1));
+    msg.applyEvent(messageDelta("tool_use"));
+
+    ASSERT_EQ(msg.currentToolUseContent().size(), 1);
+    EXPECT_EQ(msg.currentToolUseContent().first().input.value("value").toString(), "7")
+        << "the wire index runs ahead of the block list once a block is skipped";
+    EXPECT_EQ(msg.state(), MessageState::RequiresToolExecution);
+}
+
+TEST(ClaudeMessage, TextAfterAnUnknownBlockLandsInItsOwnBlock)
+{
+    ClaudeMessage msg;
+    msg.applyEvent(messageStart());
+    msg.applyEvent(blockStart(0, QJsonObject{{"type", "web_search_tool_result"}}));
+    msg.applyEvent(blockStop(0));
+    startText(msg, 1, "found it");
+
+    ASSERT_EQ(msg.currentBlocks().size(), 1);
+    auto *text = std::get_if<TextContent>(&msg.currentBlocks()[0]);
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(text->text, "found it");
+}
+
+TEST(ClaudeMessage, AnErrorEventIsHandedBackAsAnError)
+{
+    ClaudeMessage msg;
+    const MessageEffects effects = msg.applyEvent(QJsonObject{
+        {"type", "error"},
+        {"error", QJsonObject{{"type", "overloaded_error"}, {"message", "Overloaded"}}}});
+
+    ASSERT_TRUE(effects.error.has_value());
+    EXPECT_EQ(effects.error->value("message").toString(), "Overloaded");
+    EXPECT_EQ(effects.error->value("type").toString(), "overloaded_error");
 }

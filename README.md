@@ -213,7 +213,7 @@ MCP servers and an ACP agent. Build with `-DLLMQORE_BUILD_EXAMPLES=ON`.
 | OpenAI (Responses API) | `OpenAIResponsesClient` | ✓ | ✓ | ✓ | ✓ | opt-in |
 | Google AI | `GoogleAIClient` | ✓ | ✓ | ✓ | ✓ | ✓ thought signature |
 | Ollama | `OllamaClient` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Mistral | `MistralClient` | ✓ | ✓ | ✓ | ✓ | ✓ when received |
+| Mistral | `OpenAIClient` + `mistralProfile()` | ✓ | ✓ | ✓ | ✓ | ✓ when received |
 | llama.cpp | `LlamaCppClient` | ✓ | ✓ | ✓ | ✓ | ✓ when received |
 | DeepSeek | `OpenAIClient` | ✓ | ✓ | ✓ | ✓ | ✓ when received |
 | Qwen (DashScope) | `OpenAIClient` | ✓ | ✓ | ✓ | ✓ | ✓ when received |

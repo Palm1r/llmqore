@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 
+#include <QByteArrayList>
 #include <QFuture>
 #include <QHash>
 #include <QJsonArray>
@@ -25,10 +26,9 @@
 #include <LLMQore/BaseMessage.hpp>
 #include <LLMQore/Conversation.hpp>
 #include <LLMQore/RequestMode.hpp>
-#include <LLMQore/RpcLineFramer.hpp>
-#include <LLMQore/SSEParser.hpp>
-#include <LLMQore/ToolResult.hpp>
+#include <LLMQore/SSEEvent.hpp>
 #include <LLMQore/ToolDialect.hpp>
+#include <LLMQore/ToolResult.hpp>
 #include <LLMQore/UsageSchema.hpp>
 
 namespace LLMQore {
@@ -36,6 +36,8 @@ namespace LLMQore {
 class HttpStreamHandle;
 class HttpTransport;
 class ToolsManager;
+
+enum class StreamFraming { ServerSentEvents, JsonLines };
 
 using RequestID = QString;
 
@@ -46,6 +48,16 @@ struct LLMQORE_EXPORT AuthScheme
     Placement placement = Placement::Header;
     QString name;
     QString valuePrefix;
+};
+
+struct LLMQORE_EXPORT ProviderProfile
+{
+    QString chatPath;
+    QString modelsPath;
+    const QLoggingCategory *log = nullptr;
+    AuthScheme auth;
+    QHash<QString, QString> headers{
+        {QStringLiteral("Content-Type"), QStringLiteral("application/json")}};
 };
 
 struct LLMQORE_EXPORT TokenUsage
@@ -104,9 +116,7 @@ public:
         const QString &endpoint = {},
         RequestMode mode = RequestMode::Streaming)
         = 0;
-    virtual RequestID ask(
-        const QString &prompt, RequestMode mode = RequestMode::Streaming)
-        = 0;
+    RequestID ask(const QString &prompt, RequestMode mode = RequestMode::Streaming);
     RequestID ask(
         const Conversation &conversation,
         const QJsonObject &extra = {},
@@ -145,6 +155,9 @@ public:
     ToolsManager *tools();
     bool hasTools() const noexcept;
 
+    [[nodiscard]] const ProviderProfile &profile() const;
+    void setProfile(const ProviderProfile &profile);
+
     static constexpr int kDefaultMaxToolRounds = 10;
 
     int maxToolContinuations() const;
@@ -154,6 +167,12 @@ public:
 
     int transferTimeoutMs() const;
     void setTransferTimeout(int milliseconds);
+
+    struct ErrorAnnotation
+    {
+        QString label;
+        QString field;
+    };
 
 signals:
     void chunkReceived(const LLMQore::RequestID &id, const QString &chunk);
@@ -179,28 +198,35 @@ protected:
 
     virtual const UsageSchema &usageSchema() const = 0;
 
+    [[nodiscard]] virtual StreamFraming streamFraming() const;
+
     virtual void processData(const RequestID &id, const QByteArray &data);
-    virtual void processBufferedResponse(const RequestID &id, const QByteArray &data) = 0;
+    virtual void processSseEvent(
+        const RequestID &id, const SSEEvent &event, const QJsonObject &json);
+    virtual void processJsonLine(const RequestID &id, const QJsonObject &json);
+    virtual void processBufferedBody(const RequestID &id, const QJsonObject &body) = 0;
     virtual QJsonObject buildContinuationPayload(
         const QJsonObject &originalPayload,
         BaseMessage *message,
         const QHash<QString, ToolResult> &toolResults)
         = 0;
 
+    virtual std::optional<QString> takePendingStreamError(const RequestID &id);
+    virtual void onStreamDrained(const RequestID &id);
     virtual void cleanupDerivedData(const RequestID &id);
 
+    void applyEffects(const RequestID &id, const MessageEffects &effects);
+
     [[nodiscard]] const QLoggingCategory &logCategory() const;
-    void setLogCategory(const QLoggingCategory &category);
 
+    RequestID postJson(const QJsonObject &payload, const QString &endpoint, RequestMode mode);
+
+    [[nodiscard]] virtual QList<ErrorAnnotation> errorAnnotations() const;
+
+    [[nodiscard]] QString errorMessageFrom(const QJsonObject &body) const;
+    [[nodiscard]] QString describeError(const QJsonObject &error) const;
+    [[nodiscard]] QString httpErrorSnippet(const HttpResponse &response) const;
     [[nodiscard]] virtual QString parseHttpError(const HttpResponse &response) const;
-
-    struct ErrorAnnotation
-    {
-        QString label;
-        QString field;
-    };
-    [[nodiscard]] QString parseErrorObject(
-        const HttpResponse &response, const QList<ErrorAnnotation> &annotations) const;
 
     using ModelInfoEnricher = std::function<void(const QJsonObject &, ModelInfo &)>;
 
@@ -214,7 +240,6 @@ protected:
     [[nodiscard]] QUrl endpointUrl(const QString &endpoint, const QString &defaultPath) const;
 
     [[nodiscard]] BaseMessage *messageForRequest(const RequestID &id) const;
-    void setMessageForRequest(const RequestID &id, BaseMessage *message);
 
     template<typename T>
     T *ensureMessage(const RequestID &id)
@@ -227,12 +252,6 @@ protected:
         auto *created = new T(this);
         setMessageForRequest(id, created);
         return created;
-    }
-
-    template<typename T>
-    [[nodiscard]] T *messageAs(const RequestID &id) const
-    {
-        return qobject_cast<T *>(messageForRequest(id));
     }
 
     [[nodiscard]] static QJsonObject appendChatMessagesContinuation(
@@ -256,58 +275,54 @@ protected:
             typed->createToolResultMessages(toolResults));
     }
 
-    virtual void onStreamFinished(const RequestID &id, std::optional<QString> error);
-
-    virtual std::optional<QString> takePendingStreamError(const RequestID &id);
-
-    virtual void onStreamDrained(const RequestID &id);
-
-    QFuture<CompletionInfo> trackOneShot(const std::function<RequestID()> &dispatch);
-    void resolveOneShot(const RequestID &id, const CompletionInfo &info);
-    void rejectOneShot(const RequestID &id, const QString &error);
-
-    virtual void flushStreamBuffers(const RequestID &id);
-
-    void dispatchSseEvents(const RequestID &id, const QList<SSEEvent> &events);
-
-    virtual void processSseEvent(
-        const RequestID &id, const SSEEvent &event, const QJsonObject &json);
-
     [[nodiscard]] HttpTransport *transport() const;
     [[nodiscard]] QNetworkRequest prepareNetworkRequest(const QUrl &url) const;
+
+    void addChunk(const RequestID &id, const QString &chunk);
+    void completeRequest(const RequestID &id);
+    void failRequest(const RequestID &id, const QString &error);
+
+    void applyUsage(const RequestID &id, const QJsonObject &root);
+    void applyUsage(const RequestID &id, const QJsonObject &root, const UsageSchema &schema);
+
+    void cleanupFullRequest(const RequestID &id);
+
+    bool hasRequest(const RequestID &id) const noexcept;
+
+private:
+    QString m_url;
+    QString m_apiKey;
+    QString m_model;
+
+    [[nodiscard]] QJsonObject attachToolDefinitions(QJsonObject payload) const;
+    void setMessageForRequest(const RequestID &id, BaseMessage *message);
+
     [[nodiscard]] RequestID createRequest();
     void sendRequest(
         const RequestID &id,
         const QUrl &url,
         const QJsonObject &payload,
         RequestMode mode = RequestMode::Streaming);
+    void storeRequestContext(const RequestID &id, const QUrl &url, const QJsonObject &payload);
+    void startHttpRequest(
+        const RequestID &id,
+        const QNetworkRequest &request,
+        const QJsonObject &payload,
+        RequestMode mode);
 
-    void addChunk(const RequestID &id, const QString &chunk);
-    void completeRequest(const RequestID &id);
-    void failRequest(const RequestID &id, const QString &error);
+    void processBufferedResponse(const RequestID &id, const QByteArray &data);
+    void dispatchSseEvents(const RequestID &id, const QList<SSEEvent> &events);
+    void dispatchJsonLines(const RequestID &id, const QByteArrayList &lines);
+    void flushStreamBuffers(const RequestID &id);
+    void onStreamFinished(const RequestID &id, std::optional<QString> error);
+
+    void replaceRoundText(const RequestID &id, const QString &text);
+    [[nodiscard]] QString roundText(const RequestID &id) const;
 
     void captureStopReason(const RequestID &id);
-
-    void applyUsage(const RequestID &id, const QJsonObject &root);
-    void applyUsage(const RequestID &id, const QJsonObject &root, const UsageSchema &schema);
-
-    void executeToolsFromMessage(const RequestID &id);
-    void cleanupFullRequest(const RequestID &id);
     void notifyPendingThinkingBlocks(const RequestID &id);
+    void executeToolsFromMessage(const RequestID &id);
 
-    void storeRequestContext(const RequestID &id, const QUrl &url, const QJsonObject &payload);
-
-    bool hasRequest(const RequestID &id) const noexcept;
-    Rpc::LineFramer &requestLineFramer(const RequestID &id);
-    SSEParser &requestSSEParser(const RequestID &id);
-    QString responseContent(const RequestID &id) const;
-    void setResponseContent(const RequestID &id, const QString &content);
-
-    QString m_url;
-    QString m_apiKey;
-    QString m_model;
-
-private:
     void handleToolsCompleted(
         const RequestID &id, const QHash<QString, ToolResult> &toolResults);
     void setUsage(const RequestID &id, const TokenUsage &usage);
@@ -319,12 +334,11 @@ private:
     [[nodiscard]] QJsonObject buildReplayContinuation(
         const RequestID &id, const QHash<QString, ToolResult> &toolResults);
 
+    QFuture<CompletionInfo> trackOneShot(const std::function<RequestID()> &dispatch);
+    void resolveOneShot(const RequestID &id, const CompletionInfo &info);
+    void rejectOneShot(const RequestID &id, const QString &error);
+
     void cleanupRequest(const RequestID &id);
-    void startHttpRequest(
-        const RequestID &id,
-        const QNetworkRequest &request,
-        const QJsonObject &payload,
-        RequestMode mode);
 
     struct Impl;
     std::unique_ptr<Impl> m_impl;

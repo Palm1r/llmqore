@@ -4,20 +4,25 @@
 #include <LLMQore/OpenAIResponsesClient.hpp>
 
 #include <LLMQore/HttpTransport.hpp>
-#include <LLMQore/SSEParser.hpp>
 
 #include <algorithm>
 
 #include <QJsonArray>
-#include <QJsonDocument>
 
+#include "OpenAIErrorAnnotations.hpp"
 #include "OpenAIResponsesMessage.hpp"
 #include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/Log.hpp>
-
-#include "core/ThreadAffinity.hpp"
+#include <LLMQore/OpenAIClient.hpp>
 
 namespace LLMQore {
+
+ProviderProfile openAIResponsesProfile()
+{
+    ProviderProfile profile = openAIProfile();
+    profile.chatPath = QStringLiteral("/responses");
+    return profile;
+}
 
 namespace {
 
@@ -47,47 +52,26 @@ OpenAIResponsesClient::OpenAIResponsesClient(
     QObject *parent)
     : BaseClient(url, apiKey, model, transport, parent)
 {
-    setLogCategory(llmOpenAILog());
-    setAuthScheme(
-        {.placement = AuthScheme::Placement::Header,
-         .name = QStringLiteral("Authorization"),
-         .valuePrefix = QStringLiteral("Bearer ")});
-    setHeaders({{QStringLiteral("Content-Type"), QStringLiteral("application/json")}});
+    setProfile(openAIResponsesProfile());
 }
 
 RequestID OpenAIResponsesClient::sendMessage(
     const QJsonObject &payload, const QString &endpoint, RequestMode mode)
 {
-    LLMQORE_ASSERT_OWNING_THREAD();
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
 
     if (m_reasoningPersistence == ReasoningPersistence::Replay && !request.contains("store"))
         request["store"] = false;
 
-    RequestID id = createRequest();
-    const QString resolved = endpoint.isEmpty() ? QStringLiteral("/responses") : endpoint;
-
-    qCDebug(llmOpenAILog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
-
-    sendRequest(id, QUrl(m_url + resolved), request, mode);
-    return id;
-}
-
-RequestID OpenAIResponsesClient::ask(const QString &prompt, RequestMode mode)
-{
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["input"] = prompt;
-
-    return sendMessage(payload, {}, mode);
+    return postJson(request, endpoint, mode);
 }
 
 QJsonObject OpenAIResponsesClient::buildConversationPayload(
     const Conversation &conversation) const
 {
     QJsonObject payload;
-    payload["model"] = m_model;
+    payload["model"] = model();
 
     if (!conversation.system().isEmpty())
         payload["instructions"] = conversation.system();
@@ -141,20 +125,12 @@ const UsageSchema &OpenAIResponsesClient::usageSchema() const
 
 QFuture<QList<ModelInfo>> OpenAIResponsesClient::listModels(const QString &endpoint)
 {
-    return fetchModelList(endpointUrl(endpoint, QStringLiteral("/models")));
+    return fetchModelList(endpointUrl(endpoint, profile().modelsPath));
 }
 
-QString OpenAIResponsesClient::parseHttpError(const HttpResponse &response) const
+QList<BaseClient::ErrorAnnotation> OpenAIResponsesClient::errorAnnotations() const
 {
-    return parseErrorObject(
-        response,
-        {{QStringLiteral("type"), QStringLiteral("type")},
-         {QStringLiteral("code"), QStringLiteral("code")}});
-}
-
-void OpenAIResponsesClient::cleanupDerivedData(const RequestID &id)
-{
-    m_itemIdToCallId.remove(id);
+    return openAIErrorAnnotations();
 }
 
 void OpenAIResponsesClient::setReasoningPersistence(ReasoningPersistence mode)
@@ -195,267 +171,13 @@ QJsonObject OpenAIResponsesClient::buildContinuationPayload(
 void OpenAIResponsesClient::processSseEvent(
     const RequestID &id, const SSEEvent &event, const QJsonObject &data)
 {
-    const QString &eventType = event.type;
-
-    OpenAIResponsesMessage *message = ensureMessage<OpenAIResponsesMessage>(id);
-
-    if (eventType == "response.output_text.delta") {
-        QString delta = data["delta"].toString();
-        if (!delta.isEmpty()) {
-            message->handleContentDelta(delta);
-            addChunk(id, delta);
-        }
-
-    } else if (eventType == "response.output_text.done") {
-        QString fullText = data["text"].toString();
-        if (!fullText.isEmpty())
-            setResponseContent(id, fullText);
-
-    } else if (eventType == "response.output_item.added") {
-        QJsonObject item = data["item"].toObject();
-        QString itemType = item["type"].toString();
-
-        if (itemType == "function_call") {
-            QString callId = item["call_id"].toString();
-            QString name = item["name"].toString();
-            QString itemId = item["id"].toString();
-
-            if (!callId.isEmpty() && !name.isEmpty()) {
-                m_itemIdToCallId[id][itemId] = callId;
-                message->handleToolCallStart(callId, name);
-            }
-        } else if (itemType == "reasoning") {
-            QString itemId = item["id"].toString();
-            if (!itemId.isEmpty()) {
-                message->handleReasoningStart(itemId);
-                message->handleReasoningEncryptedContent(
-                    itemId, item["encrypted_content"].toString());
-            }
-        }
-
-    } else if (eventType == "response.reasoning_content.delta") {
-        QString itemId = data["item_id"].toString();
-        QString delta = data["delta"].toString();
-        if (!itemId.isEmpty() && !delta.isEmpty())
-            message->handleReasoningDelta(itemId, delta);
-
-    } else if (eventType == "response.reasoning_content.done") {
-        QString itemId = data["item_id"].toString();
-        if (!itemId.isEmpty()) {
-            message->handleReasoningComplete(itemId);
-            notifyPendingThinkingBlocks(id);
-        }
-
-    } else if (eventType == "response.function_call_arguments.delta") {
-        QString itemId = data["item_id"].toString();
-        QString delta = data["delta"].toString();
-        if (!itemId.isEmpty() && !delta.isEmpty()) {
-            QString callId = m_itemIdToCallId.value(id).value(itemId);
-            if (!callId.isEmpty())
-                message->handleToolCallDelta(callId, delta);
-        }
-
-    } else if (
-        eventType == "response.function_call_arguments.done"
-        || eventType == "response.output_item.done") {
-        QString itemId = data["item_id"].toString();
-        QJsonObject item = data["item"].toObject();
-
-        if (!item.isEmpty() && item["type"].toString() == "reasoning") {
-            QString finalItemId = itemId.isEmpty() ? item["id"].toString() : itemId;
-            QString reasoningText = extractReasoningText(item);
-
-            if (reasoningText.isEmpty()) {
-                reasoningText = QStringLiteral(
-                    "[Reasoning process completed, but detailed thinking is not available "
-                    "in streaming mode.]");
-            }
-
-            if (!finalItemId.isEmpty()) {
-                message->handleReasoningDelta(finalItemId, reasoningText);
-                message->handleReasoningEncryptedContent(
-                    finalItemId, item["encrypted_content"].toString());
-                message->handleReasoningComplete(finalItemId);
-                notifyPendingThinkingBlocks(id);
-            }
-        } else if (item.isEmpty() && !itemId.isEmpty()) {
-            QString callId = m_itemIdToCallId.value(id).value(itemId);
-            if (!callId.isEmpty()) {
-                const QString finalArguments = data["arguments"].toString();
-                message->handleToolCallComplete(callId, finalArguments);
-            }
-        } else if (!item.isEmpty() && item["type"].toString() == "function_call") {
-            QString callId = item["call_id"].toString();
-            if (!callId.isEmpty()) {
-                const QString finalArguments = item["arguments"].toString();
-                message->handleToolCallComplete(callId, finalArguments);
-            }
-        }
-
-    } else if (eventType == "response.completed") {
-        QJsonObject responseObj = data["response"].toObject();
-        QString statusStr = responseObj["status"].toString();
-
-        if (responseContent(id).isEmpty()) {
-            QString aggregatedText = extractAggregatedText(responseObj);
-            if (!aggregatedText.isEmpty())
-                setResponseContent(id, aggregatedText);
-        }
-
-        message->handleStatus(statusStr);
-
-        applyUsage(id, responseObj);
-
-        notifyPendingThinkingBlocks(id);
-        executeToolsFromMessage(id);
-
-    } else if (eventType == "response.incomplete") {
-        QJsonObject responseObj = data["response"].toObject();
-
-        if (!responseObj.isEmpty()) {
-            QString statusStr = responseObj["status"].toString();
-
-            if (responseContent(id).isEmpty()) {
-                QString aggregatedText = extractAggregatedText(responseObj);
-                if (!aggregatedText.isEmpty())
-                    setResponseContent(id, aggregatedText);
-            }
-
-            message->handleStatus(statusStr);
-        } else {
-            message->handleStatus("incomplete");
-        }
-
-        notifyPendingThinkingBlocks(id);
-        executeToolsFromMessage(id);
-    }
-}
-
-QString OpenAIResponsesClient::extractAggregatedText(const QJsonObject &responseObj)
-{
-    if (responseObj.contains("output_text")) {
-        QString outputText = responseObj["output_text"].toString();
-        if (!outputText.isEmpty())
-            return outputText;
-    }
-
-    QString aggregated;
-    if (responseObj.contains("output")) {
-        QJsonArray output = responseObj["output"].toArray();
-        for (const auto &item : output) {
-            QJsonObject itemObj = item.toObject();
-            if (itemObj["type"].toString() == "message" && itemObj.contains("content")) {
-                QJsonArray content = itemObj["content"].toArray();
-                for (const auto &contentItem : content) {
-                    QJsonObject contentObj = contentItem.toObject();
-                    if (contentObj["type"].toString() == "output_text")
-                        aggregated += contentObj["text"].toString();
-                }
-            }
-        }
-    }
-    return aggregated;
-}
-
-QString OpenAIResponsesClient::extractReasoningText(const QJsonObject &item)
-{
-    QString reasoningText;
-
-    if (item.contains("summary")) {
-        QJsonArray summary = item["summary"].toArray();
-        for (const auto &summaryItem : summary) {
-            QJsonObject summaryObj = summaryItem.toObject();
-            if (summaryObj["type"].toString() == "summary_text") {
-                reasoningText = summaryObj["text"].toString();
-                break;
-            }
-        }
-    }
-
-    if (reasoningText.isEmpty() && item.contains("content")) {
-        QJsonArray content = item["content"].toArray();
-        QStringList texts;
-        for (const auto &contentItem : content) {
-            QJsonObject contentObj = contentItem.toObject();
-            if (contentObj["type"].toString() == "reasoning_text")
-                texts.append(contentObj["text"].toString());
-        }
-        if (!texts.isEmpty())
-            reasoningText = texts.join("\n");
-    }
-
-    return reasoningText;
-}
-
-void OpenAIResponsesClient::processBufferedResponse(const RequestID &id, const QByteArray &data)
-{
-    QJsonDocument doc = QJsonDocument::fromJson(data);
-    if (!doc.isObject()) {
-        failRequest(id, QStringLiteral("Invalid JSON in buffered response"));
-        return;
-    }
-
-    QJsonObject response = doc.object();
-
-    if (response["error"].isObject()) {
-        QJsonObject error = response["error"].toObject();
-        failRequest(id, error["message"].toString());
-        return;
-    }
-
     auto *message = ensureMessage<OpenAIResponsesMessage>(id);
+    applyEffects(id, message->applyEvent(event.type, data));
+}
 
-    QJsonArray output = response["output"].toArray();
-    for (const auto &item : output) {
-        QJsonObject itemObj = item.toObject();
-        QString itemType = itemObj["type"].toString();
-
-        if (itemType == "reasoning") {
-            QString itemId = itemObj["id"].toString();
-            QString reasoningText = extractReasoningText(itemObj);
-
-            if (!itemId.isEmpty() && !reasoningText.isEmpty()) {
-                message->handleReasoningStart(itemId);
-                message->handleReasoningDelta(itemId, reasoningText);
-                message->handleReasoningComplete(itemId);
-            }
-
-        } else if (itemType == "message") {
-            QJsonArray content = itemObj["content"].toArray();
-            for (const auto &contentItem : content) {
-                QJsonObject contentObj = contentItem.toObject();
-                if (contentObj["type"].toString() == "output_text") {
-                    QString text = contentObj["text"].toString();
-                    if (!text.isEmpty()) {
-                        message->handleContentDelta(text);
-                        addChunk(id, text);
-                    }
-                }
-            }
-
-        } else if (itemType == "function_call") {
-            QString callId = itemObj["call_id"].toString();
-            QString name = itemObj["name"].toString();
-            QString arguments = itemObj["arguments"].toString();
-
-            if (!callId.isEmpty() && !name.isEmpty()) {
-                message->handleToolCallStart(callId, name);
-                if (!arguments.isEmpty())
-                    message->handleToolCallDelta(callId, arguments);
-                message->handleToolCallComplete(callId);
-            }
-        }
-    }
-
-    notifyPendingThinkingBlocks(id);
-
-    QString status = response["status"].toString();
-    if (!status.isEmpty()) {
-        message->handleStatus(status);
-        executeToolsFromMessage(id);
-    }
-
-    applyUsage(id, response);
+void OpenAIResponsesClient::processBufferedBody(const RequestID &id, const QJsonObject &response)
+{
+    applyEffects(id, ensureMessage<OpenAIResponsesMessage>(id)->applyResponse(response));
 }
 
 } // namespace LLMQore

@@ -14,6 +14,8 @@ namespace LLMQore {
 
 class OllamaMessage;
 
+[[nodiscard]] LLMQORE_EXPORT ProviderProfile ollamaProfile();
+
 class LLMQORE_EXPORT OllamaClient : public BaseClient
 {
     Q_OBJECT
@@ -32,9 +34,6 @@ public:
         const QJsonObject &payload,
         const QString &endpoint = {},
         RequestMode mode = RequestMode::Streaming) override;
-    RequestID ask(
-        const QString &prompt, RequestMode mode = RequestMode::Streaming) override;
-    using BaseClient::ask;
 
     QFuture<QList<ModelInfo>> listModels(const QString &endpoint = {}) override;
     QJsonObject buildConversationPayload(const Conversation &conversation) const override;
@@ -42,20 +41,13 @@ public:
 protected:
     [[nodiscard]] const ToolDialect &toolDialect() const override;
     [[nodiscard]] const UsageSchema &usageSchema() const override;
-    void processData(const RequestID &id, const QByteArray &data) override;
-    void processBufferedResponse(const RequestID &id, const QByteArray &data) override;
-    void flushStreamBuffers(const RequestID &id) override;
+    [[nodiscard]] StreamFraming streamFraming() const override;
+    void processJsonLine(const RequestID &id, const QJsonObject &json) override;
+    void processBufferedBody(const RequestID &id, const QJsonObject &body) override;
     QJsonObject buildContinuationPayload(
         const QJsonObject &originalPayload,
         BaseMessage *message,
         const QHash<QString, ToolResult> &toolResults) override;
-    [[nodiscard]] QString parseHttpError(const HttpResponse &response) const override;
-
-private:
-    void processStreamData(const RequestID &id, const QJsonObject &data);
-    // False when the object was a provider error and the request was failed.
-    bool handleStreamObject(const RequestID &id, const QJsonObject &obj);
-
 };
 
 } // namespace LLMQore

@@ -13,7 +13,6 @@
 #include <LLMQore/ClaudeClient.hpp>
 #include <LLMQore/GoogleAIClient.hpp>
 #include <LLMQore/LlamaCppClient.hpp>
-#include <LLMQore/MistralClient.hpp>
 #include <LLMQore/OllamaClient.hpp>
 #include <LLMQore/OpenAIClient.hpp>
 #include <LLMQore/OpenAIResponsesClient.hpp>
@@ -47,6 +46,16 @@ ClientFactory factoryFor()
     };
 }
 
+ClientFactory factoryForProfile(ProviderProfile (*profile)())
+{
+    return [profile](const QString &apiKey, HttpTransport *transport) -> BaseClient * {
+        auto *client = new OpenAIClient(
+            QStringLiteral("http://fake.local"), apiKey, QStringLiteral("m"), transport, nullptr);
+        client->setProfile(profile());
+        return client;
+    };
+}
+
 const QList<QPair<QByteArray, QByteArray>> kJsonOnly = {{"Content-Type", "application/json"}};
 
 std::vector<ProviderCase> providerCases()
@@ -69,8 +78,8 @@ std::vector<ProviderCase> providerCases()
             {},
             kJsonOnly},
         ProviderCase{
-            "Mistral",
-            factoryFor<MistralClient>(),
+            "MistralProfile",
+            factoryForProfile(&mistralProfile),
             "Authorization",
             "Bearer sk-test",
             {},
@@ -85,12 +94,7 @@ std::vector<ProviderCase> providerCases()
             {},
             kJsonOnly},
         ProviderCase{
-            "GoogleAI",
-            factoryFor<GoogleAIClient>(),
-            {},
-            {},
-            QStringLiteral("key"),
-            kJsonOnly},
+            "GoogleAI", factoryFor<GoogleAIClient>(), {}, {}, QStringLiteral("key"), kJsonOnly},
     };
 }
 
@@ -237,6 +241,61 @@ TEST_P(ProviderHeaders, NoneSchemeSendsNoCredential)
         EXPECT_TRUE(sent.header(GetParam().authHeader).isEmpty());
 }
 
+namespace {
+
+QStringList sortedHeaders(const SentRequest &sent)
+{
+    QStringList headers;
+    for (const QByteArray &name : sent.request.rawHeaderList())
+        headers << QString::fromUtf8(name + ": " + sent.request.rawHeader(name));
+    headers.sort();
+    return headers;
+}
+
+} // namespace
+
+TEST_P(ProviderHeaders, ReapplyingTheProfileLeavesTheRequestUnchanged)
+{
+    auto client = makeClient();
+    client->ask(QStringLiteral("hi"));
+    client->setProfile(client->profile());
+    client->ask(QStringLiteral("hi"));
+    ASSERT_EQ(transport.streamCount(), 2);
+
+    const SentRequest before = transport.streamRequest(0);
+    const SentRequest after = transport.streamRequest(1);
+    EXPECT_EQ(after.url(), before.url());
+    EXPECT_EQ(sortedHeaders(after), sortedHeaders(before));
+}
+
+TEST_P(ProviderHeaders, ProfileFollowsLaterHeaderAndAuthChanges)
+{
+    auto client = makeClient();
+    client->setHeader(QStringLiteral("X-Trace"), QStringLiteral("1"));
+    client->setAuthScheme(AuthScheme{AuthScheme::Placement::Header, QStringLiteral("X-Auth"), {}});
+
+    EXPECT_EQ(client->profile().headers.value(QStringLiteral("X-Trace")), QStringLiteral("1"));
+    EXPECT_EQ(client->profile().auth.name, QStringLiteral("X-Auth"));
+
+    client->setProfile(client->profile());
+    const SentRequest sent = ask(client.get());
+    EXPECT_EQ(sent.header("X-Trace"), QByteArray("1"));
+    EXPECT_EQ(sent.header("X-Auth"), QByteArray("sk-test"));
+}
+
+TEST_P(ProviderHeaders, SetProfileReplacesHeadersSetBeforeIt)
+{
+    auto client = makeClient();
+    const ProviderProfile original = client->profile();
+    client->setHeader(QStringLiteral("X-Trace"), QStringLiteral("1"));
+    client->setProfile(original);
+
+    const SentRequest sent = ask(client.get());
+    EXPECT_TRUE(sent.header("X-Trace").isEmpty());
+    for (const auto &header : GetParam().defaultHeaders)
+        EXPECT_EQ(sent.header(header.first), header.second) << header.first.constData();
+}
+
 INSTANTIATE_TEST_SUITE_P(
     AllProviders,
     ProviderHeaders,
@@ -262,4 +321,34 @@ TEST(ClaudePromptCaching, BetaHeaderIsSetByTheCallerNotTheClient)
     EXPECT_EQ(sent.header("anthropic-beta"), QByteArray("extended-cache-ttl-2025-04-11"));
     EXPECT_EQ(sent.header("anthropic-version"), QByteArray("2023-06-01"));
     EXPECT_EQ(sent.header("x-api-key"), QByteArray("sk-test"));
+}
+
+TEST(ProviderProfiles, EveryFactoryProfileCarriesItsAuth)
+{
+    EXPECT_EQ(claudeProfile().auth.name, QStringLiteral("x-api-key"));
+    EXPECT_EQ(openAIProfile().auth.name, QStringLiteral("Authorization"));
+    EXPECT_EQ(openAIProfile().auth.valuePrefix, QStringLiteral("Bearer "));
+    EXPECT_EQ(openAIResponsesProfile().auth.name, QStringLiteral("Authorization"));
+    EXPECT_EQ(mistralProfile().auth.name, QStringLiteral("Authorization"));
+    EXPECT_EQ(llamaCppProfile().auth.name, QStringLiteral("Authorization"));
+    EXPECT_EQ(ollamaProfile().auth.name, QStringLiteral("Authorization"));
+    EXPECT_EQ(ollamaProfile().auth.valuePrefix, QStringLiteral("Bearer "));
+    EXPECT_EQ(googleProfile().auth.placement, AuthScheme::Placement::QueryParam);
+    EXPECT_EQ(googleProfile().auth.name, QStringLiteral("key"));
+}
+
+TEST(ProviderProfiles, AdjustingGoogleProfileKeepsTheKey)
+{
+    FakeHttpTransport transport;
+    GoogleAIClient client("https://fake.local", "sk-test", "m", &transport);
+
+    ProviderProfile profile = googleProfile();
+    profile.modelsPath = QStringLiteral("/v1beta/models");
+    client.setProfile(profile);
+    client.ask(QStringLiteral("hi"));
+
+    ASSERT_EQ(transport.streamCount(), 1);
+    EXPECT_EQ(
+        QUrlQuery(transport.streamRequest(0).url()).queryItemValue(QStringLiteral("key")),
+        QStringLiteral("sk-test"));
 }

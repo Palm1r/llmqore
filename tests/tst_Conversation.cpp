@@ -338,7 +338,7 @@ TEST(AskOnce, CarriesAssistantBlocksNotJustText)
     EXPECT_EQ(back.turns()[1].text(), "A framework.");
 }
 
-TEST(AskOnce, PromptRequestReturnsNoConversation)
+TEST(AskOnce, PromptRequestReturnsTheOneTurnConversationItBuilt)
 {
     LLMQoreTest::FakeHttpTransport transport;
     ClaudeClient client("https://fake.local", "sk-test", "claude-test", &transport);
@@ -351,7 +351,13 @@ TEST(AskOnce, PromptRequestReturnsNoConversation)
         QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
 
     ASSERT_TRUE(future.isFinished());
-    EXPECT_TRUE(future.result().conversation.isEmpty());
+
+    const Conversation conversation = future.result().conversation;
+    ASSERT_EQ(conversation.turns().size(), 2);
+    EXPECT_EQ(conversation.turns()[0].role, TurnRole::User);
+    EXPECT_EQ(conversation.turns()[0].text(), QStringLiteral("ping"));
+    EXPECT_EQ(conversation.turns()[1].role, TurnRole::Assistant);
+    EXPECT_EQ(conversation.turns()[1].text(), QStringLiteral("pong"));
 }
 
 TEST(AskOnce, RejectsWhenClientIsDestroyedMidFlight)

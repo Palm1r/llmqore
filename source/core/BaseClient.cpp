@@ -15,6 +15,7 @@
 
 #include <stdexcept>
 #include <utility>
+#include <variant>
 
 #include "Usage.hpp"
 #include <LLMQore/FutureUtils.hpp>
@@ -22,8 +23,11 @@
 #include <LLMQore/HttpTransport.hpp>
 #include <LLMQore/HttpTransportError.hpp>
 #include <LLMQore/Log.hpp>
+#include <LLMQore/RpcLineFramer.hpp>
+#include <LLMQore/SSEParser.hpp>
 #include <LLMQore/ToolsManager.hpp>
 
+#include "core/ErrorEnvelope.hpp"
 #include "core/ThreadAffinity.hpp"
 
 namespace LLMQore {
@@ -32,15 +36,21 @@ namespace {
 
 struct DataBuffers
 {
-    Rpc::LineFramer lineFramer;
-    SSEParser sseParser;
+    std::variant<SSEParser, Rpc::LineFramer> framer;
     QString responseContent;
 
-    void clear()
+    void reset(StreamFraming framing)
     {
-        lineFramer.clear();
-        sseParser.clear();
+        if (framing == StreamFraming::JsonLines)
+            framer.emplace<Rpc::LineFramer>();
+        else
+            framer.emplace<SSEParser>();
         responseContent.clear();
+    }
+
+    void resetFramer()
+    {
+        std::visit([](auto &active) { active.clear(); }, framer);
     }
 };
 
@@ -67,6 +77,12 @@ struct ActiveRequest
     int roundTextOffset = 0;
 
     QPointer<BaseMessage> message;
+
+    [[nodiscard]] QString roundText() const
+    {
+        const int offset = std::clamp(roundTextOffset, 0, int(buffers.responseContent.size()));
+        return buffers.responseContent.mid(offset);
+    }
 };
 
 } // namespace
@@ -76,11 +92,9 @@ struct BaseClient::Impl
     HttpTransport *transport = nullptr;
     QHash<RequestID, std::shared_ptr<QPromise<CompletionInfo>>> oneShots;
     std::shared_ptr<QPromise<CompletionInfo>> pendingOneShot;
-    AuthScheme authScheme;
-    QHash<QString, QString> headers;
     ToolsManager *toolsManager = nullptr;
     int maxToolRounds = BaseClient::kDefaultMaxToolRounds;
-    const QLoggingCategory *logCategory = &llmQoreLog();
+    ProviderProfile profile;
     QHash<RequestID, ActiveRequest> requests;
     QList<ModelInfo> modelCache;
     QHash<QString, int> modelIndex;
@@ -137,15 +151,13 @@ BaseClient::~BaseClient()
 
 QString BaseClient::url() const
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::url called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     return m_url;
 }
 
 void BaseClient::setUrl(const QString &url)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setUrl called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     if (m_url == url)
         return;
     m_url = url;
@@ -154,15 +166,13 @@ void BaseClient::setUrl(const QString &url)
 
 QString BaseClient::apiKey() const
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::apiKey called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     return m_apiKey;
 }
 
 void BaseClient::setApiKey(const QString &apiKey)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setApiKey called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     if (m_apiKey == apiKey)
         return;
     m_apiKey = apiKey;
@@ -171,72 +181,66 @@ void BaseClient::setApiKey(const QString &apiKey)
 
 QString BaseClient::model() const
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::model called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     return m_model;
 }
 
 void BaseClient::setModel(const QString &model)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setModel called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     m_model = model;
 }
 
 AuthScheme BaseClient::authScheme() const
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::authScheme called from non-owning thread");
-    return m_impl->authScheme;
+    LLMQORE_ASSERT_OWNING_THREAD();
+    return m_impl->profile.auth;
 }
 
 void BaseClient::setAuthScheme(const AuthScheme &scheme)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setAuthScheme called from non-owning thread");
-    m_impl->authScheme = scheme;
+    LLMQORE_ASSERT_OWNING_THREAD();
+    m_impl->profile.auth = scheme;
 }
 
 QHash<QString, QString> BaseClient::headers() const
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::headers called from non-owning thread");
-    return m_impl->headers;
+    LLMQORE_ASSERT_OWNING_THREAD();
+    return m_impl->profile.headers;
 }
 
 void BaseClient::setHeader(const QString &name, const QString &value)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setHeader called from non-owning thread");
-    m_impl->headers.insert(name, value);
+    LLMQORE_ASSERT_OWNING_THREAD();
+    m_impl->profile.headers.insert(name, value);
 }
 
 void BaseClient::setHeaders(const QHash<QString, QString> &headers)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setHeaders called from non-owning thread");
-    m_impl->headers = headers;
+    LLMQORE_ASSERT_OWNING_THREAD();
+    m_impl->profile.headers = headers;
 }
 
 QNetworkRequest BaseClient::prepareNetworkRequest(const QUrl &url) const
 {
     QNetworkRequest request(url);
 
-    for (auto it = m_impl->headers.cbegin(); it != m_impl->headers.cend(); ++it)
+    const ProviderProfile &profile = m_impl->profile;
+    for (auto it = profile.headers.cbegin(); it != profile.headers.cend(); ++it)
         request.setRawHeader(it.key().toUtf8(), it.value().toUtf8());
 
-    if (m_apiKey.isEmpty() || m_impl->authScheme.name.isEmpty())
+    const AuthScheme &auth = profile.auth;
+    if (m_apiKey.isEmpty() || auth.name.isEmpty())
         return request;
 
-    switch (m_impl->authScheme.placement) {
+    switch (auth.placement) {
     case AuthScheme::Placement::Header:
-        request.setRawHeader(
-            m_impl->authScheme.name.toUtf8(), (m_impl->authScheme.valuePrefix + m_apiKey).toUtf8());
+        request.setRawHeader(auth.name.toUtf8(), (auth.valuePrefix + m_apiKey).toUtf8());
         break;
     case AuthScheme::Placement::QueryParam: {
         QUrl requestUrl = request.url();
         QUrlQuery query(requestUrl.query());
-        query.addQueryItem(m_impl->authScheme.name, m_impl->authScheme.valuePrefix + m_apiKey);
+        query.addQueryItem(auth.name, auth.valuePrefix + m_apiKey);
         requestUrl.setQuery(query);
         request.setUrl(requestUrl);
         break;
@@ -317,7 +321,7 @@ void BaseClient::handleToolsCompleted(
         return;
 
     if (++it->toolRounds > m_impl->maxToolRounds) {
-        qCWarning(llmQoreLog).noquote()
+        qCWarning(logCategory()).noquote()
             << QString("Tool continuation limit reached for request %1").arg(id);
         abortRequest(id, QStringLiteral("Tool continuation limit reached"));
         return;
@@ -325,7 +329,7 @@ void BaseClient::handleToolsCompleted(
 
     const QJsonObject payload = buildReplayContinuation(id, toolResults);
     if (payload.isEmpty()) {
-        qCWarning(llmQoreLog).noquote()
+        qCWarning(logCategory()).noquote()
             << QString("Missing data for continuation request %1").arg(id);
         abortRequest(id, QStringLiteral("Missing data for tool continuation"));
         return;
@@ -342,6 +346,7 @@ RequestID BaseClient::createRequest()
 
     auto registerRequest = [this, id, oneShot = std::move(oneShot)]() mutable {
         m_impl->requests[id] = ActiveRequest{};
+        m_impl->requests[id].buffers.reset(streamFraming());
         if (oneShot)
             m_impl->oneShots.insert(id, std::move(oneShot));
     };
@@ -369,14 +374,41 @@ void BaseClient::sendRequest(
     startHttpRequest(id, prepareNetworkRequest(url), payload, mode);
 }
 
-const QLoggingCategory &BaseClient::logCategory() const
+const ProviderProfile &BaseClient::profile() const
 {
-    return *m_impl->logCategory;
+    LLMQORE_ASSERT_OWNING_THREAD();
+    return m_impl->profile;
 }
 
-void BaseClient::setLogCategory(const QLoggingCategory &category)
+void BaseClient::setProfile(const ProviderProfile &profile)
 {
-    m_impl->logCategory = &category;
+    LLMQORE_ASSERT_OWNING_THREAD();
+    m_impl->profile = profile;
+}
+
+const QLoggingCategory &BaseClient::logCategory() const
+{
+    return m_impl->profile.log ? *m_impl->profile.log : llmQoreLog();
+}
+
+RequestID BaseClient::postJson(const QJsonObject &payload, const QString &endpoint, RequestMode mode)
+{
+    LLMQORE_ASSERT_OWNING_THREAD();
+
+    const RequestID id = createRequest();
+    const QString resolved = endpoint.isEmpty() ? m_impl->profile.chatPath : endpoint;
+
+    qCDebug(logCategory()).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
+
+    sendRequest(id, QUrl(url() + resolved), payload, mode);
+    return id;
+}
+
+RequestID BaseClient::ask(const QString &prompt, RequestMode mode)
+{
+    Conversation conversation;
+    conversation.addUser(prompt);
+    return ask(conversation, {}, mode);
 }
 
 void BaseClient::cleanupDerivedData(const RequestID &)
@@ -506,21 +538,24 @@ void BaseClient::clearModelCache()
     m_impl->modelIndex.clear();
 }
 
-QString BaseClient::parseErrorObject(
-    const HttpResponse &response, const QList<ErrorAnnotation> &annotations) const
+QList<BaseClient::ErrorAnnotation> BaseClient::errorAnnotations() const
 {
-    const QJsonDocument doc = QJsonDocument::fromJson(response.body);
-    if (!doc.isObject())
-        return BaseClient::parseHttpError(response);
+    return {};
+}
 
-    const QJsonObject error = doc.object().value("error").toObject();
-    const QString message = error.value("message").toString();
-    if (message.isEmpty())
-        return BaseClient::parseHttpError(response);
+QString BaseClient::errorMessageFrom(const QJsonObject &body) const
+{
+    const std::optional<QJsonObject> error = errorIn(body);
+    if (!error)
+        return {};
 
-    QString out = QString("HTTP %1: %2").arg(response.statusCode).arg(message);
+    QString out = error->value(QLatin1String("message")).toString();
+    if (out.isEmpty())
+        return {};
+
+    const QList<ErrorAnnotation> annotations = errorAnnotations();
     for (const ErrorAnnotation &annotation : annotations) {
-        const QJsonValue value = error.value(annotation.field);
+        const QJsonValue value = error->value(annotation.field);
         QString text;
         if (value.isString())
             text = value.toString();
@@ -529,20 +564,84 @@ QString BaseClient::parseErrorObject(
         if (text.isEmpty())
             continue;
 
-        out += annotation.label.isEmpty()
-            ? QString(" (%1)").arg(text)
-            : QString(" (%1: %2)").arg(annotation.label, text);
+        out += annotation.label.isEmpty() ? QString(" (%1)").arg(text)
+                                          : QString(" (%1: %2)").arg(annotation.label, text);
     }
     return out;
 }
 
-QString BaseClient::parseHttpError(const HttpResponse &response) const
+QString BaseClient::describeError(const QJsonObject &error) const
+{
+    const QString message = errorMessageFrom(QJsonObject{{QStringLiteral("error"), error}});
+    if (!message.isEmpty())
+        return message;
+
+    return QString("Provider error: %1")
+        .arg(QString::fromUtf8(QJsonDocument(error).toJson(QJsonDocument::Compact)));
+}
+
+QString BaseClient::httpErrorSnippet(const HttpResponse &response) const
 {
     constexpr int kSnippetCap = 512;
     if (response.body.isEmpty())
         return QString("HTTP %1").arg(response.statusCode);
     const QString snippet = QString::fromUtf8(response.body.left(kSnippetCap));
     return QString("HTTP %1: %2").arg(response.statusCode).arg(snippet);
+}
+
+QString BaseClient::parseHttpError(const HttpResponse &response) const
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(response.body);
+    if (!doc.isObject())
+        return httpErrorSnippet(response);
+
+    const QString message = errorMessageFrom(doc.object());
+    if (message.isEmpty())
+        return httpErrorSnippet(response);
+
+    return QString("HTTP %1: %2").arg(response.statusCode).arg(message);
+}
+
+void BaseClient::applyEffects(const RequestID &id, const MessageEffects &effects)
+{
+    if (!effects.fullText.isEmpty())
+        replaceRoundText(id, effects.fullText);
+    else if (!effects.fallbackText.isEmpty() && roundText(id).isEmpty())
+        replaceRoundText(id, effects.fallbackText);
+
+    if (effects.thinkingCompleted)
+        notifyPendingThinkingBlocks(id);
+
+    if (!effects.chunk.isEmpty())
+        addChunk(id, effects.chunk);
+
+    if (!effects.usage.isEmpty())
+        applyUsage(id, effects.usage);
+
+    if (effects.error) {
+        failRequest(id, describeError(*effects.error));
+        return;
+    }
+
+    if (effects.toolsReady)
+        executeToolsFromMessage(id);
+}
+
+void BaseClient::processBufferedResponse(const RequestID &id, const QByteArray &data)
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (!doc.isObject()) {
+        failRequest(id, QStringLiteral("Invalid JSON in buffered response"));
+        return;
+    }
+
+    const QJsonObject body = doc.object();
+    if (const std::optional<QJsonObject> error = errorIn(body)) {
+        failRequest(id, describeError(*error));
+        return;
+    }
+
+    processBufferedBody(id, body);
 }
 
 void BaseClient::startHttpRequest(
@@ -682,7 +781,6 @@ void BaseClient::onStreamFinished(const RequestID &id, std::optional<QString> er
         error = takePendingStreamError(id);
 
     if (error) {
-        cleanupFullRequest(id);
         failRequest(id, *error);
         return;
     }
@@ -719,8 +817,7 @@ void BaseClient::captureStopReason(const RequestID &id)
 
 void BaseClient::addChunk(const RequestID &id, const QString &chunk)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::addChunk called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     auto it = m_impl->requests.find(id);
     if (it == m_impl->requests.end())
         return;
@@ -734,13 +831,24 @@ void BaseClient::addChunk(const RequestID &id, const QString &chunk)
     emit accumulatedReceived(id, accumulated);
 }
 
+QJsonObject BaseClient::attachToolDefinitions(QJsonObject payload) const
+{
+    if (!m_impl->toolsManager)
+        return payload;
+
+    const QJsonArray definitions = m_impl->toolsManager->getToolsDefinitions();
+    if (!definitions.isEmpty())
+        payload.insert(QStringLiteral("tools"), definitions);
+
+    return payload;
+}
+
 RequestID BaseClient::ask(
     const Conversation &conversation, const QJsonObject &extra, RequestMode mode)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::ask called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
 
-    QJsonObject payload = buildConversationPayload(conversation);
+    QJsonObject payload = attachToolDefinitions(buildConversationPayload(conversation));
     for (auto it = extra.constBegin(); it != extra.constEnd(); ++it)
         payload.insert(it.key(), it.value());
 
@@ -806,8 +914,7 @@ QFuture<CompletionInfo> BaseClient::askOnce(
 
 void BaseClient::completeRequest(const RequestID &id)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::completeRequest called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     auto it = m_impl->requests.find(id);
     if (it == m_impl->requests.end())
         return;
@@ -826,11 +933,9 @@ void BaseClient::completeRequest(const RequestID &id)
         if (!it->finalBlocks.isEmpty()) {
             conversation.addAssistant(it->finalBlocks);
         } else {
-            const int offset
-                = std::clamp(it->roundTextOffset, 0, int(fullText.size()));
-            const QString roundText = fullText.mid(offset);
-            if (!roundText.isEmpty())
-                conversation.addAssistant(roundText);
+            const QString lastRoundText = it->roundText();
+            if (!lastRoundText.isEmpty())
+                conversation.addAssistant(lastRoundText);
         }
     }
 
@@ -850,8 +955,7 @@ void BaseClient::completeRequest(const RequestID &id)
 
 void BaseClient::setUsage(const RequestID &id, const TokenUsage &usage)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::setUsage called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     auto it = m_impl->requests.find(id);
     if (it == m_impl->requests.end())
         return;
@@ -883,8 +987,7 @@ void BaseClient::applyUsage(
 
 void BaseClient::finalizeTurn(const RequestID &id)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::finalizeTurn called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     auto it = m_impl->requests.find(id);
     if (it == m_impl->requests.end() || !it->turnUsage)
         return;
@@ -902,11 +1005,11 @@ void BaseClient::finalizeTurn(const RequestID &id)
 
 void BaseClient::failRequest(const RequestID &id, const QString &error)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::failRequest called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     if (!m_impl->requests.contains(id))
         return;
 
+    cleanupFullRequest(id);
     cleanupRequest(id);
     emit requestFailed(id, error);
     rejectOneShot(id, error);
@@ -936,7 +1039,6 @@ void BaseClient::abortRequest(const RequestID &id, const QString &error)
         it->stream = nullptr;
     }
 
-    cleanupFullRequest(id);
     failRequest(id, error);
 }
 
@@ -989,13 +1091,11 @@ QJsonObject BaseClient::buildReplayContinuation(
 
 void BaseClient::continueRequest(const RequestID &id, const QJsonObject &payload)
 {
-    Q_ASSERT_X(thread() == QThread::currentThread(), Q_FUNC_INFO,
-               "BaseClient::continueRequest called from non-owning thread");
+    LLMQORE_ASSERT_OWNING_THREAD();
     auto it = m_impl->requests.find(id);
     if (it == m_impl->requests.end() || it->url.isEmpty()) {
-        qCWarning(llmQoreLog).noquote()
+        qCWarning(logCategory()).noquote()
             << QString("Missing transport context for continuation request %1").arg(id);
-        cleanupFullRequest(id);
         failRequest(id, QStringLiteral("Missing data for tool continuation"));
         return;
     }
@@ -1062,7 +1162,22 @@ void BaseClient::notifyPendingThinkingBlocks(const RequestID &id)
 
 void BaseClient::flushStreamBuffers(const RequestID &id)
 {
-    dispatchSseEvents(id, requestSSEParser(id).flush());
+    auto it = m_impl->requests.find(id);
+    if (it == m_impl->requests.end())
+        return;
+
+    if (auto *parser = std::get_if<SSEParser>(&it->buffers.framer)) {
+        dispatchSseEvents(id, parser->flush());
+        return;
+    }
+
+    auto *framer = std::get_if<Rpc::LineFramer>(&it->buffers.framer);
+    if (!framer || !framer->hasIncompleteData())
+        return;
+
+    const QByteArray remaining = framer->currentBuffer();
+    framer->clear();
+    dispatchJsonLines(id, {remaining});
 }
 
 std::optional<QString> BaseClient::takePendingStreamError(const RequestID &)
@@ -1075,10 +1190,17 @@ void BaseClient::onStreamDrained(const RequestID &)
 
 void BaseClient::processData(const RequestID &id, const QByteArray &data)
 {
-    if (!hasRequest(id))
+    auto it = m_impl->requests.find(id);
+    if (it == m_impl->requests.end())
         return;
 
-    dispatchSseEvents(id, requestSSEParser(id).append(data));
+    if (auto *parser = std::get_if<SSEParser>(&it->buffers.framer)) {
+        dispatchSseEvents(id, parser->append(data));
+        return;
+    }
+
+    if (auto *framer = std::get_if<Rpc::LineFramer>(&it->buffers.framer))
+        dispatchJsonLines(id, framer->append(data));
 }
 
 void BaseClient::dispatchSseEvents(const RequestID &id, const QList<SSEEvent> &events)
@@ -1107,7 +1229,32 @@ void BaseClient::dispatchSseEvents(const RequestID &id, const QList<SSEEvent> &e
     }
 }
 
+void BaseClient::dispatchJsonLines(const RequestID &id, const QByteArrayList &lines)
+{
+    for (const QByteArray &raw : lines) {
+        const QByteArray line = raw.trimmed();
+        if (line.isEmpty())
+            continue;
+
+        QJsonParseError parseError;
+        const QJsonDocument doc = QJsonDocument::fromJson(line, &parseError);
+        if (!doc.isObject()) {
+            qCDebug(logCategory()).noquote()
+                << QString("Skipping a stream line that is not a JSON object: %1")
+                       .arg(parseError.errorString());
+            continue;
+        }
+
+        processJsonLine(id, doc.object());
+        if (!hasRequest(id))
+            return;
+    }
+}
+
 void BaseClient::processSseEvent(const RequestID &, const SSEEvent &, const QJsonObject &)
+{}
+
+void BaseClient::processJsonLine(const RequestID &, const QJsonObject &)
 {}
 
 void BaseClient::storeRequestContext(const RequestID &id, const QUrl &url, const QJsonObject &payload)
@@ -1118,8 +1265,7 @@ void BaseClient::storeRequestContext(const RequestID &id, const QUrl &url, const
 
     it->url = url;
     it->originalPayload = payload;
-    it->buffers.lineFramer.clear();
-    it->buffers.sseParser.clear();
+    it->buffers.resetFramer();
 }
 
 bool BaseClient::hasRequest(const RequestID &id) const noexcept
@@ -1127,36 +1273,33 @@ bool BaseClient::hasRequest(const RequestID &id) const noexcept
     return m_impl->requests.contains(id);
 }
 
-Rpc::LineFramer &BaseClient::requestLineFramer(const RequestID &id)
+StreamFraming BaseClient::streamFraming() const
 {
-    auto it = m_impl->requests.find(id);
-    Q_ASSERT(it != m_impl->requests.end());
-    return it->buffers.lineFramer;
+    return StreamFraming::ServerSentEvents;
 }
 
-SSEParser &BaseClient::requestSSEParser(const RequestID &id)
+QString BaseClient::roundText(const RequestID &id) const
 {
-    auto it = m_impl->requests.find(id);
-    Q_ASSERT(it != m_impl->requests.end());
-    return it->buffers.sseParser;
+    auto it = m_impl->requests.constFind(id);
+    if (it == m_impl->requests.constEnd())
+        return {};
+    return it->roundText();
 }
 
-QString BaseClient::responseContent(const RequestID &id) const
+void BaseClient::replaceRoundText(const RequestID &id, const QString &text)
 {
     auto it = m_impl->requests.find(id);
     if (it == m_impl->requests.end())
-        return {};
-    return it->buffers.responseContent;
-}
-
-void BaseClient::setResponseContent(const RequestID &id, const QString &content)
-{
-    auto it = m_impl->requests.find(id);
-    if (it == m_impl->requests.end() || it->buffers.responseContent == content)
         return;
 
-    it->buffers.responseContent = content;
-    emit accumulatedReceived(id, content);
+    QString &content = it->buffers.responseContent;
+    const int offset = std::clamp(it->roundTextOffset, 0, int(content.size()));
+    const QString replaced = content.left(offset) + text;
+    if (replaced == content)
+        return;
+
+    content = replaced;
+    emit accumulatedReceived(id, replaced);
 }
 
 void BaseClient::cleanupRequest(const RequestID &id)

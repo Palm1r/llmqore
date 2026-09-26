@@ -10,6 +10,8 @@
 
 #include <LLMQore/Log.hpp>
 
+#include "core/ErrorEnvelope.hpp"
+
 namespace LLMQore {
 
 namespace {
@@ -91,6 +93,74 @@ GoogleMessage::GoogleMessage(QObject *parent)
     : BaseMessage(parent)
 {}
 
+MessageEffects GoogleMessage::applyEvent(const QJsonObject &chunk)
+{
+    MessageEffects effects;
+
+    if (const std::optional<QJsonObject> error = errorIn(chunk)) {
+        effects.error = *error;
+        return effects;
+    }
+
+    if (chunk.value("usageMetadata").isObject())
+        effects.usage = chunk;
+
+    const QJsonArray candidates = chunk.value("candidates").toArray();
+    for (const QJsonValue &candidate : candidates) {
+        const QJsonObject candidateObj = candidate.toObject();
+
+        const QJsonArray parts
+            = candidateObj.value("content").toObject().value("parts").toArray();
+        for (const QJsonValue &part : parts) {
+            const QJsonObject partObj = part.toObject();
+
+            if (partObj.contains("text")) {
+                const QString text = partObj.value("text").toString();
+                if (partObj.value("thought").toBool(false)) {
+                    handleThoughtDelta(text);
+                    if (partObj.contains("signature"))
+                        handleThoughtSignature(partObj.value("signature").toString());
+                } else {
+                    effects.thinkingCompleted = true;
+                    handleContentDelta(text);
+                    effects.chunk += text;
+                }
+            }
+
+            if (partObj.contains("thoughtSignature"))
+                handleThoughtSignature(partObj.value("thoughtSignature").toString());
+
+            if (partObj.contains("functionCall")) {
+                effects.thinkingCompleted = true;
+
+                const QJsonObject functionCall = partObj.value("functionCall").toObject();
+                handleToolCallStart(functionCall.value("name").toString());
+                handleToolCallDelta(QString::fromUtf8(
+                    QJsonDocument(functionCall.value("args").toObject())
+                        .toJson(QJsonDocument::Compact)));
+                handleToolCallComplete();
+            }
+        }
+
+        if (candidateObj.contains("finishReason")) {
+            handleStopReason(candidateObj.value("finishReason").toString());
+            if (isErrorFinishReason()) {
+                qCDebug(llmGoogleLog).noquote()
+                    << QString("Google AI error: %1").arg(errorFinishMessage());
+                effects.error = QJsonObject{{QStringLiteral("message"), errorFinishMessage()}};
+                return effects;
+            }
+        }
+    }
+
+    return effects;
+}
+
+MessageEffects GoogleMessage::applyResponse(const QJsonObject &response)
+{
+    return applyEvent(response);
+}
+
 void GoogleMessage::handleContentDelta(const QString &text)
 {
     if (m_currentBlocks.isEmpty() || !std::holds_alternative<TextContent>(m_currentBlocks.last()))
@@ -122,42 +192,42 @@ void GoogleMessage::handleThoughtSignature(const QString &signature)
     blockAt<ThinkingContent>(created)->signature = signature;
 }
 
-void GoogleMessage::handleFunctionCallStart(const QString &name)
+void GoogleMessage::handleToolCallStart(const QString &name)
 {
     m_currentFunctionName = name;
     m_pendingFunctionArgs.clear();
 }
 
-void GoogleMessage::handleFunctionCallArgsDelta(const QString &argsJson)
+void GoogleMessage::handleToolCallDelta(const QString &argsJson)
 {
     m_pendingFunctionArgs += argsJson;
 }
 
-void GoogleMessage::handleFunctionCallComplete()
+void GoogleMessage::handleToolCallComplete()
 {
     if (m_currentFunctionName.isEmpty()) {
         return;
     }
 
-    QJsonObject args;
-    if (!m_pendingFunctionArgs.isEmpty()) {
-        QJsonDocument doc = QJsonDocument::fromJson(m_pendingFunctionArgs.toUtf8());
-        if (doc.isObject()) {
-            args = doc.object();
-        }
-    }
-
-    QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    addCurrentContent(ToolUseContent{id, m_currentFunctionName, args});
+    const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    addCurrentContent(
+        ToolUseContent{id, m_currentFunctionName, parseToolArguments(m_pendingFunctionArgs)});
 
     m_currentFunctionName.clear();
     m_pendingFunctionArgs.clear();
 }
 
-void GoogleMessage::handleFinishReason(const QString &reason)
+void GoogleMessage::handleStopReason(const QString &reason)
 {
-    m_finishReason = reason;
-    updateStateFromFinishReason();
+    static const StopReasonMap kMap{
+        {QStringLiteral("STOP"), QStringLiteral("MAX_TOKENS")},
+        {},
+        {},
+        {},
+        MessageState::Complete,
+        false};
+
+    recordStopReason(reason, kMap);
 }
 
 QJsonObject GoogleMessage::toProviderFormat() const
@@ -347,50 +417,37 @@ QString GoogleMessage::toolResultTurnRole(const QJsonArray &parts)
     return QStringLiteral("function");
 }
 
-void GoogleMessage::startNewContinuation()
+void GoogleMessage::clearDerivedCaches()
 {
-    qCDebug(llmGoogleLog).noquote() << "Starting new continuation";
-
-    BaseMessage::startNewContinuation();
     m_pendingFunctionArgs.clear();
     m_currentFunctionName.clear();
-    m_finishReason.clear();
 }
 
 bool GoogleMessage::isErrorFinishReason() const
 {
-    return m_finishReason == "SAFETY" || m_finishReason == "RECITATION"
-           || m_finishReason == "MALFORMED_FUNCTION_CALL" || m_finishReason == "PROHIBITED_CONTENT"
-           || m_finishReason == "SPII" || m_finishReason == "OTHER";
+    const QString reason = stopReason();
+    return reason == "SAFETY" || reason == "RECITATION" || reason == "MALFORMED_FUNCTION_CALL"
+           || reason == "PROHIBITED_CONTENT" || reason == "SPII" || reason == "OTHER";
 }
 
-QString GoogleMessage::getErrorMessage() const
+QString GoogleMessage::errorFinishMessage() const
 {
-    if (m_finishReason == "SAFETY") {
+    const QString reason = stopReason();
+    if (reason == "SAFETY") {
         return "Response blocked by safety filters";
-    } else if (m_finishReason == "RECITATION") {
+    } else if (reason == "RECITATION") {
         return "Response blocked due to recitation of copyrighted content";
-    } else if (m_finishReason == "MALFORMED_FUNCTION_CALL") {
+    } else if (reason == "MALFORMED_FUNCTION_CALL") {
         return "Model attempted to call a function with malformed arguments. Please try rephrasing "
                "your request or disabling tools.";
-    } else if (m_finishReason == "PROHIBITED_CONTENT") {
+    } else if (reason == "PROHIBITED_CONTENT") {
         return "Response blocked due to prohibited content";
-    } else if (m_finishReason == "SPII") {
+    } else if (reason == "SPII") {
         return "Response blocked due to sensitive personally identifiable information";
-    } else if (m_finishReason == "OTHER") {
+    } else if (reason == "OTHER") {
         return "Request failed due to an unknown reason";
     }
     return QString();
-}
-
-void GoogleMessage::updateStateFromFinishReason()
-{
-    if (m_finishReason == "STOP" || m_finishReason == "MAX_TOKENS") {
-        m_state = currentToolUseContent().isEmpty() ? MessageState::Complete
-                                                       : MessageState::RequiresToolExecution;
-    } else {
-        m_state = MessageState::Complete;
-    }
 }
 
 } // namespace LLMQore
