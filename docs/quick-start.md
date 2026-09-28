@@ -103,7 +103,8 @@ Both paths run the same request; the future just settles once, at the end.
 
 ## 3. Hold a conversation
 
-`ask(QString)` has no memory. For a dialogue, keep a `Conversation` and hand it back each
+`ask(QString)` is a one-turn conversation, so consecutive calls do not accumulate --
+`askOnce()` hands the pair back, but the next question starts fresh. For a dialogue, keep a `Conversation` and hand it back each
 turn:
 
 ```cpp

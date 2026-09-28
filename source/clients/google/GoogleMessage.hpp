@@ -18,13 +18,8 @@ public:
 
     static const ToolDialect &toolDialect();
 
-    void handleContentDelta(const QString &text);
-    void handleThoughtDelta(const QString &text);
-    void handleThoughtSignature(const QString &signature);
-    void handleFunctionCallStart(const QString &name);
-    void handleFunctionCallArgsDelta(const QString &argsJson);
-    void handleFunctionCallComplete();
-    void handleFinishReason(const QString &reason);
+    MessageEffects applyEvent(const QJsonObject &chunk);
+    MessageEffects applyResponse(const QJsonObject &response);
 
     [[nodiscard]] static QJsonObject serializeTurn(
         TurnRole role, const QList<TurnContent> &blocks);
@@ -34,17 +29,22 @@ public:
     static QJsonObject toInlineDataPart(const ToolContent &block);
     static QString toolResultTurnRole(const QJsonArray &parts);
 
-    QString stopReason() const override { return m_finishReason; }
-    bool isErrorFinishReason() const;
-    QString getErrorMessage() const;
-    void startNewContinuation() override;
-
 private:
-    void updateStateFromFinishReason();
+    void clearDerivedCaches() override;
+
+    void handleContentDelta(const QString &text);
+    void handleThoughtDelta(const QString &text);
+    void handleThoughtSignature(const QString &signature);
+    void handleToolCallStart(const QString &name);
+    void handleToolCallDelta(const QString &argsJson);
+    void handleToolCallComplete();
+    void handleStopReason(const QString &reason);
+
+    [[nodiscard]] bool isErrorFinishReason() const;
+    [[nodiscard]] QString errorFinishMessage() const;
 
     QString m_pendingFunctionArgs;
     QString m_currentFunctionName;
-    QString m_finishReason;
 };
 
 } // namespace LLMQore

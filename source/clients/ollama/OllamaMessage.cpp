@@ -9,6 +9,8 @@
 #include <QJsonDocument>
 #include <QRegularExpression>
 
+#include "core/ErrorEnvelope.hpp"
+
 namespace LLMQore {
 
 namespace {
@@ -41,6 +43,65 @@ OllamaMessage::OllamaMessage(QObject *parent)
     : BaseMessage(parent)
 {}
 
+MessageEffects OllamaMessage::applyEvent(const QJsonObject &event)
+{
+    MessageEffects effects;
+
+    if (const std::optional<QJsonObject> error = errorIn(event)) {
+        effects.error = *error;
+        return effects;
+    }
+
+    const QString thinking = event.value("thinking").toString();
+    if (!thinking.isEmpty())
+        handleThinkingDelta(thinking);
+
+    if (event.contains("message")) {
+        const QJsonObject message = event.value("message").toObject();
+
+        const QString messageThinking = message.value("thinking").toString();
+        if (!messageThinking.isEmpty())
+            handleThinkingDelta(messageThinking);
+
+        const QString content = message.value("content").toString();
+        if (!content.isEmpty()) {
+            effects.thinkingCompleted = true;
+            handleContentDelta(content);
+            if (!isAccumulatingToolCall())
+                effects.chunk = content;
+        }
+
+        const QJsonArray toolCalls = message.value("tool_calls").toArray();
+        for (const QJsonValue &toolCall : toolCalls)
+            handleToolCall(toolCall.toObject());
+
+    } else if (event.contains("response")) {
+        const QString content = event.value("response").toString();
+        if (!content.isEmpty()) {
+            handleContentDelta(content);
+            effects.chunk = content;
+        }
+    }
+
+    if (event.value("done").toBool()) {
+        if (event.contains("signature"))
+            handleThinkingComplete(event.value("signature").toString());
+
+        handleStopReason(event.value("done_reason").toString());
+
+        effects.usage = event;
+        effects.thinkingCompleted = true;
+        effects.toolsReady = true;
+    }
+
+    return effects;
+}
+
+MessageEffects OllamaMessage::applyResponse(const QJsonObject &response)
+{
+    return applyEvent(response);
+}
+
 void OllamaMessage::handleContentDelta(const QString &content)
 {
     m_accumulatedContent += content;
@@ -51,7 +112,7 @@ void OllamaMessage::handleContentDelta(const QString &content)
     }
 
     if (!m_contentAddedToTextBlock) {
-        if (auto *textContent = blockAt<TextContent>(getOrCreateTextContentIndex()))
+        if (auto *textContent = blockAt<TextContent>(ensureTextContentIndex()))
             textContent->text = m_accumulatedContent;
         m_contentAddedToTextBlock = true;
         qCDebug(llmOllamaLog).noquote()
@@ -85,60 +146,55 @@ void OllamaMessage::handleToolCall(const QJsonObject &toolCall)
 
 void OllamaMessage::handleThinkingDelta(const QString &thinking)
 {
-    const int index = getOrCreateThinkingContentIndex();
+    const int index = ensureThinkingContentIndex();
     if (auto *thinkingContent = blockAt<ThinkingContent>(index))
         thinkingContent->thinking += thinking;
 }
 
 void OllamaMessage::handleThinkingComplete(const QString &signature)
 {
-    if (auto *thinkingContent = blockAt<ThinkingContent>(m_currentThinkingIndex)) {
+    if (auto *thinkingContent = blockAt<ThinkingContent>(lastIndexOfBlock<ThinkingContent>())) {
         thinkingContent->signature = signature;
         qCDebug(llmOllamaLog).noquote()
             << QString("Set thinking signature, length=%1").arg(signature.length());
     }
 }
 
-void OllamaMessage::handleDone(bool done, const QString &doneReason)
+void OllamaMessage::handleStopReason(const QString &doneReason)
 {
-    m_done = done;
-    if (!doneReason.isEmpty())
-        m_doneReason = doneReason;
-    if (done) {
-        bool isToolCall = tryParseToolCall();
+    const bool isToolCall = tryParseToolCall();
 
-        if (!isToolCall && !m_contentAddedToTextBlock && !m_accumulatedContent.trimmed().isEmpty()) {
-            QString trimmed = stripMarkdownCodeFence(m_accumulatedContent);
+    if (!isToolCall && !m_contentAddedToTextBlock && !m_accumulatedContent.trimmed().isEmpty()) {
+        const QString trimmed = stripMarkdownCodeFence(m_accumulatedContent);
 
-            if (trimmed.startsWith('{')
-                && (trimmed.contains("\"name\"") || trimmed.contains("\"arguments\""))) {
-                qCDebug(llmOllamaLog).noquote()
-                    << QString("Skipping invalid/incomplete tool call JSON (length=%1)")
-                           .arg(trimmed.length());
+        if (trimmed.startsWith('{')
+            && (trimmed.contains("\"name\"") || trimmed.contains("\"arguments\""))) {
+            qCDebug(llmOllamaLog).noquote()
+                << QString("Skipping invalid/incomplete tool call JSON (length=%1)")
+                       .arg(trimmed.size());
 
-                removeBlocksIf([](const TurnContent &block) {
-                    const bool isText = std::get_if<TextContent>(&block) != nullptr;
-                    if (isText) {
-                        qCDebug(llmOllamaLog).noquote()
-                            << "Removing TextContent block (incomplete tool call)";
-                    }
-                    return isText;
-                });
-                m_currentThinkingIndex = -1;
+            removeBlocksIf([](const TurnContent &block) {
+                const bool isText = std::get_if<TextContent>(&block) != nullptr;
+                if (isText) {
+                    qCDebug(llmOllamaLog).noquote()
+                        << "Removing TextContent block (incomplete tool call)";
+                }
+                return isText;
+            });
 
-                m_accumulatedContent.clear();
-            } else {
-                if (auto *textContent = blockAt<TextContent>(getOrCreateTextContentIndex()))
-                    textContent->text = m_accumulatedContent;
-                m_contentAddedToTextBlock = true;
-                qCDebug(llmOllamaLog).noquote()
-                    << QString("Added final accumulated content to TextContent, length=%1")
-                           .arg(m_accumulatedContent.length());
-            }
+            m_accumulatedContent.clear();
+        } else {
+            if (auto *textContent = blockAt<TextContent>(ensureTextContentIndex()))
+                textContent->text = m_accumulatedContent;
+            m_contentAddedToTextBlock = true;
+            qCDebug(llmOllamaLog).noquote()
+                << QString("Added final accumulated content to TextContent, length=%1")
+                       .arg(m_accumulatedContent.size());
         }
-
-        updateStateFromDone();
     }
+
+    static const StopReasonMap kMap{{}, {}, {}, {}, MessageState::Final, true};
+    recordStopReason(doneReason, kMap);
 }
 bool OllamaMessage::tryParseToolCall()
 {
@@ -202,7 +258,6 @@ bool OllamaMessage::tryParseToolCall()
             qCDebug(llmOllamaLog).noquote() << "Removing TextContent block (tool call detected)";
     }
     clearBlocks();
-    m_currentThinkingIndex = -1;
 
     addCurrentContent(ToolUseContent{toolId, name, arguments});
 
@@ -310,46 +365,10 @@ bool OllamaMessage::isAccumulatingToolCall() const
     return !m_contentAddedToTextBlock && m_accumulatedContent.trimmed().startsWith('{');
 }
 
-void OllamaMessage::startNewContinuation()
+void OllamaMessage::clearDerivedCaches()
 {
-    qCDebug(llmOllamaLog).noquote() << "Starting new continuation";
-
-    BaseMessage::startNewContinuation();
     m_accumulatedContent.clear();
-    m_done = false;
-    m_doneReason.clear();
     m_contentAddedToTextBlock = false;
-    m_currentThinkingIndex = -1;
-}
-
-void OllamaMessage::updateStateFromDone()
-{
-    if (!currentToolUseContent().empty()) {
-        m_state = MessageState::RequiresToolExecution;
-        qCDebug(llmOllamaLog).noquote()
-            << QString("State set to RequiresToolExecution, tools count=%1")
-                   .arg(currentToolUseContent().size());
-    } else {
-        m_state = MessageState::Final;
-        qCDebug(llmOllamaLog).noquote() << "State set to Final";
-    }
-}
-
-int OllamaMessage::getOrCreateThinkingContentIndex()
-{
-    if (m_currentThinkingIndex >= 0)
-        return m_currentThinkingIndex;
-
-    for (int i = 0; i < m_currentBlocks.size(); ++i) {
-        if (std::holds_alternative<ThinkingContent>(m_currentBlocks[i])) {
-            m_currentThinkingIndex = i;
-            return m_currentThinkingIndex;
-        }
-    }
-
-    m_currentThinkingIndex = addCurrentContent(ThinkingContent{});
-    qCDebug(llmOllamaLog).noquote() << "Created new ThinkingContent block";
-    return m_currentThinkingIndex;
 }
 
 } // namespace LLMQore

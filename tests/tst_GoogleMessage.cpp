@@ -10,6 +10,46 @@
 
 using namespace LLMQore;
 
+namespace {
+
+QJsonObject candidateChunk(const QJsonArray &parts, const QString &finishReason = {})
+{
+    QJsonObject candidate = {{"content", QJsonObject{{"role", "model"}, {"parts", parts}}}};
+    if (!finishReason.isEmpty())
+        candidate["finishReason"] = finishReason;
+    return QJsonObject{{"candidates", QJsonArray{candidate}}};
+}
+
+QJsonObject textPart(const QString &text)
+{
+    return QJsonObject{{"text", text}};
+}
+
+QJsonObject thoughtPart(const QString &text)
+{
+    return QJsonObject{{"text", text}, {"thought", true}};
+}
+
+QJsonObject signaturePart(const QString &signature)
+{
+    return QJsonObject{{"thoughtSignature", signature}};
+}
+
+QJsonObject functionCallPart(const QString &name, const QJsonObject &args = {})
+{
+    QJsonObject call = {{"name", name}};
+    if (!args.isEmpty())
+        call["args"] = args;
+    return QJsonObject{{"functionCall", call}};
+}
+
+QJsonObject finishChunk(const QString &reason)
+{
+    return candidateChunk(QJsonArray{}, reason);
+}
+
+} // namespace
+
 TEST(GoogleMessage, InitialState)
 {
     GoogleMessage msg;
@@ -20,28 +60,32 @@ TEST(GoogleMessage, InitialState)
     EXPECT_TRUE(msg.stopReason().isEmpty());
 }
 
-TEST(GoogleMessage, HandleContentDelta)
+TEST(GoogleMessage, TextPartsAccumulateAndAreHandedBackAsChunks)
 {
     GoogleMessage msg;
-    msg.handleContentDelta("Hello ");
-    msg.handleContentDelta("world");
+    const MessageEffects first = msg.applyEvent(candidateChunk({textPart("Hello ")}));
+    const MessageEffects second = msg.applyEvent(candidateChunk({textPart("world")}));
 
-    EXPECT_EQ(msg.currentBlocks().size(), 1);
+    EXPECT_EQ(first.chunk, "Hello ");
+    EXPECT_EQ(second.chunk, "world");
+    EXPECT_TRUE(first.thinkingCompleted);
+
+    ASSERT_EQ(msg.currentBlocks().size(), 1);
     auto *textBlock = std::get_if<TextContent>(&msg.currentBlocks()[0]);
     ASSERT_NE(textBlock, nullptr);
     EXPECT_EQ(textBlock->text, "Hello world");
 }
 
-TEST(GoogleMessage, HandleContentDelta_CreatesNewBlockAfterNonText)
+TEST(GoogleMessage, TextAfterAThoughtStartsANewTextBlock)
 {
     GoogleMessage msg;
-    msg.handleContentDelta("text1");
-    msg.handleThoughtDelta("thinking...");
-    msg.handleContentDelta("text2");
+    msg.applyEvent(candidateChunk({textPart("text1")}));
+    msg.applyEvent(candidateChunk({thoughtPart("thinking...")}));
+    msg.applyEvent(candidateChunk({textPart("text2")}));
 
-    EXPECT_EQ(msg.currentBlocks().size(), 3);
+    ASSERT_EQ(msg.currentBlocks().size(), 3);
     auto *text1 = std::get_if<TextContent>(&msg.currentBlocks()[0]);
-    auto thinking = std::get_if<ThinkingContent>(&msg.currentBlocks()[1]);
+    auto *thinking = std::get_if<ThinkingContent>(&msg.currentBlocks()[1]);
     auto *text2 = std::get_if<TextContent>(&msg.currentBlocks()[2]);
     ASSERT_NE(text1, nullptr);
     ASSERT_NE(thinking, nullptr);
@@ -50,236 +94,193 @@ TEST(GoogleMessage, HandleContentDelta_CreatesNewBlockAfterNonText)
     EXPECT_EQ(text2->text, "text2");
 }
 
-TEST(GoogleMessage, HandleThoughtDelta)
+TEST(GoogleMessage, ThoughtPartsAccumulateAndAreNotChunks)
 {
     GoogleMessage msg;
-    msg.handleThoughtDelta("Let me think");
-    msg.handleThoughtDelta("... more");
+    const MessageEffects effects = msg.applyEvent(candidateChunk({thoughtPart("Let me think")}));
+    msg.applyEvent(candidateChunk({thoughtPart("... more")}));
 
-    EXPECT_EQ(msg.currentThinkingContent().size(), 1);
+    EXPECT_TRUE(effects.chunk.isEmpty());
+    ASSERT_EQ(msg.currentThinkingContent().size(), 1);
     EXPECT_EQ(msg.currentThinkingContent()[0].thinking, "Let me think... more");
 }
 
-TEST(GoogleMessage, HandleThoughtSignature_ExistingBlock)
+TEST(GoogleMessage, ThoughtSignatureLandsOnTheExistingThinkingBlock)
 {
     GoogleMessage msg;
-    msg.handleThoughtDelta("thinking");
-    msg.handleThoughtSignature("sig123");
+    msg.applyEvent(candidateChunk({thoughtPart("thinking"), signaturePart("sig123")}));
 
-    auto thinking = msg.currentThinkingContent()[0];
-    EXPECT_EQ(thinking.signature, "sig123");
+    ASSERT_EQ(msg.currentThinkingContent().size(), 1);
+    EXPECT_EQ(msg.currentThinkingContent()[0].signature, "sig123");
 }
 
-TEST(GoogleMessage, HandleThoughtSignature_NoExistingBlock)
+TEST(GoogleMessage, ThoughtSignatureWithoutAThoughtCreatesAThinkingBlock)
 {
     GoogleMessage msg;
-    msg.handleThoughtSignature("sig456");
+    msg.applyEvent(candidateChunk({signaturePart("sig456")}));
 
-    EXPECT_EQ(msg.currentThinkingContent().size(), 1);
+    ASSERT_EQ(msg.currentThinkingContent().size(), 1);
     EXPECT_EQ(msg.currentThinkingContent()[0].signature, "sig456");
 }
 
-TEST(GoogleMessage, HandleFunctionCall_Complete)
+TEST(GoogleMessage, FunctionCallBecomesAToolBlockWithAGeneratedId)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("read_file");
-    msg.handleFunctionCallArgsDelta(R"({"path": "/tmp/test.txt"})");
-    msg.handleFunctionCallComplete();
+    const MessageEffects effects = msg.applyEvent(
+        candidateChunk({functionCallPart("read_file", QJsonObject{{"path", "/tmp/test.txt"}})}));
 
-    EXPECT_EQ(msg.currentToolUseContent().size(), 1);
-    auto tool = msg.currentToolUseContent()[0];
+    EXPECT_TRUE(effects.thinkingCompleted);
+    ASSERT_EQ(msg.currentToolUseContent().size(), 1);
+    const ToolUseContent tool = msg.currentToolUseContent()[0];
     EXPECT_EQ(tool.name, "read_file");
     EXPECT_EQ(tool.input["path"].toString(), "/tmp/test.txt");
-    EXPECT_FALSE(tool.id.isEmpty()); // UUID generated
+    EXPECT_FALSE(tool.id.isEmpty());
 }
 
-TEST(GoogleMessage, HandleFunctionCall_StreamedArgs)
+TEST(GoogleMessage, FunctionCallWithoutArgsHasAnEmptyInput)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("write_file");
-    msg.handleFunctionCallArgsDelta(R"({"path":)");
-    msg.handleFunctionCallArgsDelta(R"( "/tmp/f"})");
-    msg.handleFunctionCallComplete();
+    msg.applyEvent(candidateChunk({functionCallPart("list_files")}));
 
-    auto tool = msg.currentToolUseContent()[0];
-    EXPECT_EQ(tool.input["path"].toString(), "/tmp/f");
+    ASSERT_EQ(msg.currentToolUseContent().size(), 1);
+    EXPECT_TRUE(msg.currentToolUseContent()[0].input.isEmpty());
 }
 
-TEST(GoogleMessage, HandleFunctionCall_EmptyArgs)
+TEST(GoogleMessage, SeveralFunctionCallsInOneChunk)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("list_files");
-    msg.handleFunctionCallComplete();
+    msg.applyEvent(candidateChunk(
+        {functionCallPart("read", QJsonObject{{"path", "a"}}),
+         functionCallPart("write", QJsonObject{{"path", "b"}})}));
 
-    auto tool = msg.currentToolUseContent()[0];
-    EXPECT_TRUE(tool.input.isEmpty());
+    const QList<ToolUseContent> tools = msg.currentToolUseContent();
+    ASSERT_EQ(tools.size(), 2);
+    EXPECT_EQ(tools[0].input["path"].toString(), "a");
+    EXPECT_EQ(tools[1].input["path"].toString(), "b");
+    EXPECT_NE(tools[0].id, tools[1].id);
 }
 
-TEST(GoogleMessage, HandleFunctionCall_InvalidJson)
+TEST(GoogleMessage, FinishReason_STOP_NoTools)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("tool");
-    msg.handleFunctionCallArgsDelta("not json{{{");
-    msg.handleFunctionCallComplete();
-
-    auto tool = msg.currentToolUseContent()[0];
-    EXPECT_TRUE(tool.input.isEmpty());
-}
-
-TEST(GoogleMessage, HandleFunctionCallComplete_NoFunctionStarted)
-{
-    GoogleMessage msg;
-    msg.handleFunctionCallComplete();
-    EXPECT_TRUE(msg.currentToolUseContent().isEmpty());
-}
-
-TEST(GoogleMessage, HandleFunctionCall_MultipleCalls)
-{
-    GoogleMessage msg;
-    msg.handleFunctionCallStart("read");
-    msg.handleFunctionCallArgsDelta(R"({"path": "a"})");
-    msg.handleFunctionCallComplete();
-
-    msg.handleFunctionCallStart("write");
-    msg.handleFunctionCallArgsDelta(R"({"path": "b"})");
-    msg.handleFunctionCallComplete();
-
-    EXPECT_EQ(msg.currentToolUseContent().size(), 2);
-}
-
-TEST(GoogleMessage, HandleFinishReason_STOP_NoTools)
-{
-    GoogleMessage msg;
-    msg.handleContentDelta("answer");
-    msg.handleFinishReason("STOP");
+    msg.applyEvent(candidateChunk({textPart("answer")}, "STOP"));
     EXPECT_EQ(msg.state(), MessageState::Complete);
+    EXPECT_EQ(msg.stopReason(), "STOP");
 }
 
-TEST(GoogleMessage, HandleFinishReason_STOP_WithTools)
+TEST(GoogleMessage, FinishReason_STOP_WithTools)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("tool");
-    msg.handleFunctionCallComplete();
-    msg.handleFinishReason("STOP");
+    msg.applyEvent(candidateChunk({functionCallPart("tool")}, "STOP"));
     EXPECT_EQ(msg.state(), MessageState::RequiresToolExecution);
 }
 
-TEST(GoogleMessage, HandleFinishReason_MAX_TOKENS_WithTools)
+TEST(GoogleMessage, FinishReason_MAX_TOKENS_WithTools)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("tool");
-    msg.handleFunctionCallComplete();
-    msg.handleFinishReason("MAX_TOKENS");
+    msg.applyEvent(candidateChunk({functionCallPart("tool")}, "MAX_TOKENS"));
     EXPECT_EQ(msg.state(), MessageState::RequiresToolExecution);
 }
 
-TEST(GoogleMessage, HandleFinishReason_MAX_TOKENS_NoTools)
+TEST(GoogleMessage, FinishReason_MAX_TOKENS_NoTools)
 {
     GoogleMessage msg;
-    msg.handleContentDelta("truncated");
-    msg.handleFinishReason("MAX_TOKENS");
+    msg.applyEvent(candidateChunk({textPart("truncated")}, "MAX_TOKENS"));
     EXPECT_EQ(msg.state(), MessageState::Complete);
 }
 
-TEST(GoogleMessage, HandleFinishReason_OtherReason)
+TEST(GoogleMessage, FinishReason_OtherReason)
 {
     GoogleMessage msg;
-    msg.handleFinishReason("UNKNOWN_REASON");
+    msg.applyEvent(finishChunk("UNKNOWN_REASON"));
     EXPECT_EQ(msg.state(), MessageState::Complete);
 }
 
-TEST(GoogleMessage, IsErrorFinishReason_Safety)
-{
-    GoogleMessage msg;
-    msg.handleFinishReason("SAFETY");
-    EXPECT_TRUE(msg.isErrorFinishReason());
-    EXPECT_FALSE(msg.getErrorMessage().isEmpty());
-}
-
-TEST(GoogleMessage, IsErrorFinishReason_Recitation)
-{
-    GoogleMessage msg;
-    msg.handleFinishReason("RECITATION");
-    EXPECT_TRUE(msg.isErrorFinishReason());
-}
-
-TEST(GoogleMessage, IsErrorFinishReason_MalformedFunctionCall)
-{
-    GoogleMessage msg;
-    msg.handleFinishReason("MALFORMED_FUNCTION_CALL");
-    EXPECT_TRUE(msg.isErrorFinishReason());
-}
-
-TEST(GoogleMessage, IsErrorFinishReason_ProhibitedContent)
-{
-    GoogleMessage msg;
-    msg.handleFinishReason("PROHIBITED_CONTENT");
-    EXPECT_TRUE(msg.isErrorFinishReason());
-}
-
-TEST(GoogleMessage, IsErrorFinishReason_SPII)
-{
-    GoogleMessage msg;
-    msg.handleFinishReason("SPII");
-    EXPECT_TRUE(msg.isErrorFinishReason());
-}
-
-TEST(GoogleMessage, IsErrorFinishReason_Other)
-{
-    GoogleMessage msg;
-    msg.handleFinishReason("OTHER");
-    EXPECT_TRUE(msg.isErrorFinishReason());
-}
-
-TEST(GoogleMessage, IsNotErrorFinishReason_STOP)
-{
-    GoogleMessage msg;
-    msg.handleFinishReason("STOP");
-    EXPECT_FALSE(msg.isErrorFinishReason());
-}
-
-TEST(GoogleMessage, GetErrorMessage_AllTypes)
+TEST(GoogleMessage, ErrorFinishReasonsAreHandedBackAsErrors)
 {
     const QStringList errorReasons
         = {"SAFETY", "RECITATION", "MALFORMED_FUNCTION_CALL", "PROHIBITED_CONTENT", "SPII", "OTHER"};
 
-    for (const auto &reason : errorReasons) {
+    for (const QString &reason : errorReasons) {
         GoogleMessage msg;
-        msg.handleFinishReason(reason);
-        EXPECT_FALSE(msg.getErrorMessage().isEmpty())
+        const MessageEffects effects = msg.applyEvent(finishChunk(reason));
+        ASSERT_TRUE(effects.error.has_value()) << reason.toStdString();
+        EXPECT_FALSE(effects.error->value("message").toString().isEmpty())
             << "Empty error message for: " << reason.toStdString();
     }
 }
 
-TEST(GoogleMessage, GetErrorMessage_NoError)
+TEST(GoogleMessage, StopIsNotAnError)
 {
     GoogleMessage msg;
-    msg.handleFinishReason("STOP");
-    EXPECT_TRUE(msg.getErrorMessage().isEmpty());
+    const MessageEffects effects = msg.applyEvent(finishChunk("STOP"));
+    EXPECT_FALSE(effects.error.has_value());
+}
+
+TEST(GoogleMessage, TextBeforeABlockingFinishIsStillHandedBack)
+{
+    GoogleMessage msg;
+    const MessageEffects effects = msg.applyEvent(candidateChunk({textPart("par")}, "SAFETY"));
+
+    EXPECT_EQ(effects.chunk, "par");
+    ASSERT_TRUE(effects.error.has_value());
+    EXPECT_EQ(effects.error->value("message").toString(), "Response blocked by safety filters");
+}
+
+TEST(GoogleMessage, AnErrorObjectInTheStreamIsHandedBackAsAnError)
+{
+    GoogleMessage msg;
+    const MessageEffects effects = msg.applyEvent(QJsonObject{
+        {"error", QJsonObject{{"code", 500}, {"message", "boom"}, {"status", "INTERNAL"}}}});
+
+    ASSERT_TRUE(effects.error.has_value());
+    EXPECT_EQ(effects.error->value("message").toString(), "boom");
+    EXPECT_TRUE(msg.currentBlocks().isEmpty());
+}
+
+TEST(GoogleMessage, UsageMetadataIsHandedBack)
+{
+    GoogleMessage msg;
+    QJsonObject chunk = candidateChunk({textPart("hi")});
+    const MessageEffects without = msg.applyEvent(chunk);
+    chunk["usageMetadata"] = QJsonObject{{"promptTokenCount", 3}, {"candidatesTokenCount", 5}};
+    const MessageEffects with = msg.applyEvent(chunk);
+
+    EXPECT_TRUE(without.usage.isEmpty());
+    EXPECT_EQ(with.usage["usageMetadata"].toObject()["candidatesTokenCount"].toInt(), 5);
+}
+
+TEST(GoogleMessage, BufferedResponseTakesTheStreamPath)
+{
+    GoogleMessage msg;
+    const MessageEffects effects = msg.applyResponse(candidateChunk(
+        {thoughtPart("ponder"), textPart("answer"), functionCallPart("tool")}, "STOP"));
+
+    EXPECT_EQ(effects.chunk, "answer");
+    EXPECT_EQ(msg.currentThinkingContent().size(), 1);
+    EXPECT_EQ(msg.currentToolUseContent().size(), 1);
+    EXPECT_EQ(msg.state(), MessageState::RequiresToolExecution);
 }
 
 TEST(GoogleMessage, ToProviderFormat_TextOnly)
 {
     GoogleMessage msg;
-    msg.handleContentDelta("Hello");
+    msg.applyEvent(candidateChunk({textPart("Hello")}));
 
-    QJsonObject result = msg.toProviderFormat();
+    const QJsonObject result = msg.toProviderFormat();
     EXPECT_EQ(result["role"].toString(), "model");
-    QJsonArray parts = result["parts"].toArray();
-    EXPECT_EQ(parts.size(), 1);
+    const QJsonArray parts = result["parts"].toArray();
+    ASSERT_EQ(parts.size(), 1);
     EXPECT_EQ(parts[0].toObject()["text"].toString(), "Hello");
 }
 
 TEST(GoogleMessage, ToProviderFormat_FunctionCall)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("read_file");
-    msg.handleFunctionCallArgsDelta(R"({"path": "/tmp"})");
-    msg.handleFunctionCallComplete();
+    msg.applyEvent(candidateChunk({functionCallPart("read_file", QJsonObject{{"path", "/tmp"}})}));
 
-    QJsonObject result = msg.toProviderFormat();
-    QJsonArray parts = result["parts"].toArray();
-    EXPECT_EQ(parts.size(), 1);
+    const QJsonArray parts = msg.toProviderFormat()["parts"].toArray();
+    ASSERT_EQ(parts.size(), 1);
     EXPECT_TRUE(parts[0].toObject().contains("functionCall"));
     EXPECT_EQ(parts[0].toObject()["functionCall"].toObject()["name"].toString(), "read_file");
 }
@@ -287,13 +288,10 @@ TEST(GoogleMessage, ToProviderFormat_FunctionCall)
 TEST(GoogleMessage, ToProviderFormat_ThinkingWithSignature)
 {
     GoogleMessage msg;
-    msg.handleThoughtDelta("hmm...");
-    msg.handleThoughtSignature("sig-abc");
+    msg.applyEvent(candidateChunk({thoughtPart("hmm..."), signaturePart("sig-abc")}));
 
-    QJsonObject result = msg.toProviderFormat();
-    QJsonArray parts = result["parts"].toArray();
-    EXPECT_EQ(parts.size(), 2); // thinking part + signature part
-
+    const QJsonArray parts = msg.toProviderFormat()["parts"].toArray();
+    ASSERT_EQ(parts.size(), 2);
     EXPECT_EQ(parts[0].toObject()["text"].toString(), "hmm...");
     EXPECT_TRUE(parts[0].toObject()["thought"].toBool());
     EXPECT_EQ(parts[1].toObject()["thoughtSignature"].toString(), "sig-abc");
@@ -302,38 +300,29 @@ TEST(GoogleMessage, ToProviderFormat_ThinkingWithSignature)
 TEST(GoogleMessage, ToProviderFormat_MixedContent)
 {
     GoogleMessage msg;
-    msg.handleThoughtDelta("thinking");
-    msg.handleContentDelta("answer");
-    msg.handleFunctionCallStart("tool");
-    msg.handleFunctionCallArgsDelta(R"({})");
-    msg.handleFunctionCallComplete();
+    msg.applyEvent(candidateChunk({thoughtPart("thinking")}));
+    msg.applyEvent(candidateChunk({textPart("answer")}));
+    msg.applyEvent(candidateChunk({functionCallPart("tool")}));
 
-    QJsonObject result = msg.toProviderFormat();
-    QJsonArray parts = result["parts"].toArray();
-    EXPECT_EQ(parts.size(), 3); // thinking + text + functionCall
+    EXPECT_EQ(msg.toProviderFormat()["parts"].toArray().size(), 3);
 }
 
 TEST(GoogleMessage, ToProviderFormat_ThinkingSignature_OnFunctionCall)
 {
     GoogleMessage msg;
-    msg.handleThoughtDelta("let me think about this...");
-    msg.handleThoughtSignature("sig-xyz-123");
-    msg.handleFunctionCallStart("read_file");
-    msg.handleFunctionCallArgsDelta(R"({"path": "/tmp/test"})");
-    msg.handleFunctionCallComplete();
+    msg.applyEvent(candidateChunk(
+        {thoughtPart("let me think about this..."),
+         signaturePart("sig-xyz-123"),
+         functionCallPart("read_file", QJsonObject{{"path", "/tmp/test"}})}));
 
-    QJsonObject result = msg.toProviderFormat();
-    QJsonArray parts = result["parts"].toArray();
-    EXPECT_EQ(parts.size(), 3);
+    const QJsonArray parts = msg.toProviderFormat()["parts"].toArray();
+    ASSERT_EQ(parts.size(), 3);
 
-    // Thinking part
     EXPECT_TRUE(parts[0].toObject()["thought"].toBool());
     EXPECT_EQ(parts[0].toObject()["text"].toString(), "let me think about this...");
-
-    // Signature part
     EXPECT_EQ(parts[1].toObject()["thoughtSignature"].toString(), "sig-xyz-123");
 
-    QJsonObject functionCallPart = parts[2].toObject();
+    const QJsonObject functionCallPart = parts[2].toObject();
     EXPECT_TRUE(functionCallPart.contains("functionCall"));
     EXPECT_TRUE(functionCallPart.contains("thoughtSignature"))
         << "functionCall part missing thoughtSignature";
@@ -344,17 +333,14 @@ TEST(GoogleMessage, ToProviderFormat_ThinkingSignature_OnFunctionCall)
 TEST(GoogleMessage, ToProviderFormat_ThinkingSignature_StandaloneOnFunctionCall)
 {
     GoogleMessage msg;
-    msg.handleThoughtSignature("sig-standalone");
-    msg.handleFunctionCallStart("echo");
-    msg.handleFunctionCallArgsDelta(R"({"msg": "hi"})");
-    msg.handleFunctionCallComplete();
+    msg.applyEvent(candidateChunk(
+        {signaturePart("sig-standalone"), functionCallPart("echo", QJsonObject{{"msg", "hi"}})}));
 
-    QJsonObject result = msg.toProviderFormat();
-    QJsonArray parts = result["parts"].toArray();
+    const QJsonArray parts = msg.toProviderFormat()["parts"].toArray();
 
     bool foundFunctionCallWithSig = false;
-    for (const auto &p : parts) {
-        QJsonObject partObj = p.toObject();
+    for (const QJsonValue &p : parts) {
+        const QJsonObject partObj = p.toObject();
         if (partObj.contains("functionCall")) {
             EXPECT_TRUE(partObj.contains("thoughtSignature"))
                 << "functionCall part missing thoughtSignature";
@@ -368,23 +354,16 @@ TEST(GoogleMessage, ToProviderFormat_ThinkingSignature_StandaloneOnFunctionCall)
 TEST(GoogleMessage, ToProviderFormat_MultipleFunctionCalls_ShareSignature)
 {
     GoogleMessage msg;
-    msg.handleThoughtDelta("planning...");
-    msg.handleThoughtSignature("sig-multi");
+    msg.applyEvent(candidateChunk({thoughtPart("planning..."), signaturePart("sig-multi")}));
+    msg.applyEvent(candidateChunk(
+        {functionCallPart("read", QJsonObject{{"path", "a"}}),
+         functionCallPart("write", QJsonObject{{"path", "b"}})}));
 
-    msg.handleFunctionCallStart("read");
-    msg.handleFunctionCallArgsDelta(R"({"path": "a"})");
-    msg.handleFunctionCallComplete();
-
-    msg.handleFunctionCallStart("write");
-    msg.handleFunctionCallArgsDelta(R"({"path": "b"})");
-    msg.handleFunctionCallComplete();
-
-    QJsonObject result = msg.toProviderFormat();
-    QJsonArray parts = result["parts"].toArray();
+    const QJsonArray parts = msg.toProviderFormat()["parts"].toArray();
 
     int functionCallsWithSig = 0;
-    for (const auto &p : parts) {
-        QJsonObject partObj = p.toObject();
+    for (const QJsonValue &p : parts) {
+        const QJsonObject partObj = p.toObject();
         if (partObj.contains("functionCall") && partObj.contains("thoughtSignature")) {
             EXPECT_EQ(partObj["thoughtSignature"].toString(), "sig-multi");
             functionCallsWithSig++;
@@ -396,24 +375,22 @@ TEST(GoogleMessage, ToProviderFormat_MultipleFunctionCalls_ShareSignature)
 TEST(GoogleMessage, CreateToolResultParts)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("read");
-    msg.handleFunctionCallComplete();
-    msg.handleFunctionCallStart("write");
-    msg.handleFunctionCallComplete();
+    msg.applyEvent(candidateChunk({functionCallPart("read"), functionCallPart("write")}));
 
-    auto tools = msg.currentToolUseContent();
+    const QList<ToolUseContent> tools = msg.currentToolUseContent();
+    ASSERT_EQ(tools.size(), 2);
 
     QHash<QString, ToolResult> results;
     results[tools[0].id] = ToolResult::text("file content");
     results[tools[1].id] = ToolResult::text("write ok");
 
-    QJsonArray parts = msg.createToolResultParts(results);
-    EXPECT_EQ(parts.size(), 2);
+    const QJsonArray parts = msg.createToolResultParts(results);
+    ASSERT_EQ(parts.size(), 2);
 
-    for (const auto &val : parts) {
-        QJsonObject obj = val.toObject();
+    for (const QJsonValue &val : parts) {
+        const QJsonObject obj = val.toObject();
         EXPECT_TRUE(obj.contains("functionResponse"));
-        auto funcResp = obj["functionResponse"].toObject();
+        const QJsonObject funcResp = obj["functionResponse"].toObject();
         EXPECT_TRUE(funcResp.contains("name"));
         EXPECT_TRUE(funcResp.contains("response"));
         EXPECT_TRUE(funcResp["response"].toObject().contains("result"));
@@ -423,10 +400,9 @@ TEST(GoogleMessage, CreateToolResultParts)
 TEST(GoogleMessage, CreateToolResultParts_ImageBecomesNestedInlineDataPart)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("get_sample_image");
-    msg.handleFunctionCallComplete();
+    msg.applyEvent(candidateChunk({functionCallPart("get_sample_image")}));
 
-    auto tools = msg.currentToolUseContent();
+    const QList<ToolUseContent> tools = msg.currentToolUseContent();
     ASSERT_EQ(tools.size(), 1);
 
     ToolResult r;
@@ -458,12 +434,9 @@ TEST(GoogleMessage, CreateToolResultParts_ImageBecomesNestedInlineDataPart)
 TEST(GoogleMessage, CreateToolResultParts_OnePartPerFunctionCallWithMixedResults)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("read");
-    msg.handleFunctionCallComplete();
-    msg.handleFunctionCallStart("get_sample_image");
-    msg.handleFunctionCallComplete();
+    msg.applyEvent(candidateChunk({functionCallPart("read"), functionCallPart("get_sample_image")}));
 
-    auto tools = msg.currentToolUseContent();
+    const QList<ToolUseContent> tools = msg.currentToolUseContent();
     ASSERT_EQ(tools.size(), 2);
 
     ToolResult withImage;
@@ -486,10 +459,9 @@ TEST(GoogleMessage, CreateToolResultParts_OnePartPerFunctionCallWithMixedResults
 TEST(GoogleMessage, CreateToolResultParts_TextOnlyKeepsFlatResponse)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("read");
-    msg.handleFunctionCallComplete();
+    msg.applyEvent(candidateChunk({functionCallPart("read")}));
 
-    auto tools = msg.currentToolUseContent();
+    const QList<ToolUseContent> tools = msg.currentToolUseContent();
     QHash<QString, ToolResult> results;
     results[tools[0].id] = ToolResult::text("plain text result");
 
@@ -506,10 +478,9 @@ TEST(GoogleMessage, CreateToolResultParts_TextOnlyKeepsFlatResponse)
 TEST(GoogleMessage, CreateToolResultParts_AudioAlsoBecomesInlineData)
 {
     GoogleMessage msg;
-    msg.handleFunctionCallStart("record");
-    msg.handleFunctionCallComplete();
+    msg.applyEvent(candidateChunk({functionCallPart("record")}));
 
-    auto tools = msg.currentToolUseContent();
+    const QList<ToolUseContent> tools = msg.currentToolUseContent();
 
     ToolResult r;
     r.content.append(AudioContent{QByteArray("WAVDATA"), "audio/wav"});
@@ -533,10 +504,7 @@ TEST(GoogleMessage, CreateToolResultParts_AudioAlsoBecomesInlineData)
 TEST(GoogleMessage, StartNewContinuation)
 {
     GoogleMessage msg;
-    msg.handleContentDelta("old");
-    msg.handleFunctionCallStart("tool");
-    msg.handleFunctionCallComplete();
-    msg.handleFinishReason("STOP");
+    msg.applyEvent(candidateChunk({textPart("old"), functionCallPart("tool")}, "STOP"));
 
     msg.startNewContinuation();
     EXPECT_EQ(msg.state(), MessageState::Building);

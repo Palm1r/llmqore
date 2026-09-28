@@ -186,8 +186,9 @@ was refused and continues. The gate is consulted per call, not per round.
 
 ## Headers and authentication
 
-Every client starts with the headers its provider needs and an `AuthScheme` saying where
-the key goes. All of it is replaceable.
+Every client starts from its provider's profile: the headers the provider needs and an
+`AuthScheme` saying where the key goes. All of it is replaceable, and `profile()` always
+shows what the next request will carry.
 
 `setHeader` changes one entry and leaves the rest alone:
 
@@ -215,21 +216,28 @@ azure->setAuthScheme({.placement = LLMQore::AuthScheme::Placement::Header,
 `Placement::QueryParam` puts it in the query string (Google's default), `Placement::None`
 sends none. An empty `apiKey` sends nothing either way.
 
+`setProfile` replaces the whole identity at once -- paths, headers, auth and logging
+category -- so call it first and adjust afterwards. To change one field of a profile, start
+from the current one: `auto p = client->profile(); p.chatPath = "..."; client->setProfile(p);`
+keeps everything else, the key included.
+
 ## Non-default endpoints
 
-Clients with more than one inference endpoint take a path suffix as the second argument to
-`sendMessage`. An empty string selects the provider's default.
+Clients with more than one inference endpoint take a path as the second argument to
+`sendMessage`. It is appended to the base URL, like the profile's default path, and an empty
+string selects that default.
 
 ```cpp
-auto *mistral = new LLMQore::MistralClient(
-    "https://api.mistral.ai/v1", "...", "codestral-latest", this);
+auto *mistral = new LLMQore::OpenAIClient(
+    "https://api.mistral.ai", "...", "codestral-latest", this);
+mistral->setProfile(LLMQore::mistralProfile());
 
 QJsonObject payload;
 payload["model"] = "codestral-latest";
 payload["prompt"] = "def fib(n):\n    ";
 payload["suffix"] = "\n\nprint(fib(10))\n";
 
-mistral->sendMessage(payload, "/fim/completions");
+mistral->sendMessage(payload, "/v1/fim/completions");
 ```
 
 Others that accept an override: `OllamaClient` (`/api/generate`, default `/api/chat`) and

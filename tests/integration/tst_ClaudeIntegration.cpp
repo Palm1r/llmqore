@@ -3,6 +3,7 @@
 
 #include "IntegrationTestHelpers.hpp"
 #include <LLMQore/ClaudeClient.hpp>
+#include <LLMQore/Conversation.hpp>
 
 using namespace LLMQore;
 using namespace LLMQore::IntegrationTest;
@@ -21,8 +22,7 @@ protected:
 
     std::unique_ptr<ClaudeClient> createClient()
     {
-        return std::make_unique<ClaudeClient>(
-            m_url, m_apiKey, m_model);
+        return std::make_unique<ClaudeClient>(m_url, m_apiKey, m_model);
     }
 
     QString m_apiKey;
@@ -48,6 +48,7 @@ TEST_F(ClaudeIntegrationTest, SimpleTextResponse)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -68,6 +69,7 @@ TEST_F(ClaudeIntegrationTest, SimpleStringPrompt)
     client->ask("Reply with exactly one word: Pong");
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -99,6 +101,7 @@ TEST_F(ClaudeIntegrationTest, StreamingChunks)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -115,20 +118,15 @@ TEST_F(ClaudeIntegrationTest, ToolUse_EchoTool)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["max_tokens"] = 500;
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content",
-         "Use the echo tool to echo the message 'integration test works'. "
-         "Then tell me the result."}}};
+    Conversation conversation;
+    conversation.addUser(
+        "Use the echo tool to echo the message 'integration test works'. "
+        "Then tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation, QJsonObject{{"max_tokens", 500}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -147,18 +145,13 @@ TEST_F(ClaudeIntegrationTest, ToolUse_Calculator)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["max_tokens"] = 500;
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content", "Use the calculator tool to multiply 7 by 8. Tell me the result."}}};
+    Conversation conversation;
+    conversation.addUser("Use the calculator tool to multiply 7 by 8. Tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation, QJsonObject{{"max_tokens", 500}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -186,6 +179,7 @@ TEST_F(ClaudeIntegrationTest, ExtendedThinking)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -222,6 +216,7 @@ TEST_F(ClaudeIntegrationTest, ImageMessage_Base64)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_FALSE(result.failed) << result.diagnostics();
@@ -249,6 +244,7 @@ TEST_F(ClaudeIntegrationTest, BufferedTextResponse)
     client->sendMessage(payload, {}, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -268,6 +264,7 @@ TEST_F(ClaudeIntegrationTest, BufferedStringPrompt)
     client->ask("Reply with exactly one word: Pong", RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();

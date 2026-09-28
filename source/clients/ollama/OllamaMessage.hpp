@@ -18,13 +18,8 @@ public:
 
     static const ToolDialect &toolDialect();
 
-    void handleContentDelta(const QString &content);
-    void handleToolCall(const QJsonObject &toolCall);
-    void handleThinkingDelta(const QString &thinking);
-    void handleThinkingComplete(const QString &signature);
-    void handleDone(bool done, const QString &doneReason = {});
-
-    QString stopReason() const override { return m_doneReason; }
+    MessageEffects applyEvent(const QJsonObject &event);
+    MessageEffects applyResponse(const QJsonObject &response);
 
     [[nodiscard]] static QJsonObject serializeTurn(
         TurnRole role, const QList<TurnContent> &blocks);
@@ -32,23 +27,23 @@ public:
     QJsonObject toProviderFormat() const;
     QJsonArray createToolResultMessages(const QHash<QString, ToolResult> &toolResults) const;
 
-    bool isAccumulatingToolCall() const;
-
-    void startNewContinuation() override;
-
 private:
-    bool m_done = false;
-    QString m_doneReason;
+    void clearDerivedCaches() override;
+
+    void handleContentDelta(const QString &content);
+    void handleToolCall(const QJsonObject &toolCall);
+    void handleThinkingDelta(const QString &thinking);
+    void handleThinkingComplete(const QString &signature);
+    void handleStopReason(const QString &doneReason);
+    [[nodiscard]] bool isAccumulatingToolCall() const;
+
     QString m_accumulatedContent;
     bool m_contentAddedToTextBlock = false;
-    int m_currentThinkingIndex = -1;
     quint64 m_toolCallSequence = 0;
 
     QString makeToolCallId(const QString &name);
-    void updateStateFromDone();
     bool tryParseToolCall();
     QString stripMarkdownCodeFence(const QString &content) const;
-    int getOrCreateThinkingContentIndex();
 };
 
 } // namespace LLMQore

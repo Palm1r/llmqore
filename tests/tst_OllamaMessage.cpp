@@ -10,6 +10,42 @@
 
 using namespace LLMQore;
 
+namespace {
+
+QJsonObject line(const QJsonObject &message, bool done = false)
+{
+    return QJsonObject{{"message", message}, {"done", done}};
+}
+
+QJsonObject contentLine(const QString &content)
+{
+    return line(QJsonObject{{"role", "assistant"}, {"content", content}});
+}
+
+QJsonObject thinkingLine(const QString &thinking)
+{
+    return line(QJsonObject{{"role", "assistant"}, {"content", ""}, {"thinking", thinking}});
+}
+
+QJsonObject toolCallLine(const QString &name, const QJsonValue &arguments)
+{
+    return line(QJsonObject{
+        {"role", "assistant"},
+        {"content", ""},
+        {"tool_calls",
+         QJsonArray{QJsonObject{
+             {"function", QJsonObject{{"name", name}, {"arguments", arguments}}}}}}});
+}
+
+QJsonObject doneLine(const QString &reason = QStringLiteral("stop"))
+{
+    QJsonObject done = line(QJsonObject{{"role", "assistant"}, {"content", ""}}, true);
+    done["done_reason"] = reason;
+    return done;
+}
+
+} // namespace
+
 TEST(OllamaMessage, InitialState)
 {
     OllamaMessage msg;
@@ -19,87 +55,71 @@ TEST(OllamaMessage, InitialState)
     EXPECT_TRUE(msg.currentThinkingContent().isEmpty());
 }
 
-TEST(OllamaMessage, HandleContentDelta_PlainText)
+TEST(OllamaMessage, PlainTextAccumulatesAndIsHandedBackAsChunks)
 {
     OllamaMessage msg;
-    msg.handleContentDelta("Hello ");
-    msg.handleContentDelta("world");
+    const MessageEffects first = msg.applyEvent(contentLine("Hello "));
+    const MessageEffects second = msg.applyEvent(contentLine("world"));
 
-    EXPECT_EQ(msg.currentBlocks().size(), 1);
+    EXPECT_EQ(first.chunk, "Hello ");
+    EXPECT_EQ(second.chunk, "world");
+    EXPECT_TRUE(first.thinkingCompleted);
+
+    ASSERT_EQ(msg.currentBlocks().size(), 1);
     auto *textBlock = std::get_if<TextContent>(&msg.currentBlocks()[0]);
     ASSERT_NE(textBlock, nullptr);
     EXPECT_EQ(textBlock->text, "Hello world");
 }
 
-TEST(OllamaMessage, HandleContentDelta_JsonLikeBuffered)
+TEST(OllamaMessage, JsonLookingContentIsHeldBackAsAPossibleToolCall)
 {
     OllamaMessage msg;
-    msg.handleContentDelta(R"({"name": "read")");
+    const MessageEffects effects = msg.applyEvent(contentLine(R"({"name": "read")"));
 
-    bool hasTextBlock = false;
-    for (const auto &block : msg.currentBlocks()) {
-        if (std::get_if<TextContent>(&block))
-            hasTextBlock = true;
-    }
-    EXPECT_FALSE(hasTextBlock);
+    EXPECT_TRUE(effects.chunk.isEmpty());
+    for (const TurnContent &block : msg.currentBlocks())
+        EXPECT_EQ(std::get_if<TextContent>(&block), nullptr);
 }
 
-TEST(OllamaMessage, HandleContentDelta_NonJsonFlushesAccumulated)
+TEST(OllamaMessage, GenerateEndpointResponseIsText)
 {
     OllamaMessage msg;
-    msg.handleContentDelta("Hello");
+    const MessageEffects effects
+        = msg.applyEvent(QJsonObject{{"response", "hi"}, {"done", false}});
 
-    auto *textBlock = std::get_if<TextContent>(&msg.currentBlocks()[0]);
-    ASSERT_NE(textBlock, nullptr);
-    EXPECT_EQ(textBlock->text, "Hello");
+    EXPECT_EQ(effects.chunk, "hi");
+    ASSERT_EQ(msg.currentBlocks().size(), 1);
+    EXPECT_EQ(std::get_if<TextContent>(&msg.currentBlocks()[0])->text, "hi");
 }
 
-TEST(OllamaMessage, HandleToolCall_Structured)
+TEST(OllamaMessage, StructuredToolCall)
 {
     OllamaMessage msg;
-    QJsonObject toolCall{
-        {"function",
-         QJsonObject{{"name", "read_file"}, {"arguments", QJsonObject{{"path", "/tmp"}}}}}};
+    msg.applyEvent(toolCallLine("read_file", QJsonObject{{"path", "/tmp"}}));
 
-    msg.handleToolCall(toolCall);
-
-    EXPECT_EQ(msg.currentToolUseContent().size(), 1);
-    auto tool = msg.currentToolUseContent()[0];
+    ASSERT_EQ(msg.currentToolUseContent().size(), 1);
+    const ToolUseContent tool = msg.currentToolUseContent()[0];
     EXPECT_EQ(tool.name, "read_file");
     EXPECT_EQ(tool.input["path"].toString(), "/tmp");
     EXPECT_TRUE(tool.id.startsWith("call_read_file_"));
 }
 
-TEST(OllamaMessage, HandleToolCall_MultipleStructured)
+TEST(OllamaMessage, SeveralStructuredToolCalls)
 {
     OllamaMessage msg;
-
-    QJsonObject toolCall1{
-        {"function", QJsonObject{{"name", "tool_a"}, {"arguments", QJsonObject{{"x", 1}}}}}};
-    QJsonObject toolCall2{
-        {"function", QJsonObject{{"name", "tool_b"}, {"arguments", QJsonObject{{"y", 2}}}}}};
-
-    msg.handleToolCall(toolCall1);
-    msg.handleToolCall(toolCall2);
+    msg.applyEvent(toolCallLine("tool_a", QJsonObject{{"x", 1}}));
+    msg.applyEvent(toolCallLine("tool_b", QJsonObject{{"y", 2}}));
 
     EXPECT_EQ(msg.currentToolUseContent().size(), 2);
 }
 
-TEST(OllamaMessage, HandleToolCall_SameToolTwiceGetsDistinctIds)
+TEST(OllamaMessage, SameToolTwiceGetsDistinctIds)
 {
     OllamaMessage msg;
+    msg.applyEvent(toolCallLine("read_file", QJsonObject{{"path", "/a"}}));
+    msg.applyEvent(toolCallLine("read_file", QJsonObject{{"path", "/b"}}));
 
-    QJsonObject toolCall1{
-        {"function",
-         QJsonObject{{"name", "read_file"}, {"arguments", QJsonObject{{"path", "/a"}}}}}};
-    QJsonObject toolCall2{
-        {"function",
-         QJsonObject{{"name", "read_file"}, {"arguments", QJsonObject{{"path", "/b"}}}}}};
-
-    msg.handleToolCall(toolCall1);
-    msg.handleToolCall(toolCall2);
-
-    auto tools = msg.currentToolUseContent();
+    const QList<ToolUseContent> tools = msg.currentToolUseContent();
     ASSERT_EQ(tools.size(), 2);
     EXPECT_TRUE(tools[0].id.startsWith("call_read_file_"));
     EXPECT_TRUE(tools[1].id.startsWith("call_read_file_"));
@@ -108,144 +128,170 @@ TEST(OllamaMessage, HandleToolCall_SameToolTwiceGetsDistinctIds)
     EXPECT_EQ(tools[1].input["path"].toString(), "/b");
 }
 
-TEST(OllamaMessage, ToolCallIds_DistinctAcrossContinuations)
+TEST(OllamaMessage, ToolCallIdsAreDistinctAcrossContinuations)
 {
     OllamaMessage msg;
-    QJsonObject toolCall{
-        {"function", QJsonObject{{"name", "tool"}, {"arguments", QJsonObject{}}}}};
-
-    msg.handleToolCall(toolCall);
-    msg.handleDone(true);
-    QString firstId = msg.currentToolUseContent()[0].id;
+    msg.applyEvent(toolCallLine("tool", QJsonObject{}));
+    msg.applyEvent(doneLine());
+    const QString firstId = msg.currentToolUseContent()[0].id;
 
     msg.startNewContinuation();
-    msg.handleToolCall(toolCall);
+    msg.applyEvent(toolCallLine("tool", QJsonObject{}));
 
     ASSERT_EQ(msg.currentToolUseContent().size(), 1);
     EXPECT_NE(msg.currentToolUseContent()[0].id, firstId);
 }
 
-TEST(OllamaMessage, HandleDone_ParsesToolCallFromContent)
+TEST(OllamaMessage, DoneParsesAToolCallWrittenAsContent)
 {
     OllamaMessage msg;
-    msg.handleContentDelta(R"({"name": "read_file", "arguments": {"path": "/tmp/test.txt"}})");
-    msg.handleDone(true);
+    msg.applyEvent(
+        contentLine(R"({"name": "read_file", "arguments": {"path": "/tmp/test.txt"}})"));
+    msg.applyEvent(doneLine());
 
-    EXPECT_EQ(msg.currentToolUseContent().size(), 1);
-    auto tool = msg.currentToolUseContent()[0];
+    ASSERT_EQ(msg.currentToolUseContent().size(), 1);
+    const ToolUseContent tool = msg.currentToolUseContent()[0];
     EXPECT_EQ(tool.name, "read_file");
     EXPECT_EQ(tool.input["path"].toString(), "/tmp/test.txt");
     EXPECT_EQ(msg.state(), MessageState::RequiresToolExecution);
 }
 
-TEST(OllamaMessage, HandleDone_ParsesToolCallWithStringArguments)
+TEST(OllamaMessage, DoneParsesAToolCallWithStringArguments)
 {
     OllamaMessage msg;
-    msg.handleContentDelta(R"({"name": "tool", "arguments": "{\"key\": \"value\"}"})");
-    msg.handleDone(true);
+    msg.applyEvent(contentLine(R"({"name": "tool", "arguments": "{\"key\": \"value\"}"})"));
+    msg.applyEvent(doneLine());
 
-    EXPECT_EQ(msg.currentToolUseContent().size(), 1);
-    auto tool = msg.currentToolUseContent()[0];
-    EXPECT_EQ(tool.input["key"].toString(), "value");
+    ASSERT_EQ(msg.currentToolUseContent().size(), 1);
+    EXPECT_EQ(msg.currentToolUseContent()[0].input["key"].toString(), "value");
 }
 
-TEST(OllamaMessage, HandleDone_PlainTextFinal)
+TEST(OllamaMessage, DoneAfterPlainTextIsFinal)
 {
     OllamaMessage msg;
-    msg.handleContentDelta("Just a normal answer");
-    msg.handleDone(true);
+    msg.applyEvent(contentLine("Just a normal answer"));
+    msg.applyEvent(doneLine());
 
     EXPECT_EQ(msg.state(), MessageState::Final);
-    EXPECT_EQ(msg.currentToolUseContent().size(), 0);
+    EXPECT_EQ(msg.stopReason(), "stop");
+    EXPECT_TRUE(msg.currentToolUseContent().isEmpty());
 
     auto *textBlock = std::get_if<TextContent>(&msg.currentBlocks()[0]);
     ASSERT_NE(textBlock, nullptr);
     EXPECT_EQ(textBlock->text, "Just a normal answer");
 }
 
-TEST(OllamaMessage, HandleDone_FalseDoesNothing)
+TEST(OllamaMessage, ALineThatIsNotDoneLeavesTheTurnOpen)
 {
     OllamaMessage msg;
-    msg.handleContentDelta("partial");
-    msg.handleDone(false);
+    const MessageEffects effects = msg.applyEvent(contentLine("partial"));
 
     EXPECT_EQ(msg.state(), MessageState::Building);
+    EXPECT_FALSE(effects.toolsReady);
 }
 
-TEST(OllamaMessage, HandleDone_InvalidToolCallJson)
+TEST(OllamaMessage, DoneHandsBackUsageAndReadiesTools)
 {
     OllamaMessage msg;
-    msg.handleContentDelta(R"({"name": "", "arguments": {}})");
-    msg.handleDone(true);
+    QJsonObject done = doneLine();
+    done["prompt_eval_count"] = 3;
+    done["eval_count"] = 5;
+
+    const MessageEffects effects = msg.applyEvent(done);
+
+    EXPECT_TRUE(effects.toolsReady);
+    EXPECT_TRUE(effects.thinkingCompleted);
+    EXPECT_EQ(effects.usage["eval_count"].toInt(), 5);
+}
+
+TEST(OllamaMessage, AnErrorLineIsHandedBackAsAnError)
+{
+    OllamaMessage msg;
+    const MessageEffects effects = msg.applyEvent(QJsonObject{{"error", "boom"}});
+
+    ASSERT_TRUE(effects.error.has_value());
+    EXPECT_EQ(effects.error->value("message").toString(), "boom");
+    EXPECT_TRUE(msg.currentBlocks().isEmpty());
+}
+
+TEST(OllamaMessage, ToolCallJsonWithAnEmptyNameIsNotACall)
+{
+    OllamaMessage msg;
+    msg.applyEvent(contentLine(R"({"name": "", "arguments": {}})"));
+    msg.applyEvent(doneLine());
 
     EXPECT_TRUE(msg.currentToolUseContent().isEmpty());
     EXPECT_EQ(msg.state(), MessageState::Final);
 }
 
-TEST(OllamaMessage, HandleDone_IncompleteToolCallJsonDiscarded)
+TEST(OllamaMessage, IncompleteToolCallJsonIsDiscarded)
 {
     OllamaMessage msg;
-    msg.handleContentDelta(R"({"name": "tool", "arguments": )");
-    msg.handleDone(true);
+    msg.applyEvent(contentLine(R"({"name": "tool", "arguments": )"));
+    msg.applyEvent(doneLine());
 
     EXPECT_TRUE(msg.currentToolUseContent().isEmpty());
 }
 
-TEST(OllamaMessage, HandleDone_JsonWithoutToolFields)
+TEST(OllamaMessage, JsonWithoutToolFieldsIsNotACall)
 {
     OllamaMessage msg;
-    msg.handleContentDelta(R"({"key": "value", "other": 123})");
-    msg.handleDone(true);
+    msg.applyEvent(contentLine(R"({"key": "value", "other": 123})"));
+    msg.applyEvent(doneLine());
 
     EXPECT_TRUE(msg.currentToolUseContent().isEmpty());
     EXPECT_EQ(msg.state(), MessageState::Final);
 }
 
-TEST(OllamaMessage, HandleThinkingDelta)
+TEST(OllamaMessage, ThinkingDeltasShareOneBlock)
 {
     OllamaMessage msg;
-    msg.handleThinkingDelta("Step 1...");
-    msg.handleThinkingDelta(" Step 2...");
+    const MessageEffects effects = msg.applyEvent(thinkingLine("Step 1..."));
+    msg.applyEvent(thinkingLine(" Step 2..."));
 
-    auto thinkingBlocks = msg.currentThinkingContent();
-    EXPECT_EQ(thinkingBlocks.size(), 1);
+    EXPECT_TRUE(effects.chunk.isEmpty());
+    const QList<ThinkingContent> thinkingBlocks = msg.currentThinkingContent();
+    ASSERT_EQ(thinkingBlocks.size(), 1);
     EXPECT_EQ(thinkingBlocks[0].thinking, "Step 1... Step 2...");
 }
 
-TEST(OllamaMessage, HandleThinkingComplete_WithSignature)
+TEST(OllamaMessage, TopLevelThinkingIsReadToo)
 {
     OllamaMessage msg;
-    msg.handleThinkingDelta("thinking...");
-    msg.handleThinkingComplete("sig-abc");
+    msg.applyEvent(QJsonObject{{"thinking", "hmm"}, {"done", false}});
 
-    auto thinking = msg.currentThinkingContent()[0];
-    EXPECT_EQ(thinking.signature, "sig-abc");
+    ASSERT_EQ(msg.currentThinkingContent().size(), 1);
+    EXPECT_EQ(msg.currentThinkingContent()[0].thinking, "hmm");
 }
 
-TEST(OllamaMessage, HandleThinkingComplete_NoThinkingBlock)
+TEST(OllamaMessage, DoneSignatureLandsOnTheThinkingBlock)
 {
     OllamaMessage msg;
-    msg.handleThinkingComplete("sig");
+    msg.applyEvent(thinkingLine("thinking..."));
+    QJsonObject done = doneLine();
+    done["signature"] = "sig-abc";
+    msg.applyEvent(done);
+
+    EXPECT_EQ(msg.currentThinkingContent()[0].signature, "sig-abc");
+}
+
+TEST(OllamaMessage, DoneSignatureWithoutThinkingCreatesNothing)
+{
+    OllamaMessage msg;
+    QJsonObject done = doneLine();
+    done["signature"] = "sig";
+    msg.applyEvent(done);
+
     EXPECT_TRUE(msg.currentThinkingContent().isEmpty());
-}
-
-TEST(OllamaMessage, HandleThinkingDelta_ReusesExistingBlock)
-{
-    OllamaMessage msg;
-    msg.handleThinkingDelta("first");
-    msg.handleThinkingDelta(" second");
-
-    EXPECT_EQ(msg.currentThinkingContent().size(), 1);
-    EXPECT_EQ(msg.currentThinkingContent()[0].thinking, "first second");
 }
 
 TEST(OllamaMessage, ToProviderFormat_TextOnly)
 {
     OllamaMessage msg;
-    msg.handleContentDelta("Hello world");
-    msg.handleDone(true);
+    msg.applyEvent(contentLine("Hello world"));
+    msg.applyEvent(doneLine());
 
-    QJsonObject result = msg.toProviderFormat();
+    const QJsonObject result = msg.toProviderFormat();
     EXPECT_EQ(result["role"].toString(), "assistant");
     EXPECT_EQ(result["content"].toString(), "Hello world");
     EXPECT_FALSE(result.contains("tool_calls"));
@@ -254,25 +300,23 @@ TEST(OllamaMessage, ToProviderFormat_TextOnly)
 TEST(OllamaMessage, ToProviderFormat_WithToolCalls)
 {
     OllamaMessage msg;
-    QJsonObject toolCall{
-        {"function", QJsonObject{{"name", "read"}, {"arguments", QJsonObject{{"p", "a"}}}}}};
-    msg.handleToolCall(toolCall);
+    msg.applyEvent(toolCallLine("read", QJsonObject{{"p", "a"}}));
 
-    QJsonObject result = msg.toProviderFormat();
+    const QJsonObject result = msg.toProviderFormat();
     EXPECT_EQ(result["role"].toString(), "assistant");
-    QJsonArray toolCalls = result["tool_calls"].toArray();
-    EXPECT_EQ(toolCalls.size(), 1);
+    const QJsonArray toolCalls = result["tool_calls"].toArray();
+    ASSERT_EQ(toolCalls.size(), 1);
     EXPECT_EQ(toolCalls[0].toObject()["type"].toString(), "function");
 }
 
 TEST(OllamaMessage, ToProviderFormat_WithThinking)
 {
     OllamaMessage msg;
-    msg.handleThinkingDelta("hmm...");
-    msg.handleContentDelta("answer");
-    msg.handleDone(true);
+    msg.applyEvent(thinkingLine("hmm..."));
+    msg.applyEvent(contentLine("answer"));
+    msg.applyEvent(doneLine());
 
-    QJsonObject result = msg.toProviderFormat();
+    const QJsonObject result = msg.toProviderFormat();
     EXPECT_EQ(result["thinking"].toString(), "hmm...");
     EXPECT_EQ(result["content"].toString(), "answer");
 }
@@ -280,56 +324,44 @@ TEST(OllamaMessage, ToProviderFormat_WithThinking)
 TEST(OllamaMessage, CreateToolResultMessages)
 {
     OllamaMessage msg;
-    QJsonObject tc1{{"function", QJsonObject{{"name", "read"}, {"arguments", QJsonObject{}}}}};
-    QJsonObject tc2{{"function", QJsonObject{{"name", "write"}, {"arguments", QJsonObject{}}}}};
-    msg.handleToolCall(tc1);
-    msg.handleToolCall(tc2);
+    msg.applyEvent(toolCallLine("read", QJsonObject{}));
+    msg.applyEvent(toolCallLine("write", QJsonObject{}));
 
-    auto tools = msg.currentToolUseContent();
+    const QList<ToolUseContent> tools = msg.currentToolUseContent();
     QHash<QString, ToolResult> results;
     results[tools[0].id] = ToolResult::text("content1");
     results[tools[1].id] = ToolResult::text("content2");
 
-    QJsonArray messages = msg.createToolResultMessages(results);
-    EXPECT_EQ(messages.size(), 2);
+    const QJsonArray messages = msg.createToolResultMessages(results);
+    ASSERT_EQ(messages.size(), 2);
 
-    for (const auto &val : messages) {
-        QJsonObject obj = val.toObject();
+    for (const QJsonValue &val : messages) {
+        const QJsonObject obj = val.toObject();
         EXPECT_EQ(obj["role"].toString(), "tool");
         EXPECT_FALSE(obj["content"].toString().isEmpty());
     }
 }
 
-TEST(OllamaMessage, StateTransition_DoneWithTools)
+TEST(OllamaMessage, DoneWithToolsRequiresToolExecution)
 {
     OllamaMessage msg;
-    QJsonObject toolCall{{"function", QJsonObject{{"name", "tool"}, {"arguments", QJsonObject{}}}}};
-    msg.handleToolCall(toolCall);
-    msg.handleDone(true);
+    msg.applyEvent(toolCallLine("tool", QJsonObject{}));
+    msg.applyEvent(doneLine());
 
     EXPECT_EQ(msg.state(), MessageState::RequiresToolExecution);
-}
-
-TEST(OllamaMessage, StateTransition_DoneWithoutTools)
-{
-    OllamaMessage msg;
-    msg.handleContentDelta("answer");
-    msg.handleDone(true);
-
-    EXPECT_EQ(msg.state(), MessageState::Final);
 }
 
 TEST(OllamaMessage, StartNewContinuation)
 {
     OllamaMessage msg;
-    msg.handleContentDelta("old");
-    msg.handleThinkingDelta("thought");
-    QJsonObject toolCall{{"function", QJsonObject{{"name", "tool"}, {"arguments", QJsonObject{}}}}};
-    msg.handleToolCall(toolCall);
-    msg.handleDone(true);
+    msg.applyEvent(contentLine("old"));
+    msg.applyEvent(thinkingLine("thought"));
+    msg.applyEvent(toolCallLine("tool", QJsonObject{}));
+    msg.applyEvent(doneLine());
 
     msg.startNewContinuation();
     EXPECT_EQ(msg.state(), MessageState::Building);
+    EXPECT_TRUE(msg.stopReason().isEmpty());
     EXPECT_TRUE(msg.currentBlocks().isEmpty());
     EXPECT_TRUE(msg.currentToolUseContent().isEmpty());
     EXPECT_TRUE(msg.currentThinkingContent().isEmpty());

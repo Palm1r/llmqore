@@ -63,6 +63,14 @@ Tools can be enabled or disabled at runtime. Disabled tools remain in the regist
 
 When building tool definitions for the provider, `ToolsManager` wraps each enabled tool through a `ToolDialect` -- the object the client hands it at construction, obtained from `BaseClient::toolDialect()`. `wrapDefinition(tool)` produces one entry, and `finalizeDefinitions(array)` wraps the whole array for providers that need an envelope. The shapes differ -- some providers use a nested `function` wrapper, some a flat structure, and Google both sanitizes the parameter schema (dropping the JSON Schema keywords Gemini rejects) and groups declarations under a single `function_declarations` object -- but `ToolsManager` itself branches on nothing: each dialect lives next to its provider's message translator, alongside the code that reads tool results back.
 
+### Who attaches the definitions
+
+`BaseClient::ask(Conversation)` attaches them, not the application. It owns the `ToolsManager`, so it is the only place that can know both the registry and the dialect. The rule is one line: a non-empty registry puts the finished array under `tools`; an empty one omits the key entirely, because providers do not agree on what `"tools": []` means. Anything the caller passes in `extra` is merged afterwards and therefore wins, and the continuation payload inherits the key from the original request without re-deriving it.
+
+`sendMessage(QJsonObject)` remains the hand-built path, and it stays literal: nothing is attached to a payload the host wrote itself. That is what `ToolsManager::getToolsDefinitions()` is public for.
+
+Only enabled tools count, so a request that must go out without any -- a local model that rejects the `tools` key -- is one where every tool is disabled with `BaseTool::setEnabled(false)`, or one built by hand and sent through `sendMessage`.
+
 ### Execution queue
 
 Each in-flight request has its own tool queue. When `BaseClient` detects pending tool calls in a response, it dispatches each one through `ToolsManager`, which appends them to the request's queue and runs them through `ToolHandler`. Tools execute asynchronously and their futures are monitored for completion. On success, the result is stored; on failure (thrown exception or future error), an error result is recorded so the model sees the failure. Once all tools in the round complete, the round's ledger is closed and cleared, and a batch-level completion signal delivers that round's results to the client, which enforces the round limit, builds the continuation payload, and resends. Clearing at the boundary is what lets a model reuse a tool-call id in the next round without the call being deduplicated away.

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "IntegrationTestHelpers.hpp"
+#include <LLMQore/Conversation.hpp>
 #include <LLMQore/GoogleAIClient.hpp>
 
 using namespace LLMQore;
@@ -22,8 +23,7 @@ protected:
 
     std::unique_ptr<GoogleAIClient> createClient()
     {
-        return std::make_unique<GoogleAIClient>(
-            m_url, m_apiKey, m_model);
+        return std::make_unique<GoogleAIClient>(m_url, m_apiKey, m_model);
     }
 
     QString m_apiKey;
@@ -47,6 +47,7 @@ TEST_F(GoogleAIIntegrationTest, SimpleTextResponse)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -66,6 +67,7 @@ TEST_F(GoogleAIIntegrationTest, SimpleStringPrompt)
     client->ask("Reply with exactly one word: Pong");
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -84,12 +86,13 @@ TEST_F(GoogleAIIntegrationTest, StreamingChunks)
     payload["contents"] = QJsonArray{QJsonObject{
         {"role", "user"},
         {"parts",
-         QJsonArray{QJsonObject{
-             {"text", "Count from 1 to 30, one number per line, no other text."}}}}}};
+         QJsonArray{
+             QJsonObject{{"text", "Count from 1 to 30, one number per line, no other text."}}}}}};
 
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -106,17 +109,13 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_EchoTool)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["contents"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"parts",
-         QJsonArray{QJsonObject{
-             {"text", "Use the echo tool to echo 'google test works'. Then tell me the result."}}}}}};
-    payload["tools"] = client->tools()->getToolsDefinitions();
+    Conversation conversation;
+    conversation.addUser("Use the echo tool to echo 'google test works'. Then tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -140,26 +139,22 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_ImageReturningTool)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["contents"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"parts",
-         QJsonArray{QJsonObject{
-             {"text",
-              "Call the get_sample_image tool (no arguments), then tell me what "
-              "colour the returned image is. Reply with a single lowercase colour "
-              "word like 'red' or 'blue'."}}}}}};
-    payload["tools"] = client->tools()->getToolsDefinitions();
+    Conversation conversation;
+    conversation.addUser(
+        "Call the get_sample_image tool (no arguments), then tell me what "
+        "colour the returned image is. Reply with a single lowercase colour "
+        "word like 'red' or 'blue'.");
 
-    client->sendMessage(payload);
+    client->ask(conversation);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
     EXPECT_FALSE(result.failed) << result.diagnostics();
-    EXPECT_FALSE(result.toolCalls.isEmpty())
-        << "Model did not invoke the image-returning tool\n" << result.diagnostics();
+    EXPECT_FALSE(result.toolCalls.isEmpty()) << "Model did not invoke the image-returning tool\n"
+                                             << result.diagnostics();
     // The key invariant is that the multi-turn loop survived a non-text
     // tool result. The exact colour detection is advisory only.
     EXPECT_FALSE(result.fullText.isEmpty()) << result.diagnostics();
@@ -175,17 +170,13 @@ TEST_F(GoogleAIIntegrationTest, ToolUse_Calculator)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["contents"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"parts",
-         QJsonArray{QJsonObject{
-             {"text", "Use the calculator to divide 100 by 4. Tell me the result."}}}}}};
-    payload["tools"] = client->tools()->getToolsDefinitions();
+    Conversation conversation;
+    conversation.addUser("Use the calculator to divide 100 by 4. Tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -216,6 +207,7 @@ TEST_F(GoogleAIIntegrationTest, ThinkingBlocks)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -249,6 +241,7 @@ TEST_F(GoogleAIIntegrationTest, ImageMessage_InlineData)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_FALSE(result.failed) << result.diagnostics();
@@ -274,6 +267,7 @@ TEST_F(GoogleAIIntegrationTest, BufferedTextResponse)
     client->sendMessage(payload, {}, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -293,6 +287,7 @@ TEST_F(GoogleAIIntegrationTest, BufferedStringPrompt)
     client->ask("Reply with exactly one word: Pong", RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();

@@ -8,15 +8,9 @@
 #include <QString>
 
 #include <LLMQore/LLMQore_global.h>
+#include <LLMQore/SSEEvent.hpp>
 
 namespace LLMQore {
-
-struct LLMQORE_EXPORT SSEEvent
-{
-    QString type;
-    QByteArray data;
-    QByteArray id;
-};
 
 class LLMQORE_EXPORT SSEParser
 {

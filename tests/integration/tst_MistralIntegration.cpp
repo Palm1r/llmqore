@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "IntegrationTestHelpers.hpp"
-#include <LLMQore/MistralClient.hpp>
+#include <LLMQore/Conversation.hpp>
+#include <LLMQore/OpenAIClient.hpp>
 
 using namespace LLMQore;
 using namespace LLMQore::IntegrationTest;
@@ -20,14 +21,18 @@ protected:
         m_fimModel = getEnvOrDefault("MISTRAL_FIM_MODEL", "codestral-latest");
     }
 
-    std::unique_ptr<MistralClient> createClient()
+    std::unique_ptr<OpenAIClient> createClient()
     {
-        return std::make_unique<MistralClient>(m_url, m_apiKey, m_model);
+        auto client = std::make_unique<OpenAIClient>(m_url, m_apiKey, m_model);
+        client->setProfile(mistralProfile());
+        return client;
     }
 
-    std::unique_ptr<MistralClient> createFimClient()
+    std::unique_ptr<OpenAIClient> createFimClient()
     {
-        return std::make_unique<MistralClient>(m_url, m_apiKey, m_fimModel);
+        auto client = std::make_unique<OpenAIClient>(m_url, m_apiKey, m_fimModel);
+        client->setProfile(mistralProfile());
+        return client;
     }
 
     QString m_apiKey;
@@ -54,6 +59,7 @@ TEST_F(MistralIntegrationTest, SimpleTextResponse)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -73,6 +79,7 @@ TEST_F(MistralIntegrationTest, SimpleStringPrompt)
     client->ask("Reply with exactly one word: Pong");
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -92,12 +99,12 @@ TEST_F(MistralIntegrationTest, StreamingChunks)
     payload["max_tokens"] = 500;
     payload["stream"] = true;
     payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content", "Count from 1 to 30, one number per line, no other text."}}};
+        {"role", "user"}, {"content", "Count from 1 to 30, one number per line, no other text."}}};
 
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -114,19 +121,14 @@ TEST_F(MistralIntegrationTest, ToolUse_EchoTool)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["max_tokens"] = 300;
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content",
-         "Use the echo tool to echo 'integration test works'. Then tell me the result."}}};
+    Conversation conversation;
+    conversation.addUser(
+        "Use the echo tool to echo 'integration test works'. Then tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation, QJsonObject{{"max_tokens", 300}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -145,18 +147,13 @@ TEST_F(MistralIntegrationTest, ToolUse_Calculator)
     QEventLoop loop;
     wireLoggingSignals(client.get(), result, loop);
 
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["max_tokens"] = 300;
-    payload["stream"] = true;
-    payload["tools"] = client->tools()->getToolsDefinitions();
-    payload["messages"] = QJsonArray{QJsonObject{
-        {"role", "user"},
-        {"content", "Use the calculator to multiply 7 by 8. Tell me the result."}}};
+    Conversation conversation;
+    conversation.addUser("Use the calculator to multiply 7 by 8. Tell me the result.");
 
-    client->sendMessage(payload);
+    client->ask(conversation, QJsonObject{{"max_tokens", 300}});
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_TRUE(result.completed) << result.diagnostics();
@@ -193,6 +190,7 @@ TEST_F(MistralIntegrationTest, ImageMessage_Base64)
     client->sendMessage(payload);
 
     waitWithTimeout(loop, result, kToolContinuationTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     EXPECT_FALSE(result.failed) << result.diagnostics();
@@ -217,6 +215,7 @@ TEST_F(MistralIntegrationTest, BufferedTextResponse)
     client->sendMessage(payload, {}, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -236,6 +235,7 @@ TEST_F(MistralIntegrationTest, BufferedStringPrompt)
     client->ask("Reply with exactly one word: Pong", RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -285,6 +285,7 @@ TEST_F(MistralIntegrationTest, FimCompletion_Streaming)
     client->sendMessage(payload, kFimEndpoint);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -310,6 +311,7 @@ TEST_F(MistralIntegrationTest, FimCompletion_NoSuffix)
     client->sendMessage(payload, kFimEndpoint);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();
@@ -334,6 +336,7 @@ TEST_F(MistralIntegrationTest, FimCompletion_Buffered)
     client->sendMessage(payload, kFimEndpoint, RequestMode::Buffered);
 
     waitWithTimeout(loop, result, kRequestTimeoutMs);
+    LLMQORE_SKIP_IF_RATE_LIMITED(result);
 
     ASSERT_FALSE(result.timedOut) << "Request timed out\n" << result.diagnostics();
     ASSERT_TRUE(result.completed) << result.diagnostics();

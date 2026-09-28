@@ -9,12 +9,22 @@
 #include "OllamaMessage.hpp"
 #include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/HttpTransport.hpp>
-#include <LLMQore/RpcLineFramer.hpp>
 #include <LLMQore/Log.hpp>
 
-#include "core/ThreadAffinity.hpp"
-
 namespace LLMQore {
+
+ProviderProfile ollamaProfile()
+{
+    ProviderProfile profile = {
+        .chatPath = QStringLiteral("/api/chat"),
+        .modelsPath = QStringLiteral("/api/tags"),
+        .log = &llmOllamaLog()};
+    profile.auth = {
+        .placement = AuthScheme::Placement::Header,
+        .name = QStringLiteral("Authorization"),
+        .valuePrefix = QStringLiteral("Bearer ")};
+    return profile;
+}
 
 namespace {
 
@@ -44,43 +54,21 @@ OllamaClient::OllamaClient(
     QObject *parent)
     : BaseClient(url, apiKey, model, transport, parent)
 {
-    setLogCategory(llmOllamaLog());
-    setAuthScheme(
-        {.placement = AuthScheme::Placement::Header,
-         .name = QStringLiteral("Authorization"),
-         .valuePrefix = QStringLiteral("Bearer ")});
-    setHeaders({{QStringLiteral("Content-Type"), QStringLiteral("application/json")}});
+    setProfile(ollamaProfile());
 }
 
 RequestID OllamaClient::sendMessage(
     const QJsonObject &payload, const QString &endpoint, RequestMode mode)
 {
-    LLMQORE_ASSERT_OWNING_THREAD();
     QJsonObject request = payload;
     request["stream"] = (mode == RequestMode::Streaming);
-
-    RequestID id = createRequest();
-    const QString resolved = endpoint.isEmpty() ? QStringLiteral("/api/chat") : endpoint;
-
-    qCDebug(llmOllamaLog).noquote() << QString("Sending request %1 to %2").arg(id, resolved);
-
-    sendRequest(id, QUrl(m_url + resolved), request, mode);
-    return id;
-}
-
-RequestID OllamaClient::ask(const QString &prompt, RequestMode mode)
-{
-    QJsonObject payload;
-    payload["model"] = m_model;
-    payload["messages"] = QJsonArray{QJsonObject{{"role", "user"}, {"content", prompt}}};
-
-    return sendMessage(payload, {}, mode);
+    return postJson(request, endpoint, mode);
 }
 
 QJsonObject OllamaClient::buildConversationPayload(const Conversation &conversation) const
 {
     QJsonObject payload;
-    payload["model"] = m_model;
+    payload["model"] = model();
 
     QJsonArray messages;
     if (!conversation.system().isEmpty())
@@ -119,61 +107,19 @@ const UsageSchema &OllamaClient::usageSchema() const
 QFuture<QList<ModelInfo>> OllamaClient::listModels(const QString &endpoint)
 {
     return fetchModelList(
-        endpointUrl(endpoint, QStringLiteral("/api/tags")),
+        endpointUrl(endpoint, profile().modelsPath),
         QStringLiteral("models"),
         QStringLiteral("name"));
 }
 
-QString OllamaClient::parseHttpError(const HttpResponse &response) const
+StreamFraming OllamaClient::streamFraming() const
 {
-    const QJsonDocument doc = QJsonDocument::fromJson(response.body);
-    if (doc.isObject()) {
-        const QString message = doc.object().value("error").toString();
-        if (!message.isEmpty())
-            return QString("HTTP %1: %2").arg(response.statusCode).arg(message);
-    }
-    return BaseClient::parseHttpError(response);
+    return StreamFraming::JsonLines;
 }
 
-void OllamaClient::processData(const RequestID &id, const QByteArray &data)
+void OllamaClient::processJsonLine(const RequestID &id, const QJsonObject &json)
 {
-    if (data.isEmpty())
-        return;
-
-    if (!hasRequest(id))
-        return;
-
-    const QByteArrayList lines = requestLineFramer(id).append(data);
-
-    for (const QByteArray &line : lines) {
-        if (line.trimmed().isEmpty())
-            continue;
-
-        QJsonParseError error;
-        QJsonDocument doc = QJsonDocument::fromJson(line, &error);
-        if (doc.isNull() || !doc.isObject()) {
-            qCDebug(llmOllamaLog).noquote()
-                << QString("Failed to parse JSON: %1").arg(error.errorString());
-            continue;
-        }
-
-        if (!handleStreamObject(id, doc.object()))
-            return;
-    }
-}
-
-bool OllamaClient::handleStreamObject(const RequestID &id, const QJsonObject &obj)
-{
-    const QString errorMsg = obj.value("error").toString();
-    if (!errorMsg.isEmpty()) {
-        qCWarning(llmOllamaLog).noquote() << "Error in response: " + errorMsg;
-        cleanupFullRequest(id);
-        failRequest(id, errorMsg);
-        return false;
-    }
-
-    processStreamData(id, obj);
-    return true;
+    applyEffects(id, ensureMessage<OllamaMessage>(id)->applyEvent(json));
 }
 
 QJsonObject OllamaClient::buildContinuationPayload(
@@ -184,96 +130,9 @@ QJsonObject OllamaClient::buildContinuationPayload(
     return appendChatContinuation<OllamaMessage>(originalPayload, message, toolResults);
 }
 
-void OllamaClient::flushStreamBuffers(const RequestID &id)
+void OllamaClient::processBufferedBody(const RequestID &id, const QJsonObject &response)
 {
-    Rpc::LineFramer &framer = requestLineFramer(id);
-    if (!framer.hasIncompleteData())
-        return;
-
-    const QByteArray remaining = framer.currentBuffer().trimmed();
-    framer.clear();
-    if (remaining.isEmpty())
-        return;
-
-    const QJsonDocument doc = QJsonDocument::fromJson(remaining);
-    if (doc.isNull() || !doc.isObject())
-        return;
-
-    handleStreamObject(id, doc.object());
-}
-
-void OllamaClient::processStreamData(const RequestID &id, const QJsonObject &data)
-{
-    OllamaMessage *message = ensureMessage<OllamaMessage>(id);
-
-    if (data.contains("thinking")) {
-        QString thinkingDelta = data["thinking"].toString();
-        if (!thinkingDelta.isEmpty())
-            message->handleThinkingDelta(thinkingDelta);
-    }
-
-    if (data.contains("message")) {
-        QJsonObject messageObj = data["message"].toObject();
-
-        if (messageObj.contains("thinking")) {
-            QString thinkingDelta = messageObj["thinking"].toString();
-            if (!thinkingDelta.isEmpty())
-                message->handleThinkingDelta(thinkingDelta);
-        }
-
-        if (messageObj.contains("content")) {
-            QString content = messageObj["content"].toString();
-            if (!content.isEmpty()) {
-                notifyPendingThinkingBlocks(id);
-                message->handleContentDelta(content);
-                if (!message->isAccumulatingToolCall())
-                    addChunk(id, content);
-            }
-        }
-
-        if (messageObj.contains("tool_calls")) {
-            QJsonArray toolCalls = messageObj["tool_calls"].toArray();
-            for (const auto &toolCallValue : toolCalls)
-                message->handleToolCall(toolCallValue.toObject());
-        }
-    } else if (data.contains("response")) {
-        QString content = data["response"].toString();
-        if (!content.isEmpty()) {
-            message->handleContentDelta(content);
-            addChunk(id, content);
-        }
-    }
-
-    if (data["done"].toBool()) {
-        if (data.contains("signature")) {
-            message->handleThinkingComplete(data["signature"].toString());
-        }
-
-        message->handleDone(true, data.value("done_reason").toString());
-
-        applyUsage(id, data);
-
-        notifyPendingThinkingBlocks(id);
-        executeToolsFromMessage(id);
-    }
-}
-
-void OllamaClient::processBufferedResponse(const RequestID &id, const QByteArray &data)
-{
-    QJsonDocument doc = QJsonDocument::fromJson(data);
-    if (!doc.isObject()) {
-        failRequest(id, QStringLiteral("Invalid JSON in buffered response"));
-        return;
-    }
-
-    QJsonObject response = doc.object();
-
-    if (response.contains("error") && !response["error"].toString().isEmpty()) {
-        failRequest(id, response["error"].toString());
-        return;
-    }
-
-    processStreamData(id, response);
+    applyEffects(id, ensureMessage<OllamaMessage>(id)->applyResponse(response));
 }
 
 } // namespace LLMQore

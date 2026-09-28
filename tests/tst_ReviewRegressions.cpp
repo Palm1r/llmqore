@@ -21,7 +21,6 @@
 #include <LLMQore/HttpClient.hpp>
 #include <LLMQore/HttpStream.hpp>
 #include <LLMQore/LlamaCppClient.hpp>
-#include <LLMQore/MistralClient.hpp>
 #include <LLMQore/OllamaClient.hpp>
 #include <LLMQore/OpenAIClient.hpp>
 #include <LLMQore/OpenAIResponsesClient.hpp>
@@ -172,17 +171,22 @@ TEST(ReviewRegression, StreamDeletedByTheCallerSurvivesClientTeardown)
 TEST(ReviewRegression, OllamaThinkingAfterToolCallDoesNotReuseFreedBlock)
 {
     OllamaMessage msg;
+    const auto thinkingLine = [](const QString &thinking) {
+        return QJsonObject{{"message", QJsonObject{{"thinking", thinking}}}, {"done", false}};
+    };
 
-    msg.handleThinkingDelta(QStringLiteral("first thought"));
+    msg.applyEvent(thinkingLine(QStringLiteral("first thought")));
     ASSERT_EQ(msg.currentThinkingContent().size(), 1);
 
-    msg.handleContentDelta(R"({"name":"echo","arguments":{"value":"7"}})");
-    msg.handleDone(true);
+    msg.applyEvent(QJsonObject{
+        {"message", QJsonObject{{"content", R"({"name":"echo","arguments":{"value":"7"}})"}}},
+        {"done", false}});
+    msg.applyEvent(QJsonObject{{"done", true}});
     ASSERT_EQ(msg.currentToolUseContent().size(), 1);
     EXPECT_TRUE(msg.currentThinkingContent().isEmpty())
         << "the tool-call path deletes every accumulated block";
 
-    msg.handleThinkingDelta(QStringLiteral("second thought"));
+    msg.applyEvent(thinkingLine(QStringLiteral("second thought")));
 
     ASSERT_EQ(msg.currentThinkingContent().size(), 1);
     EXPECT_EQ(msg.currentThinkingContent().front().thinking,
@@ -368,7 +372,8 @@ TEST(ListModels, ClaudeAsksForTheFullPage)
 TEST(ListModels, MistralKeepsTheV1Prefix)
 {
     FakeHttpTransport transport;
-    MistralClient client("http://fake.local", "sk-test", "mistral-test", &transport);
+    OpenAIClient client("http://fake.local", "sk-test", "mistral-test", &transport);
+    client.setProfile(mistralProfile());
 
     auto future = client.listModels();
     ASSERT_EQ(transport.bufferedCount(), 1);
@@ -535,6 +540,48 @@ TEST(ParseHttpError, BodyWithoutAnErrorObjectFallsBackToTheSnippet)
     ASSERT_EQ(failed.count(), 1);
     EXPECT_EQ(failed.first().at(1).toString(),
               QStringLiteral("HTTP 502: <html>bad gateway</html>"));
+}
+
+TEST(ParseHttpError, MistralTopLevelEnvelopeIsReadWithItsAnnotations)
+{
+    FakeHttpTransport transport;
+    OpenAIClient client("https://fake.local", "sk-test", "mistral-small-latest", &transport);
+    client.setProfile(mistralProfile());
+
+    QSignalSpy failed(&client, &BaseClient::requestFailed);
+
+    client.ask(QStringLiteral("hi"));
+    auto *stream = transport.lastStream();
+    stream->sendHeaders(429);
+    stream->sendChunk(
+        R"({"object":"error","message":"Rate limit exceeded","type":"rate_limited",)"
+        R"("param":null,"code":"1300","raw_status_code":429})");
+    stream->sendFinished();
+
+    ASSERT_EQ(failed.size(), 1);
+    EXPECT_EQ(
+        failed.first().at(1).toString(),
+        QStringLiteral("HTTP 429: Rate limit exceeded (type: rate_limited) (code: 1300)"));
+}
+
+TEST(ParseHttpError, ATopLevelMessageWithoutTheErrorMarkerStaysASnippet)
+{
+    FakeHttpTransport transport;
+    OpenAIClient client("https://fake.local", "sk-test", "mistral-small-latest", &transport);
+    client.setProfile(mistralProfile());
+
+    QSignalSpy failed(&client, &BaseClient::requestFailed);
+
+    client.ask(QStringLiteral("hi"));
+    auto *stream = transport.lastStream();
+    stream->sendHeaders(401);
+    stream->sendChunk(R"({"message":"Unauthorized","request_id":"r1"})");
+    stream->sendFinished();
+
+    ASSERT_EQ(failed.size(), 1);
+    EXPECT_EQ(
+        failed.first().at(1).toString(),
+        QStringLiteral(R"(HTTP 401: {"message":"Unauthorized","request_id":"r1"})"));
 }
 
 // --- LlamaCpp now inherits the OpenAI dialect instead of copying it ---
@@ -908,19 +955,180 @@ TEST(LogCategory, EveryProviderReportsUnderItsOwnName)
 
 TEST(LogCategory, OpenAIDerivedClientsKeepTheirOwnNameOnEveryConstructor)
 {
-    CategoryProbe<MistralClient> mistralPlain;
     CategoryProbe<LlamaCppClient> llamaPlain;
-
-    EXPECT_STREQ(mistralPlain.logCategory().categoryName(), "llmqore.mistral");
     EXPECT_STREQ(llamaPlain.logCategory().categoryName(), "llmqore.llamacpp");
 
-    CategoryProbe<MistralClient> mistral("http://fake.local", "k", "m");
     CategoryProbe<LlamaCppClient> llama("http://fake.local", "", "m");
-
-    EXPECT_STREQ(mistral.logCategory().categoryName(), "llmqore.mistral")
-        << "the transport-less constructor must not fall through to the OpenAI category";
     EXPECT_STREQ(llama.logCategory().categoryName(), "llmqore.llamacpp")
         << "the transport-less constructor must not fall through to the OpenAI category";
 }
 
+TEST(LogCategory, AProfileCarriesItsOwnCategory)
+{
+    CategoryProbe<OpenAIClient> mistral;
+    mistral.setProfile(mistralProfile());
+
+    EXPECT_STREQ(mistral.logCategory().categoryName(), "llmqore.mistral")
+        << "a profile is the whole of what MistralClient used to be";
+}
+
 #include "tst_ReviewRegressions.moc"
+
+TEST(MistralProfile, StreamsTextAndReasoningThroughTheOpenAIDialect)
+{
+    FakeHttpTransport transport;
+    OpenAIClient client("http://fake.local", "sk-test", "magistral-small", &transport);
+    client.setProfile(mistralProfile());
+
+    QSignalSpy chunks(&client, &BaseClient::chunkReceived);
+    QSignalSpy thinking(&client, &BaseClient::thinkingBlockReceived);
+    QSignalSpy completed(&client, &BaseClient::requestCompleted);
+
+    client.ask(QStringLiteral("why is the sky blue?"));
+    ASSERT_EQ(transport.streamCount(), 1);
+    EXPECT_EQ(transport.streamRequest(0).url(), QUrl("http://fake.local/v1/chat/completions"))
+        << "the profile carries Mistral's /v1 prefix";
+
+    transport.lastStream()->sendAll(
+        "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"Rayleigh scattering.\"}}]}\n\n"
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Because of scattering.\"}}]}\n\n"
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n"
+        "data: [DONE]\n\n");
+
+    ASSERT_EQ(completed.size(), 1);
+    EXPECT_EQ(completed.first().at(1).toString(), QStringLiteral("Because of scattering."));
+
+    ASSERT_EQ(chunks.size(), 1) << "reasoning must not reach chunkReceived";
+    EXPECT_EQ(chunks.first().at(1).toString(), QStringLiteral("Because of scattering."));
+
+    ASSERT_EQ(thinking.size(), 1) << "Magistral reasoning arrives as a thinking block";
+    EXPECT_EQ(thinking.first().at(1).toString(), QStringLiteral("Rayleigh scattering."));
+}
+
+TEST(MistralProfile, BufferedResponseTakesTheSamePath)
+{
+    FakeHttpTransport transport;
+    OpenAIClient client("http://fake.local", "sk-test", "mistral-small", &transport);
+    client.setProfile(mistralProfile());
+
+    QSignalSpy completed(&client, &BaseClient::requestCompleted);
+
+    client.ask(QStringLiteral("ping"), RequestMode::Buffered);
+    ASSERT_EQ(transport.bufferedCount(), 1);
+    transport.respondToLast(
+        200,
+        R"({"choices":[{"message":{"role":"assistant","content":"pong"},)"
+        R"("finish_reason":"stop"}]})");
+
+    for (int i = 0; i < 32 && completed.isEmpty(); ++i)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+
+    ASSERT_EQ(completed.size(), 1);
+    EXPECT_EQ(completed.first().at(1).toString(), QStringLiteral("pong"));
+}
+
+namespace {
+
+class CacheProbeMessage : public BaseMessage
+{
+public:
+    void think(const QString &text)
+    {
+        if (auto *thinking = blockAt<ThinkingContent>(ensureThinkingContentIndex()))
+            thinking->thinking += text;
+    }
+
+    void say(const QString &text) { appendTextDelta(text); }
+
+    void dropText()
+    {
+        removeBlocksIf(
+            [](const TurnContent &block) { return std::get_if<TextContent>(&block) != nullptr; });
+    }
+
+    void dropEverything() { clearBlocks(); }
+};
+
+} // namespace
+
+TEST(BaseMessageCaches, ThinkingIndexFollowsItsBlockWhenEarlierBlocksAreRemoved)
+{
+    CacheProbeMessage msg;
+    msg.say(QStringLiteral("draft"));
+    msg.think(QStringLiteral("x"));
+    msg.dropText();
+    msg.think(QStringLiteral("y"));
+
+    ASSERT_EQ(msg.currentBlocks().size(), 1);
+    ASSERT_EQ(msg.currentThinkingContent().size(), 1);
+    EXPECT_EQ(msg.currentThinkingContent().first().thinking, QStringLiteral("xy"));
+}
+
+TEST(BaseMessageCaches, ThinkingIndexIsForgottenWhenBlocksAreCleared)
+{
+    CacheProbeMessage msg;
+    msg.think(QStringLiteral("x"));
+    msg.dropEverything();
+    msg.say(QStringLiteral("answer"));
+    msg.think(QStringLiteral("y"));
+
+    ASSERT_EQ(msg.currentThinkingContent().size(), 1);
+    EXPECT_EQ(msg.currentThinkingContent().first().thinking, QStringLiteral("y"));
+    auto *text = std::get_if<TextContent>(&msg.currentBlocks()[0]);
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(text->text, QStringLiteral("answer"));
+}
+
+TEST(RenderToolContent, AnImageWithoutARendererBecomesAPlaceholder)
+{
+    const ToolContentNaming naming{QLatin1String("text"), {}};
+    const QJsonObject rendered
+        = renderToolContent(ImageContent::fromBytes(QByteArray("PNG"), "image/png"), naming);
+
+    EXPECT_EQ(rendered.value("type").toString(), QStringLiteral("text"));
+    EXPECT_EQ(rendered.value("text").toString(), QStringLiteral("[image: image/png]"));
+}
+
+TEST(LlamaCppInheritance, AnEmptyModelIsLeftOutOfThePayload)
+{
+    FakeHttpTransport transport;
+    LlamaCppClient client("https://fake.local", {}, {}, &transport);
+
+    client.ask(QStringLiteral("hi"));
+    ASSERT_EQ(transport.streamCount(), 1);
+    EXPECT_FALSE(transport.streamRequest(0).payload().contains("model"));
+
+    client.setModel(QStringLiteral("qwen"));
+    client.ask(QStringLiteral("hi"));
+    ASSERT_EQ(transport.streamCount(), 2);
+    EXPECT_EQ(transport.streamRequest(1).payload().value("model").toString(), QStringLiteral("qwen"));
+}
+
+TEST(ReviewRegression, GoogleSpellsOneErrorTheSameWayInBothModes)
+{
+    const QByteArray body
+        = R"({"error":{"code":429,"message":"Quota exceeded","status":"RESOURCE_EXHAUSTED"}})";
+    const QString expected
+        = QStringLiteral("Quota exceeded (code: 429) (status: RESOURCE_EXHAUSTED)");
+
+    FakeHttpTransport streamedTransport;
+    GoogleAIClient streamed("https://fake.local", "key", "gemini-test", &streamedTransport);
+    QSignalSpy streamedFailed(&streamed, &BaseClient::requestFailed);
+    streamed.ask(QStringLiteral("hi"));
+    ASSERT_EQ(streamedTransport.streamCount(), 1);
+    streamedTransport.lastStream()->sendAll(body);
+    ASSERT_EQ(streamedFailed.size(), 1);
+
+    FakeHttpTransport bufferedTransport;
+    GoogleAIClient buffered("https://fake.local", "key", "gemini-test", &bufferedTransport);
+    QSignalSpy bufferedFailed(&buffered, &BaseClient::requestFailed);
+    buffered.ask(QStringLiteral("hi"), RequestMode::Buffered);
+    ASSERT_EQ(bufferedTransport.bufferedCount(), 1);
+    bufferedTransport.respondToLast(200, body);
+    for (int i = 0; i < 20 && bufferedFailed.isEmpty(); ++i)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    ASSERT_EQ(bufferedFailed.size(), 1);
+
+    EXPECT_EQ(streamedFailed.first().at(1).toString(), expected);
+    EXPECT_EQ(bufferedFailed.first().at(1).toString(), expected);
+}

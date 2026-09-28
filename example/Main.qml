@@ -34,7 +34,7 @@ ApplicationWindow {
         },
         {
             name: "Mistral",
-            url: "https://api.mistral.ai/v1",
+            url: "https://api.mistral.ai",
             needsKey: true
         },
         {
@@ -44,7 +44,7 @@ ApplicationWindow {
         },
         {
             name: "Google AI",
-            url: "https://generativelanguage.googleapis.com",
+            url: "https://generativelanguage.googleapis.com/v1beta",
             needsKey: true
         },
         {

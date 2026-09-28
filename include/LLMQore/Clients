@@ -9,4 +9,3 @@
 #include <LLMQore/OllamaClient.hpp>
 #include <LLMQore/GoogleAIClient.hpp>
 #include <LLMQore/LlamaCppClient.hpp>
-#include <LLMQore/MistralClient.hpp>

@@ -4,11 +4,14 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 
 #include <QHash>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QObject>
 #include <QSet>
+#include <QStringList>
 
 #include <LLMQore/LLMQore_global.h>
 
@@ -23,6 +26,36 @@ struct LLMQORE_EXPORT PendingThinkingNotification
     QString signature;
 };
 
+struct LLMQORE_EXPORT MessageEffects
+{
+    QString chunk;
+    QString fullText;
+    QString fallbackText;
+    QJsonObject usage;
+    std::optional<QJsonObject> error = std::nullopt;
+    bool thinkingCompleted = false;
+    bool toolsReady = false;
+};
+
+struct LLMQORE_EXPORT StopReasonMap
+{
+    QStringList toolReasons;
+    QStringList completeReasons;
+    QStringList finalReasons;
+    QStringList openReasons;
+    MessageState fallback = MessageState::Complete;
+    bool toolsOverrideReason = false;
+};
+
+struct LLMQORE_EXPORT ToolContentNaming
+{
+    QLatin1String textType;
+    std::function<QJsonObject(const ImageContent &)> renderImage;
+};
+
+[[nodiscard]] LLMQORE_EXPORT QJsonObject
+renderToolContent(const ToolContent &block, const ToolContentNaming &naming);
+
 class LLMQORE_EXPORT BaseMessage : public QObject
 {
     Q_OBJECT
@@ -33,16 +66,76 @@ public:
     MessageState state() const { return m_state; }
     const QList<TurnContent> &currentBlocks() const { return m_currentBlocks; }
 
-    virtual QString stopReason() const { return {}; }
+    QString stopReason() const { return m_stopReason; }
 
     QList<ToolUseContent> currentToolUseContent() const;
     QList<ThinkingContent> currentThinkingContent() const;
 
     QList<PendingThinkingNotification> takePendingThinkingNotifications();
 
-    virtual void startNewContinuation();
+    void startNewContinuation();
 
 protected:
+    virtual void clearDerivedCaches();
+
+    template<typename Key>
+    struct ToolCallAccumulator
+    {
+        QHash<Key, int> blockIndex;
+        QHash<Key, QString> pending;
+
+        void start(const Key &key, int index)
+        {
+            blockIndex[key] = index;
+            pending[key] = QString();
+        }
+
+        void delta(const Key &key, const QString &fragment)
+        {
+            auto it = pending.find(key);
+            if (it != pending.end())
+                *it += fragment;
+        }
+
+        void clear()
+        {
+            blockIndex.clear();
+            pending.clear();
+        }
+    };
+
+    [[nodiscard]] static QJsonObject parseToolArguments(const QString &json);
+
+    template<typename Key>
+    void completeToolCall(
+        ToolCallAccumulator<Key> &accumulator, const Key &key, const QString &finalArguments = {})
+    {
+        auto it = accumulator.pending.find(key);
+        if (it == accumulator.pending.end())
+            return;
+
+        const QString json = finalArguments.isEmpty() ? *it : finalArguments;
+        accumulator.pending.erase(it);
+        const int index = accumulator.blockIndex.value(key, -1);
+        accumulator.blockIndex.remove(key);
+
+        if (json.isEmpty())
+            return;
+
+        if (auto *tool = blockAt<ToolUseContent>(index))
+            tool->input = parseToolArguments(json);
+    }
+
+    template<typename Key>
+    void completeAllToolCalls(ToolCallAccumulator<Key> &accumulator)
+    {
+        const QList<Key> open = accumulator.pending.keys();
+        for (const Key &key : open)
+            completeToolCall(accumulator, key);
+    }
+
+    void recordStopReason(const QString &reason, const StopReasonMap &map);
+
     using ToolResultEmitter
         = std::function<void(const ToolUseContent &, const ToolResult &, QJsonArray &)>;
     [[nodiscard]] QJsonArray mapToolResults(
@@ -51,7 +144,8 @@ protected:
     MessageState m_state = MessageState::Building;
     QList<TurnContent> m_currentBlocks;
 
-    int getOrCreateTextContentIndex();
+    int ensureTextContentIndex();
+    int ensureThinkingContentIndex();
     void appendTextDelta(const QString &delta);
 
     void removeBlocksIf(const std::function<bool(const TurnContent &)> &predicate);
@@ -91,7 +185,11 @@ protected:
     }
 
 private:
+    [[nodiscard]] MessageState resolveState(const QString &reason, const StopReasonMap &map) const;
+
     QSet<int> m_notifiedThinking;
+    int m_currentThinkingIndex = -1;
+    QString m_stopReason;
 };
 
 } // namespace LLMQore

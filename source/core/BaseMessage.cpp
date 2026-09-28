@@ -3,6 +3,8 @@
 
 #include <LLMQore/BaseMessage.hpp>
 
+#include <QJsonDocument>
+
 namespace LLMQore {
 
 BaseMessage::BaseMessage(QObject *parent)
@@ -57,6 +59,7 @@ QList<PendingThinkingNotification> BaseMessage::takePendingThinkingNotifications
 void BaseMessage::removeBlocksIf(const std::function<bool(const TurnContent &)> &predicate)
 {
     QSet<int> remapped;
+    int thinkingIndex = -1;
     int kept = 0;
 
     for (int i = 0; i < m_currentBlocks.size(); ++i) {
@@ -64,6 +67,8 @@ void BaseMessage::removeBlocksIf(const std::function<bool(const TurnContent &)> 
             continue;
         if (m_notifiedThinking.contains(i))
             remapped.insert(kept);
+        if (i == m_currentThinkingIndex)
+            thinkingIndex = kept;
         if (kept != i)
             m_currentBlocks[kept] = std::move(m_currentBlocks[i]);
         ++kept;
@@ -71,24 +76,109 @@ void BaseMessage::removeBlocksIf(const std::function<bool(const TurnContent &)> 
 
     m_currentBlocks.erase(m_currentBlocks.begin() + kept, m_currentBlocks.end());
     m_notifiedThinking = std::move(remapped);
+    m_currentThinkingIndex = thinkingIndex;
 }
 
 void BaseMessage::clearBlocks()
 {
     m_currentBlocks.clear();
     m_notifiedThinking.clear();
+    m_currentThinkingIndex = -1;
 }
 
 void BaseMessage::startNewContinuation()
 {
+    clearDerivedCaches();
     clearBlocks();
+    m_stopReason.clear();
     m_state = MessageState::Building;
 }
 
-int BaseMessage::getOrCreateTextContentIndex()
+void BaseMessage::clearDerivedCaches() {}
+
+QJsonObject BaseMessage::parseToolArguments(const QString &json)
+{
+    if (json.isEmpty())
+        return {};
+
+    const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
+    return doc.isObject() ? doc.object() : QJsonObject{};
+}
+
+MessageState BaseMessage::resolveState(const QString &reason, const StopReasonMap &map) const
+{
+    const bool hasToolCalls = !currentToolUseContent().isEmpty();
+    if (hasToolCalls && (map.toolsOverrideReason || map.toolReasons.contains(reason)))
+        return MessageState::RequiresToolExecution;
+
+    if (map.completeReasons.contains(reason))
+        return MessageState::Complete;
+    if (map.finalReasons.contains(reason))
+        return MessageState::Final;
+    if (map.openReasons.contains(reason))
+        return MessageState::Building;
+
+    return map.fallback;
+}
+
+void BaseMessage::recordStopReason(const QString &reason, const StopReasonMap &map)
+{
+    m_stopReason = reason;
+    m_state = resolveState(reason, map);
+}
+
+QJsonObject renderToolContent(const ToolContent &block, const ToolContentNaming &naming)
+{
+    const auto asText = [&naming](const QString &text) {
+        return QJsonObject{{"type", naming.textType}, {"text", text}};
+    };
+
+    return std::visit(
+        detail::overloaded{
+            [&](const TextContent &c) -> QJsonObject { return asText(c.text); },
+            [&](const ImageContent &c) -> QJsonObject {
+                if (naming.renderImage)
+                    return naming.renderImage(c);
+                return asText(
+                    QString("[image: %1]")
+                        .arg(c.mimeType.isEmpty() ? QStringLiteral("unknown") : c.mimeType));
+            },
+            [&](const AudioContent &c) -> QJsonObject {
+                return asText(
+                    QString("[audio: %1]")
+                        .arg(c.mimeType.isEmpty() ? QStringLiteral("unknown") : c.mimeType));
+            },
+            [&](const ResourceContent &c) -> QJsonObject {
+                if (!c.isBlob() && !c.text().isEmpty())
+                    return asText(c.text());
+                return asText(QString("[resource: %1]").arg(c.uri));
+            },
+            [&](const ResourceLinkContent &c) -> QJsonObject {
+                return asText(QString("[resource link: %1]").arg(c.uri));
+            }},
+        block);
+}
+
+int BaseMessage::ensureThinkingContentIndex()
+{
+    if (blockAt<ThinkingContent>(m_currentThinkingIndex))
+        return m_currentThinkingIndex;
+
+    for (int i = 0; i < m_currentBlocks.size(); ++i) {
+        if (std::get_if<ThinkingContent>(&m_currentBlocks[i])) {
+            m_currentThinkingIndex = i;
+            return m_currentThinkingIndex;
+        }
+    }
+
+    m_currentThinkingIndex = addCurrentContent(ThinkingContent{});
+    return m_currentThinkingIndex;
+}
+
+int BaseMessage::ensureTextContentIndex()
 {
     for (int i = 0; i < m_currentBlocks.size(); ++i) {
-        if (std::holds_alternative<TextContent>(m_currentBlocks[i]))
+        if (std::get_if<TextContent>(&m_currentBlocks[i]))
             return i;
     }
 
@@ -97,7 +187,7 @@ int BaseMessage::getOrCreateTextContentIndex()
 
 void BaseMessage::appendTextDelta(const QString &delta)
 {
-    const int index = getOrCreateTextContentIndex();
+    const int index = ensureTextContentIndex();
     if (auto *text = blockAt<TextContent>(index))
         text->text += delta;
 }

@@ -447,14 +447,25 @@ ToolResult structuredResult()
     return r;
 }
 
+void callWeather(OpenAIMessage &msg)
+{
+    const QJsonObject call{
+        {"index", 0},
+        {"id", "call_1"},
+        {"function", QJsonObject{{"name", "weather"}, {"arguments", "{}"}}}};
+    msg.applyEvent(QJsonObject{
+        {"choices",
+         QJsonArray{QJsonObject{
+             {"delta", QJsonObject{{"tool_calls", QJsonArray{call}}}},
+             {"finish_reason", "tool_calls"}}}}});
+}
+
 } // namespace
 
 TEST(ToolResultText, CarriesStructuredContentAlongsideTheRenderedText)
 {
     OpenAIMessage msg;
-    msg.handleToolCallStart(0, QStringLiteral("call_1"), QStringLiteral("weather"));
-    msg.handleToolCallDelta(0, QStringLiteral("{}"));
-    msg.handleToolCallComplete(0);
+    callWeather(msg);
 
     const QJsonArray messages = msg.createToolResultMessages({{"call_1", structuredResult()}});
     ASSERT_EQ(messages.size(), 1);
@@ -468,9 +479,7 @@ TEST(ToolResultText, CarriesStructuredContentAlongsideTheRenderedText)
 TEST(ToolResultText, PlainResultIsUnchanged)
 {
     OpenAIMessage msg;
-    msg.handleToolCallStart(0, QStringLiteral("call_1"), QStringLiteral("weather"));
-    msg.handleToolCallDelta(0, QStringLiteral("{}"));
-    msg.handleToolCallComplete(0);
+    callWeather(msg);
 
     const QJsonArray messages
         = msg.createToolResultMessages({{"call_1", ToolResult::text("just text")}});

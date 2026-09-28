@@ -11,6 +11,8 @@
 
 namespace LLMQore {
 
+[[nodiscard]] LLMQORE_EXPORT ProviderProfile llamaCppProfile();
+
 class LLMQORE_EXPORT LlamaCppClient : public OpenAIClient
 {
     Q_OBJECT
@@ -25,21 +27,13 @@ public:
         HttpTransport *transport,
         QObject *parent = nullptr);
 
-    RequestID sendMessage(
-        const QJsonObject &payload,
-        const QString &endpoint = {},
-        RequestMode mode = RequestMode::Streaming) override;
-    RequestID ask(
-        const QString &prompt, RequestMode mode = RequestMode::Streaming) override;
-    using OpenAIClient::ask;
-
-    QFuture<QList<ModelInfo>> listModels(const QString &endpoint = {}) override;
+    QJsonObject buildConversationPayload(const Conversation &conversation) const override;
 
     QFuture<bool> isServerReady();
     QFuture<QJsonObject> serverProps();
 
 protected:
-    void processBufferedResponse(const RequestID &id, const QByteArray &data) override;
+    void processBufferedBody(const RequestID &id, const QJsonObject &body) override;
     void processSseEvent(
         const RequestID &id, const SSEEvent &event, const QJsonObject &json) override;
 

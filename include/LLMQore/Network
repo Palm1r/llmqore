@@ -10,4 +10,5 @@
 #include <LLMQore/HttpTransportError.hpp>
 #include <LLMQore/RpcLineFramer.hpp>
 #include <LLMQore/RequestMode.hpp>
+#include <LLMQore/SSEEvent.hpp>
 #include <LLMQore/SSEParser.hpp>
