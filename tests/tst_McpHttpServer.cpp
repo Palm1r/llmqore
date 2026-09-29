@@ -322,6 +322,71 @@ TEST_F(McpHttpServerTest, LegacySpecDoesNotReplaySendsQueuedForAClosedStream)
     EXPECT_EQ(http.bufferedRequest(0).payload().value("id").toInt(), 2);
 }
 
+TEST_F(McpHttpServerTest, LegacySpecRejectsAnEndpointOutsideTheConnectionOrigin)
+{
+    const QList<QByteArray> foreignEndpoints{
+        "https://attacker.example/collect",
+        "//attacker.example/collect",
+        "http://mcp.example.com/messages",
+        "https://mcp.example.com:8443/messages",
+    };
+
+    for (const QByteArray &endpoint : foreignEndpoints) {
+        SCOPED_TRACE(endpoint.constData());
+
+        FakeHttpTransport http;
+
+        HttpTransportConfig cfg;
+        cfg.endpoint = QUrl("https://mcp.example.com/sse");
+        cfg.headers.insert("Authorization", "Bearer secret");
+        McpSseHttpTransport transport(cfg, &http);
+
+        QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+
+        transport.start();
+        http.lastStream()->sendChunk("event: endpoint\ndata: " + endpoint + "\n\n");
+        spin();
+
+        EXPECT_FALSE(errors.isEmpty()) << "an endpoint on another origin must be reported";
+        EXPECT_FALSE(transport.isOpen()) << "the stream announced no endpoint the client may use";
+
+        transport.send(jsonRpcRequest(1, "initialize"));
+        spin();
+        EXPECT_EQ(http.bufferedCount(), 0)
+            << "no message, and no Authorization header, may leave for another origin";
+    }
+}
+
+TEST_F(McpHttpServerTest, LegacySpecAcceptsAnAbsoluteEndpointOnTheConnectionOrigin)
+{
+    const QList<QByteArray> sameOriginEndpoints{
+        "https://mcp.example.com/messages?sessionId=abc",
+        "https://mcp.example.com:443/messages?sessionId=abc",
+    };
+
+    for (const QByteArray &endpoint : sameOriginEndpoints) {
+        SCOPED_TRACE(endpoint.constData());
+
+        FakeHttpTransport http;
+
+        HttpTransportConfig cfg;
+        cfg.endpoint = QUrl("https://mcp.example.com/sse");
+        cfg.headers.insert("Authorization", "Bearer secret");
+        McpSseHttpTransport transport(cfg, &http);
+
+        transport.start();
+        http.lastStream()->sendChunk("event: endpoint\ndata: " + endpoint + "\n\n");
+        spin();
+        EXPECT_TRUE(transport.isOpen());
+
+        transport.send(jsonRpcRequest(1, "initialize"));
+        spin();
+        ASSERT_EQ(http.bufferedCount(), 1);
+        EXPECT_EQ(http.bufferedRequest(0).url().path(), QString("/messages"));
+        EXPECT_EQ(http.bufferedRequest(0).header("Authorization"), QByteArray("Bearer secret"));
+    }
+}
+
 TEST_F(McpHttpServerTest, SessionIdFromTheFirstResponseIsEchoedOnLaterPosts)
 {
     FakeHttpTransport http;

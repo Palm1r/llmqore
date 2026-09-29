@@ -21,6 +21,21 @@
 
 namespace LLMQore::Mcp {
 
+namespace {
+
+int effectivePort(const QUrl &url)
+{
+    return url.port(url.scheme() == QLatin1String("https") ? 443 : 80);
+}
+
+bool isSameOrigin(const QUrl &url, const QUrl &origin)
+{
+    return url.scheme() == origin.scheme() && url.host() == origin.host()
+           && effectivePort(url) == effectivePort(origin);
+}
+
+} // namespace
+
 struct McpSseHttpTransport::Impl
 {
     McpSseHttpTransport *q = nullptr;
@@ -67,6 +82,14 @@ struct McpSseHttpTransport::Impl
                 QUrl ep(QString::fromUtf8(ev.data).trimmed());
                 if (ep.isRelative())
                     ep = config.endpoint.resolved(ep);
+                if (!isSameOrigin(ep, config.endpoint)) {
+                    const QString reason = QString("SSE endpoint outside the connection origin: %1")
+                                               .arg(ep.toString());
+                    qCWarning(llmMcpLog).noquote() << reason;
+                    emit q->errorOccurred(reason);
+                    q->stop();
+                    return;
+                }
                 postEndpoint = ep;
                 qCDebug(llmMcpLog).noquote()
                     << QString("MCP POST endpoint resolved: %1").arg(ep.toString());
