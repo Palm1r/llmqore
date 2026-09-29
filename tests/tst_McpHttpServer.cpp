@@ -492,6 +492,71 @@ TEST_F(McpHttpServerTest, LegacySpecPostsCarryTheRequestTimeout)
     EXPECT_EQ(http.bufferedRequest(0).request.transferTimeout(), 7000);
 }
 
+TEST_F(McpHttpServerTest, LegacySpecReportsAnHttpErrorOnTheStream)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+    QSignalSpy closed(&transport, &Rpc::Transport::closed);
+
+    transport.start();
+    http.lastStream()->sendHeaders(401, {{"Content-Type", "application/json"}});
+    http.lastStream()->sendChunk("{\"error\":\"invalid_token\"}");
+    http.lastStream()->sendFinished();
+    spin();
+
+    ASSERT_EQ(errors.size(), 1) << "an expired token must not look like a server that went away";
+    EXPECT_TRUE(errors.first().first().toString().contains("401"))
+        << qPrintable(errors.first().first().toString());
+    EXPECT_FALSE(transport.isOpen());
+    EXPECT_EQ(closed.size(), 1);
+}
+
+TEST_F(McpHttpServerTest, LegacySpecRejectsAStreamThatIsNotAnEventStream)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+
+    transport.start();
+    http.lastStream()->sendHeaders(200, {{"Content-Type", "text/html"}});
+    spin();
+
+    ASSERT_EQ(errors.size(), 1) << "a page that never announces an endpoint must not hang sends";
+    EXPECT_TRUE(errors.first().first().toString().contains("text/html"))
+        << qPrintable(errors.first().first().toString());
+    EXPECT_FALSE(transport.isOpen());
+}
+
+TEST_F(McpHttpServerTest, LegacySpecAcceptsAnEventStreamWithParameters)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+
+    transport.start();
+    http.lastStream()->sendHeaders(200, {{"content-type", "Text/Event-Stream; charset=utf-8"}});
+    http.lastStream()->sendChunk("event: endpoint\ndata: /messages\n\n");
+    transport.send(jsonRpcRequest(1, "initialize"));
+    spin();
+
+    EXPECT_TRUE(errors.isEmpty()) << qPrintable(errors.value(0).value(0).toString());
+    EXPECT_TRUE(transport.isOpen());
+    EXPECT_EQ(http.bufferedCount(), 1);
+}
+
 TEST_F(McpHttpServerTest, SessionIdFromTheFirstResponseIsEchoedOnLaterPosts)
 {
     FakeHttpTransport http;

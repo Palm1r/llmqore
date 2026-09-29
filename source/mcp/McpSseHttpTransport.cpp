@@ -61,6 +61,8 @@ struct McpSseHttpTransport::Impl
         sseStream = http->openStream(req, QByteArrayView("GET"));
 
         QObject::connect(
+            sseStream, &HttpStreamHandle::headersReceived, q, [this]() { onHeaders(); });
+        QObject::connect(
             sseStream, &HttpStreamHandle::chunkReceived, q, [this](const QByteArray &chunk) {
                 onChunk(chunk);
             });
@@ -75,6 +77,25 @@ struct McpSseHttpTransport::Impl
             });
 
         open = true;
+    }
+
+    void onHeaders()
+    {
+        HttpResponse head;
+        head.statusCode = sseStream->statusCode();
+        head.rawHeaders = sseStream->rawHeaders();
+
+        QString reason;
+        if (!head.isSuccess())
+            reason = QString("SSE stream rejected (HTTP %1)").arg(head.statusCode);
+        else if (!head.contentType().contains(QLatin1String("text/event-stream")))
+            reason = QString("SSE stream is not text/event-stream: %1").arg(head.contentType());
+        if (reason.isEmpty())
+            return;
+
+        qCWarning(llmMcpLog).noquote() << reason;
+        emit q->errorOccurred(reason);
+        q->stop();
     }
 
     void onChunk(const QByteArray &chunk)
