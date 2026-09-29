@@ -54,6 +54,11 @@ QByteArray compact(const QJsonObject &object)
     return QJsonDocument(object).toJson(QJsonDocument::Compact);
 }
 
+QJsonObject jsonRpcRequest(int id, const QString &method)
+{
+    return QJsonObject{{"jsonrpc", "2.0"}, {"id", id}, {"method", method}};
+}
+
 // Minimal tool so we have something for the HTTP loopback to exercise.
 class EchoTool : public BaseTool
 {
@@ -234,6 +239,87 @@ TEST_F(McpHttpServerTest, LegacySpecDeliversServerMessagesOverTheSseStream)
     const QJsonObject received = messages.first().first().toJsonObject();
     EXPECT_EQ(received.value("id").toInt(), 7);
     EXPECT_EQ(received.value("result").toObject().value("value").toString(), "pong");
+}
+
+TEST_F(McpHttpServerTest, LegacySpecDoesNotReuseTheEndpointOfAClosedStream)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    transport.start();
+    http.lastStream()->sendChunk("event: endpoint\ndata: /messages?sessionId=old\n\n");
+    http.lastStream()->sendFinished();
+    spin();
+    ASSERT_FALSE(transport.isOpen());
+
+    transport.start();
+    ASSERT_EQ(http.streamCount(), 2);
+
+    transport.send(jsonRpcRequest(1, "initialize"));
+    EXPECT_EQ(http.bufferedCount(), 0)
+        << "a send on the new stream must wait for its endpoint, not go to the closed session";
+
+    http.lastStream()->sendChunk("event: endpoint\ndata: /messages?sessionId=new\n\n");
+    spin();
+
+    ASSERT_EQ(http.bufferedCount(), 1);
+    const QUrl posted = http.bufferedRequest(0).url();
+    EXPECT_EQ(posted, QUrl("http://mcp.local/messages?sessionId=new"))
+        << qPrintable(posted.toString());
+}
+
+TEST_F(McpHttpServerTest, LegacySpecFindsTheNewEndpointAfterAStreamCutMidEvent)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    transport.start();
+    http.lastStream()->sendChunk("event: endpoint\ndata: /messages?sessionId=old\n\n");
+    http.lastStream()->sendChunk("event: message\ndata: {\"jsonrpc\":\"2.0\",");
+    http.lastStream()->sendFinished();
+    spin();
+
+    transport.start();
+    http.lastStream()->sendChunk("event: endpoint\ndata: /messages?sessionId=new\n\n");
+    spin();
+
+    transport.send(jsonRpcRequest(1, "initialize"));
+    ASSERT_EQ(http.bufferedCount(), 1)
+        << "the half-received event of the closed stream must not swallow the new endpoint";
+    const QUrl posted = http.bufferedRequest(0).url();
+    EXPECT_EQ(posted, QUrl("http://mcp.local/messages?sessionId=new"))
+        << qPrintable(posted.toString());
+}
+
+TEST_F(McpHttpServerTest, LegacySpecDoesNotReplaySendsQueuedForAClosedStream)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "initialize"));
+    http.lastStream()->sendFinished();
+    spin();
+
+    transport.start();
+    http.lastStream()->sendChunk("event: endpoint\ndata: /messages?sessionId=new\n\n");
+    spin();
+    EXPECT_EQ(http.bufferedCount(), 0)
+        << "a message queued for the closed stream belongs to a session that no longer exists";
+
+    transport.send(jsonRpcRequest(2, "initialize"));
+    spin();
+    ASSERT_EQ(http.bufferedCount(), 1);
+    EXPECT_EQ(http.bufferedRequest(0).payload().value("id").toInt(), 2);
 }
 
 TEST_F(McpHttpServerTest, SessionIdFromTheFirstResponseIsEchoedOnLaterPosts)

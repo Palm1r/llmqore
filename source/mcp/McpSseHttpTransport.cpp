@@ -88,6 +88,13 @@ struct McpSseHttpTransport::Impl
         }
     }
 
+    void resetSession()
+    {
+        sseParser.clear();
+        postEndpoint.clear();
+        pendingSends.clear();
+    }
+
     void onFinished()
     {
         if (sseStream) {
@@ -95,6 +102,7 @@ struct McpSseHttpTransport::Impl
             sseStream->deleteLater();
             sseStream = nullptr;
         }
+        resetSession();
         if (open) {
             open = false;
             emit q->closed();
@@ -171,9 +179,7 @@ void McpSseHttpTransport::stop()
         m_impl->sseStream->deleteLater();
         m_impl->sseStream = nullptr;
     }
-    m_impl->sseParser.clear();
-    m_impl->postEndpoint.clear();
-    m_impl->pendingSends.clear();
+    m_impl->resetSession();
 
     emit closed();
 }
