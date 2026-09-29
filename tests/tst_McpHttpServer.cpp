@@ -64,6 +64,32 @@ QList<QPair<QByteArray, QByteArray>> sessionHeaders(const QByteArray &sessionId)
     return {{"Content-Type", "application/json"}, {"Mcp-Session-Id", sessionId}};
 }
 
+class QtWarningCapture
+{
+public:
+    QtWarningCapture()
+        : m_previous(qInstallMessageHandler(&QtWarningCapture::record))
+    {
+        s_warnings.clear();
+    }
+    ~QtWarningCapture() { qInstallMessageHandler(m_previous); }
+
+    QtWarningCapture(const QtWarningCapture &) = delete;
+    QtWarningCapture &operator=(const QtWarningCapture &) = delete;
+
+    QStringList warnings() const { return s_warnings; }
+
+private:
+    static void record(QtMsgType type, const QMessageLogContext &, const QString &message)
+    {
+        if (type == QtWarningMsg)
+            s_warnings.append(message);
+    }
+
+    static inline QStringList s_warnings;
+    QtMessageHandler m_previous = nullptr;
+};
+
 // Minimal tool so we have something for the HTTP loopback to exercise.
 class EchoTool : public BaseTool
 {
@@ -410,6 +436,27 @@ TEST_F(McpHttpServerTest, LegacySpecClosesWhenTheHttpTransportDeletesItsStream)
     EXPECT_FALSE(transport.isOpen())
         << "a stream its HttpTransport destroyed delivers nothing more";
     EXPECT_EQ(closed.size(), 1);
+}
+
+TEST_F(McpHttpServerTest, LegacySpecClosesItsStreamWithoutQtWarnings)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    const QtWarningCapture capture;
+
+    transport.start();
+    http.lastStream()->sendFinished();
+    spin();
+
+    transport.start();
+    transport.stop();
+    spin();
+
+    EXPECT_TRUE(capture.warnings().isEmpty()) << qPrintable(capture.warnings().join('\n'));
 }
 
 TEST_F(McpHttpServerTest, SessionIdFromTheFirstResponseIsEchoedOnLaterPosts)

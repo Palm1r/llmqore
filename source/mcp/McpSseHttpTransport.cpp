@@ -123,7 +123,7 @@ struct McpSseHttpTransport::Impl
     void onFinished()
     {
         if (sseStream) {
-            sseStream->disconnect();
+            sseStream->disconnect(q);
             sseStream->deleteLater();
             sseStream = nullptr;
         }
@@ -199,7 +199,7 @@ void McpSseHttpTransport::stop()
     m_impl->open = false;
 
     if (m_impl->sseStream) {
-        m_impl->sseStream->disconnect();
+        m_impl->sseStream->disconnect(this);
         m_impl->sseStream->abort();
         m_impl->sseStream->deleteLater();
         m_impl->sseStream = nullptr;
