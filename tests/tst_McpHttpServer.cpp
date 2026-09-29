@@ -670,6 +670,22 @@ TEST_F(McpHttpServerTest, LatestSpecPostsCarryTheRequestTimeout)
     EXPECT_EQ(http.bufferedRequest(0).request.transferTimeout(), 7000);
 }
 
+TEST_F(McpHttpServerTest, InjectedHttpTransportKeepsItsOwnTimeout)
+{
+    FakeHttpTransport http;
+    http.setTransferTimeout(45000);
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    cfg.requestTimeoutMs = 7000;
+
+    McpStreamableHttpTransport streamable(cfg, &http);
+    McpSseHttpTransport sse(cfg, &http);
+
+    EXPECT_EQ(http.transferTimeoutMs(), 45000)
+        << "an injected transport belongs to the caller, and so does its timeout";
+}
+
 TEST_F(McpHttpServerTest, JsonResponseBodyBecomesOneReceivedMessage)
 {
     FakeHttpTransport http;

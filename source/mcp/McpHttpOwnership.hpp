@@ -16,9 +16,11 @@ namespace LLMQore::Mcp {
 inline LLMQore::HttpTransport *resolveHttpTransport(
     LLMQore::HttpTransport *injected, QObject *owner, int requestTimeoutMs)
 {
-    LLMQore::HttpTransport *http = injected ? injected : new LLMQore::HttpClient(owner);
-    http->setTransferTimeout(requestTimeoutMs);
-    return http;
+    if (injected)
+        return injected;
+    auto *client = new LLMQore::HttpClient(owner);
+    client->setTransferTimeout(requestTimeoutMs);
+    return client;
 }
 
 inline void applyCustomHeaders(QNetworkRequest &request, const QHash<QString, QString> &headers)
