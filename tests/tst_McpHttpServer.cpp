@@ -392,6 +392,26 @@ TEST_F(McpHttpServerTest, LegacySpecAcceptsAnAbsoluteEndpointOnTheConnectionOrig
     }
 }
 
+TEST_F(McpHttpServerTest, LegacySpecClosesWhenTheHttpTransportDeletesItsStream)
+{
+    auto *http = new FakeHttpTransport;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, http);
+
+    QSignalSpy closed(&transport, &Rpc::Transport::closed);
+
+    transport.start();
+    ASSERT_TRUE(transport.isOpen());
+
+    delete http;
+
+    EXPECT_FALSE(transport.isOpen())
+        << "a stream its HttpTransport destroyed delivers nothing more";
+    EXPECT_EQ(closed.size(), 1);
+}
+
 TEST_F(McpHttpServerTest, SessionIdFromTheFirstResponseIsEchoedOnLaterPosts)
 {
     FakeHttpTransport http;

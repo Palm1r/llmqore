@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QList>
 #include <QNetworkRequest>
+#include <QPointer>
 
 #include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/HttpClient.hpp>
@@ -44,7 +45,7 @@ struct McpSseHttpTransport::Impl
 
     bool open = false;
 
-    LLMQore::HttpStreamHandle *sseStream = nullptr;
+    QPointer<LLMQore::HttpStreamHandle> sseStream;
     SSEParser sseParser;
     QUrl postEndpoint;
     QList<QJsonObject> pendingSends;
@@ -63,6 +64,7 @@ struct McpSseHttpTransport::Impl
                 onChunk(chunk);
             });
         QObject::connect(sseStream, &HttpStreamHandle::finished, q, [this]() { onFinished(); });
+        QObject::connect(sseStream, &QObject::destroyed, q, [this]() { onFinished(); });
         QObject::connect(
             sseStream, &HttpStreamHandle::errorOccurred, q, [this](const HttpTransportError &e) {
                 const QString reason = QString("SSE stream error: %1").arg(e.message());
