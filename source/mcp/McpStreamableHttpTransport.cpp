@@ -29,6 +29,7 @@ struct McpStreamableHttpTransport::Impl
 
     bool open = false;
     QString sessionId;
+    quint64 generation = 0;
 
     void post(const QJsonObject &message)
     {
@@ -40,10 +41,18 @@ struct McpStreamableHttpTransport::Impl
         applyCustomHeaders(req, config.headers);
 
         const QByteArray body = QJsonDocument(message).toJson(QJsonDocument::Compact);
+        const quint64 postedIn = generation;
 
         (void) LLMQore::compat(http->send(req, QByteArrayView("POST"), body))
-            .then(q, [this](const HttpResponse &response) { handleResponse(response); })
-            .onFailed(q, [this](const HttpTransportError &e) {
+            .then(
+                q,
+                [this, postedIn](const HttpResponse &response) {
+                    if (postedIn == generation)
+                        handleResponse(response);
+                })
+            .onFailed(q, [this, postedIn](const HttpTransportError &e) {
+                if (postedIn != generation)
+                    return;
                 const QString reason = QString("HTTP error: %1").arg(e.message());
                 qCWarning(llmMcpLog).noquote() << reason;
                 emit q->errorOccurred(reason);
@@ -60,6 +69,8 @@ struct McpStreamableHttpTransport::Impl
             const QString reason = QString("HTTP error %1").arg(response.statusCode);
             qCWarning(llmMcpLog).noquote() << reason;
             emit q->errorOccurred(reason);
+            if (response.statusCode == 404 && !sessionId.isEmpty())
+                q->stop();
             return;
         }
 
@@ -128,6 +139,8 @@ void McpStreamableHttpTransport::stop()
         return;
 
     m_impl->open = false;
+    m_impl->sessionId.clear();
+    ++m_impl->generation;
     emit closed();
 }
 

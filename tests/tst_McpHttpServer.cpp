@@ -59,6 +59,11 @@ QJsonObject jsonRpcRequest(int id, const QString &method)
     return QJsonObject{{"jsonrpc", "2.0"}, {"id", id}, {"method", method}};
 }
 
+QList<QPair<QByteArray, QByteArray>> sessionHeaders(const QByteArray &sessionId)
+{
+    return {{"Content-Type", "application/json"}, {"Mcp-Session-Id", sessionId}};
+}
+
 // Minimal tool so we have something for the HTTP loopback to exercise.
 class EchoTool : public BaseTool
 {
@@ -410,6 +415,143 @@ TEST_F(McpHttpServerTest, SessionIdFromTheFirstResponseIsEchoedOnLaterPosts)
     transport.send(QJsonObject{{"jsonrpc", "2.0"}, {"id", 2}, {"method", "tools/list"}});
     ASSERT_EQ(http.bufferedCount(), 2);
     EXPECT_EQ(http.bufferedRequest(1).header("Mcp-Session-Id"), QByteArray("sess-42"));
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDropsTheSessionWhenTheServerAnswers404)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    QSignalSpy closed(&transport, &Rpc::Transport::closed);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "initialize"));
+    http.respondToLast(200, compact(jsonRpcResult(1, "ok")), sessionHeaders("sess-42"));
+    spin();
+
+    transport.send(jsonRpcRequest(2, "tools/list"));
+    ASSERT_EQ(http.bufferedRequest(1).header("Mcp-Session-Id"), QByteArray("sess-42"));
+    http.respondToLast(404, {});
+    spin();
+
+    EXPECT_EQ(closed.size(), 1) << "the owner must learn the session is gone to initialize again";
+    EXPECT_FALSE(transport.isOpen());
+    EXPECT_TRUE(transport.sessionId().isEmpty()) << qPrintable(transport.sessionId());
+
+    transport.start();
+    transport.send(jsonRpcRequest(3, "initialize"));
+    const auto reinitialize = http.bufferedRequest(http.bufferedCount() - 1);
+    EXPECT_EQ(reinitialize.payload().value("id").toInt(), 3);
+    EXPECT_FALSE(reinitialize.request.hasRawHeader("Mcp-Session-Id"))
+        << "after a 404 the client must start a new session without the old id";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecStartsWithoutASessionAfterStop)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "initialize"));
+    http.respondToLast(200, compact(jsonRpcResult(1, "ok")), sessionHeaders("sess-42"));
+    spin();
+    ASSERT_EQ(transport.sessionId(), QString("sess-42")) << qPrintable(transport.sessionId());
+
+    transport.stop();
+    EXPECT_TRUE(transport.sessionId().isEmpty()) << qPrintable(transport.sessionId());
+
+    transport.start();
+    transport.send(jsonRpcRequest(2, "initialize"));
+    const auto restarted = http.bufferedRequest(http.bufferedCount() - 1);
+    EXPECT_EQ(restarted.payload().value("id").toInt(), 2);
+    EXPECT_FALSE(restarted.request.hasRawHeader("Mcp-Session-Id"))
+        << "a restarted transport must begin a new session";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecIgnoresResponsesToPostsSentBeforeStop)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "tools/call"));
+    transport.stop();
+
+    transport.start();
+    transport.send(jsonRpcRequest(2, "initialize"));
+    http.respondToLast(200, compact(jsonRpcResult(2, "ok")), sessionHeaders("sess-new"));
+    spin();
+
+    http.respondTo(0, 200, compact(jsonRpcResult(1, "late")), sessionHeaders("sess-old"));
+    spin();
+
+    ASSERT_EQ(messages.size(), 1)
+        << "a response to a POST sent before stop() belongs to a dead session";
+    EXPECT_EQ(messages.first().first().toJsonObject().value("id").toInt(), 2);
+    EXPECT_EQ(transport.sessionId(), QString("sess-new"))
+        << "a late response must not replace the current session id, got "
+        << qPrintable(transport.sessionId());
+}
+
+TEST_F(McpHttpServerTest, LatestSpecIgnoresFailuresOfPostsSentBeforeStop)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "tools/call"));
+    transport.stop();
+    transport.start();
+
+    http.failLast("connection reset");
+    spin();
+
+    EXPECT_EQ(errors.size(), 0) << "a POST sent before stop() cannot fail the new session";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecKeepsTheSessionAcrossOtherHttpErrors)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    QSignalSpy closed(&transport, &Rpc::Transport::closed);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "initialize"));
+    http.respondToLast(200, compact(jsonRpcResult(1, "ok")), sessionHeaders("sess-42"));
+    spin();
+
+    transport.send(jsonRpcRequest(2, "tools/call"));
+    http.respondToLast(503, "upstream down");
+    spin();
+
+    EXPECT_EQ(closed.size(), 0);
+    EXPECT_TRUE(transport.isOpen());
+
+    transport.send(jsonRpcRequest(3, "tools/list"));
+    EXPECT_EQ(
+        http.bufferedRequest(http.bufferedCount() - 1).header("Mcp-Session-Id"),
+        QByteArray("sess-42"))
+        << "only a 404 means the server no longer knows the session";
 }
 
 TEST_F(McpHttpServerTest, JsonResponseBodyBecomesOneReceivedMessage)
