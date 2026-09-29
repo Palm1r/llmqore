@@ -30,6 +30,7 @@ struct LLMQORE_EXPORT HttpTransportConfig
     McpHttpSpec spec = McpHttpSpec::Latest;
     QHash<QString, QString> headers;
     int requestTimeoutMs = 120000;
+    int sseIdleTimeoutMs = 300000;
 };
 
 class LLMQORE_EXPORT McpStreamableHttpTransport : public Rpc::Transport

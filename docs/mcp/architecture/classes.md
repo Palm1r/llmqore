@@ -110,6 +110,8 @@ classDiagram
 
 `Mcp::makeTransport()` is the only place that reads `HttpTransportConfig::spec`. Everything downstream -- `McpClient`, `McpToolBinder`, the bridge -- sees an `Rpc::Transport` and cannot tell the revisions apart. That is what lets a decorator be applied to one revision and not the other without a second switch appearing somewhere else.
 
+Timeouts travel on each request, not on the `HttpTransport`. POSTs carry `HttpTransportConfig::requestTimeoutMs`; the 2024-11-05 `GET` stream carries `sseIdleTimeoutMs` (five minutes by default), because the stream is quiet by design and the request timeout would cut an idle session every two minutes.
+
 ## What ships with each seam
 
 An abstract class with no implementation is a shape nobody has confirmed. Three of the four provider seams now ship one, so the seam is answered by code rather than by a promise:

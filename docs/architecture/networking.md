@@ -72,7 +72,7 @@ The production `HttpTransport`. Wraps one `QNetworkAccessManager`. Must be used 
 
 The **buffered** mode returns a future that resolves to an `HttpResponse` containing the status code, headers, and body. Any HTTP status (including 4xx/5xx) produces a valid response; only transport-level failures (DNS, timeout, SSL, abort, connection refused) propagate as exceptions. This mode is used for model listing, MCP HTTP transports, and non-streamed endpoints. The **streaming** mode returns a live `HttpStream` (caller takes ownership) used for all streamed LLM requests and HTTP MCP client transport.
 
-Additional configuration includes proxy settings (forwarded to the underlying network manager) and a transfer timeout (default 120 seconds, can be disabled).
+Additional configuration includes proxy settings (forwarded to the underlying network manager) and a transfer timeout (default 120 seconds, can be disabled). The transport's timeout applies to requests that carry none of their own: a request with a non-zero `QNetworkRequest::transferTimeout()` keeps it, the same rule `QNetworkAccessManager` follows.
 
 ---
 

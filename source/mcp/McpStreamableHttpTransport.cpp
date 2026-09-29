@@ -36,6 +36,7 @@ struct McpStreamableHttpTransport::Impl
         QNetworkRequest req(config.endpoint);
         req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
         req.setRawHeader("Accept", "application/json, text/event-stream");
+        req.setTransferTimeout(config.requestTimeoutMs);
         if (!sessionId.isEmpty())
             req.setRawHeader("Mcp-Session-Id", sessionId.toUtf8());
         applyCustomHeaders(req, config.headers);

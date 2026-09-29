@@ -55,6 +55,7 @@ struct McpSseHttpTransport::Impl
         QNetworkRequest req(config.endpoint);
         req.setRawHeader("Accept", "text/event-stream");
         req.setRawHeader("Cache-Control", "no-cache");
+        req.setTransferTimeout(config.sseIdleTimeoutMs);
         applyCustomHeaders(req, config.headers);
 
         sseStream = http->openStream(req, QByteArrayView("GET"));
@@ -143,6 +144,7 @@ struct McpSseHttpTransport::Impl
 
         QNetworkRequest req(postEndpoint);
         req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+        req.setTransferTimeout(config.requestTimeoutMs);
         applyCustomHeaders(req, config.headers);
 
         const QByteArray body = QJsonDocument(message).toJson(QJsonDocument::Compact);

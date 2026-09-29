@@ -459,6 +459,39 @@ TEST_F(McpHttpServerTest, LegacySpecClosesItsStreamWithoutQtWarnings)
     EXPECT_TRUE(capture.warnings().isEmpty()) << qPrintable(capture.warnings().join('\n'));
 }
 
+TEST_F(McpHttpServerTest, LegacySpecStreamUsesTheSseIdleTimeout)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    cfg.requestTimeoutMs = 7000;
+    cfg.sseIdleTimeoutMs = 45000;
+    McpSseHttpTransport transport(cfg, &http);
+
+    transport.start();
+    ASSERT_EQ(http.streamCount(), 1);
+    EXPECT_EQ(http.streamRequest(0).request.transferTimeout(), 45000)
+        << "the standing stream is quiet by design and must not inherit the request timeout";
+}
+
+TEST_F(McpHttpServerTest, LegacySpecPostsCarryTheRequestTimeout)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    cfg.requestTimeoutMs = 7000;
+    McpSseHttpTransport transport(cfg, &http);
+
+    transport.start();
+    http.lastStream()->sendChunk("event: endpoint\ndata: /messages\n\n");
+    transport.send(jsonRpcRequest(1, "initialize"));
+
+    ASSERT_EQ(http.bufferedCount(), 1);
+    EXPECT_EQ(http.bufferedRequest(0).request.transferTimeout(), 7000);
+}
+
 TEST_F(McpHttpServerTest, SessionIdFromTheFirstResponseIsEchoedOnLaterPosts)
 {
     FakeHttpTransport http;
@@ -619,6 +652,22 @@ TEST_F(McpHttpServerTest, LatestSpecKeepsTheSessionAcrossOtherHttpErrors)
         http.bufferedRequest(http.bufferedCount() - 1).header("Mcp-Session-Id"),
         QByteArray("sess-42"))
         << "only a 404 means the server no longer knows the session";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecPostsCarryTheRequestTimeout)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    cfg.requestTimeoutMs = 7000;
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "initialize"));
+
+    ASSERT_EQ(http.bufferedCount(), 1);
+    EXPECT_EQ(http.bufferedRequest(0).request.transferTimeout(), 7000);
 }
 
 TEST_F(McpHttpServerTest, JsonResponseBodyBecomesOneReceivedMessage)

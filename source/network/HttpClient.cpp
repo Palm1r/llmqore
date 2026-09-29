@@ -79,7 +79,8 @@ QFuture<HttpResponse> HttpClient::send(
     promise->start();
 
     QNetworkRequest req(request);
-    req.setTransferTimeout(transferTimeoutMs());
+    if (req.transferTimeout() == 0)
+        req.setTransferTimeout(transferTimeoutMs());
 
     QNetworkReply *reply = dispatchVerb(m_impl->manager, req, verb, body);
 
@@ -126,7 +127,8 @@ HttpStream *HttpClient::openStream(
     const QNetworkRequest &request, QByteArrayView verb, const QByteArray &body)
 {
     QNetworkRequest req(request);
-    req.setTransferTimeout(transferTimeoutMs());
+    if (req.transferTimeout() == 0)
+        req.setTransferTimeout(transferTimeoutMs());
 
     QNetworkReply *reply = dispatchVerb(m_impl->manager, req, verb, body);
     auto *stream = new HttpStream(reply);
