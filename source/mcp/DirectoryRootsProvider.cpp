@@ -8,10 +8,20 @@
 #include <QUrl>
 
 #include <LLMQore/FutureUtils.hpp>
+#include <LLMQore/Log.hpp>
 
 namespace LLMQore::Mcp {
 
 namespace {
+
+bool isUsableRoot(const QString &path)
+{
+    if (!path.isEmpty() && QDir::isAbsolutePath(path))
+        return true;
+    qCWarning(llmMcpLog).noquote()
+        << QString("Ignoring root path '%1': roots must be absolute directories").arg(path);
+    return false;
+}
 
 Root rootFor(const QString &path, const QString &name)
 {
@@ -37,8 +47,10 @@ void DirectoryRootsProvider::setPaths(const QStringList &paths)
 {
     QList<Root> roots;
     roots.reserve(paths.size());
-    for (const QString &path : paths)
-        roots.append(rootFor(path, {}));
+    for (const QString &path : paths) {
+        if (isUsableRoot(path))
+            roots.append(rootFor(path, {}));
+    }
 
     if (roots.size() == m_roots.size()) {
         bool same = true;
@@ -63,6 +75,9 @@ QStringList DirectoryRootsProvider::paths() const
 
 void DirectoryRootsProvider::addPath(const QString &path, const QString &name)
 {
+    if (!isUsableRoot(path))
+        return;
+
     const Root root = rootFor(path, name);
     for (const Root &existing : m_roots) {
         if (existing.uri == root.uri)
@@ -75,6 +90,9 @@ void DirectoryRootsProvider::addPath(const QString &path, const QString &name)
 
 void DirectoryRootsProvider::removePath(const QString &path)
 {
+    if (!isUsableRoot(path))
+        return;
+
     const QString uri = rootFor(path, {}).uri;
 
     QList<Root> kept;

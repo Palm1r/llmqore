@@ -98,6 +98,26 @@ TEST(DirectoryRootsProviderTest, SetPathsIsQuietWhenNothingMoved)
     EXPECT_EQ(changed.size(), 1);
 }
 
+TEST(DirectoryRootsProviderTest, IgnoresEmptyAndRelativePaths)
+{
+    QTemporaryDir sandbox;
+    ASSERT_TRUE(sandbox.isValid());
+
+    DirectoryRootsProvider provider(
+        QStringList{QString(), QStringLiteral("relative/dir"), sandbox.path()});
+
+    const QList<Root> roots = waitForFuture(provider.listRoots());
+    ASSERT_EQ(roots.size(), 1)
+        << "an empty or relative path would quietly become the working directory";
+    EXPECT_EQ(QUrl(roots[0].uri).toLocalFile(), QDir(sandbox.path()).absolutePath());
+
+    QSignalSpy changed(&provider, &BaseRootsProvider::listChanged);
+    provider.addPath(QString());
+    provider.addPath(QStringLiteral("relative/dir"));
+    EXPECT_TRUE(changed.isEmpty());
+    EXPECT_EQ(waitForFuture(provider.listRoots()).size(), 1);
+}
+
 TEST(StaticResourceProviderTest, ListsInInsertionOrderAndReadsBack)
 {
     StaticResourceProvider provider;
