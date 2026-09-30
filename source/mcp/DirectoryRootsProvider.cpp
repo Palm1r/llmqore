@@ -3,6 +3,8 @@
 
 #include <LLMQore/DirectoryRootsProvider.hpp>
 
+#include <algorithm>
+
 #include <QDir>
 #include <QFileInfo>
 #include <QUrl>
@@ -21,6 +23,12 @@ bool isUsableRoot(const QString &path)
     qCWarning(llmMcpLog).noquote()
         << QString("Ignoring root path '%1': roots must be absolute directories").arg(path);
     return false;
+}
+
+QList<Root>::const_iterator findRoot(const QList<Root> &roots, const QString &uri)
+{
+    return std::find_if(
+        roots.cbegin(), roots.cend(), [&uri](const Root &root) { return root.uri == uri; });
 }
 
 Root rootFor(const QString &path, const QString &name)
@@ -48,17 +56,19 @@ void DirectoryRootsProvider::setPaths(const QStringList &paths)
     QList<Root> roots;
     roots.reserve(paths.size());
     for (const QString &path : paths) {
-        if (isUsableRoot(path))
-            roots.append(rootFor(path, {}));
+        if (!isUsableRoot(path))
+            continue;
+        Root root = rootFor(path, {});
+        if (findRoot(roots, root.uri) != roots.cend())
+            continue;
+        const auto kept = findRoot(m_roots, root.uri);
+        if (kept != m_roots.cend())
+            root.name = kept->name;
+        roots.append(root);
     }
 
-    if (roots.size() == m_roots.size()) {
-        bool same = true;
-        for (int i = 0; i < roots.size() && same; ++i)
-            same = roots[i].uri == m_roots[i].uri && roots[i].name == m_roots[i].name;
-        if (same)
-            return;
-    }
+    if (roots == m_roots)
+        return;
 
     m_roots = roots;
     emit listChanged();
@@ -79,12 +89,16 @@ void DirectoryRootsProvider::addPath(const QString &path, const QString &name)
         return;
 
     const Root root = rootFor(path, name);
-    for (const Root &existing : m_roots) {
-        if (existing.uri == root.uri)
-            return;
+    const auto existing = findRoot(m_roots, root.uri);
+    if (existing == m_roots.cend()) {
+        m_roots.append(root);
+        emit listChanged();
+        return;
     }
 
-    m_roots.append(root);
+    if (name.isEmpty() || existing->name == name)
+        return;
+    m_roots[existing - m_roots.cbegin()].name = name;
     emit listChanged();
 }
 

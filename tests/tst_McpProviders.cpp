@@ -142,6 +142,50 @@ TEST(DirectoryRootsProviderTest, EncodesRootUrisAsPlainAsciiUris)
     EXPECT_EQ(provider.paths(), QStringList{directory});
 }
 
+TEST(DirectoryRootsProviderTest, SetPathsKeepsOneRootPerDirectory)
+{
+    QTemporaryDir sandbox;
+    ASSERT_TRUE(sandbox.isValid());
+
+    DirectoryRootsProvider provider(QStringList{sandbox.path(), sandbox.path() + "/"});
+
+    EXPECT_EQ(waitForFuture(provider.listRoots()).size(), 1)
+        << "the same directory spelled twice is still one root";
+}
+
+TEST(DirectoryRootsProviderTest, AddPathRenamesAnExistingRoot)
+{
+    QTemporaryDir sandbox;
+    ASSERT_TRUE(sandbox.isValid());
+
+    DirectoryRootsProvider provider;
+    provider.addPath(sandbox.path(), QStringLiteral("first"));
+    QSignalSpy changed(&provider, &BaseRootsProvider::listChanged);
+
+    provider.addPath(sandbox.path(), QStringLiteral("second"));
+    EXPECT_EQ(changed.size(), 1);
+    EXPECT_EQ(waitForFuture(provider.listRoots()).value(0).name, QStringLiteral("second"));
+
+    provider.addPath(sandbox.path());
+    EXPECT_EQ(changed.size(), 1) << "no name means keep the one it has";
+    EXPECT_EQ(waitForFuture(provider.listRoots()).value(0).name, QStringLiteral("second"));
+}
+
+TEST(DirectoryRootsProviderTest, SetPathsKeepsTheNamesOfTheRootsItKeeps)
+{
+    QTemporaryDir sandbox;
+    ASSERT_TRUE(sandbox.isValid());
+
+    DirectoryRootsProvider provider;
+    provider.addPath(sandbox.path(), QStringLiteral("named"));
+    QSignalSpy changed(&provider, &BaseRootsProvider::listChanged);
+
+    provider.setPaths(provider.paths());
+
+    EXPECT_TRUE(changed.isEmpty()) << "handing back the same directories changes nothing";
+    EXPECT_EQ(waitForFuture(provider.listRoots()).value(0).name, QStringLiteral("named"));
+}
+
 TEST(StaticResourceProviderTest, ListsInInsertionOrderAndReadsBack)
 {
     StaticResourceProvider provider;
