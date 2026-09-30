@@ -11,7 +11,6 @@
 #include <QPointer>
 
 #include <LLMQore/FutureUtils.hpp>
-#include <LLMQore/HttpClient.hpp>
 #include <LLMQore/HttpResponse.hpp>
 #include <LLMQore/HttpTransport.hpp>
 #include <LLMQore/HttpTransportError.hpp>
