@@ -103,10 +103,7 @@ struct McpStreamableHttpTransport::Impl
         req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
         req.setRawHeader("Accept", "application/json, text/event-stream");
         req.setTransferTimeout(config.requestTimeoutMs);
-        if (!sessionId.isEmpty())
-            req.setRawHeader("Mcp-Session-Id", sessionId.toUtf8());
-        if (!protocolVersion.isEmpty())
-            req.setRawHeader("MCP-Protocol-Version", protocolVersion.toUtf8());
+        applySessionHeaders(req);
         applyCustomHeaders(req, config.headers);
 
         const QByteArray body = QJsonDocument(message).toJson(QJsonDocument::Compact);
@@ -141,10 +138,17 @@ struct McpStreamableHttpTransport::Impl
         });
     }
 
+    void applySessionHeaders(QNetworkRequest &request) const
+    {
+        if (!sessionId.isEmpty())
+            request.setRawHeader("Mcp-Session-Id", sessionId.toUtf8());
+        if (!protocolVersion.isEmpty())
+            request.setRawHeader("MCP-Protocol-Version", protocolVersion.toUtf8());
+    }
+
     void onHeaders(Exchange &exchange)
     {
-        exchange.response.statusCode = exchange.stream->statusCode();
-        exchange.response.rawHeaders = exchange.stream->rawHeaders();
+        exchange.response = responseHead(*exchange.stream);
         const QByteArray session = exchange.response.rawHeader(QByteArrayView("Mcp-Session-Id"));
         if (!session.isEmpty())
             sessionId = QString::fromUtf8(session);
@@ -268,14 +272,8 @@ struct McpStreamableHttpTransport::Impl
         if (!open || !http || listenStream || listenRefused)
             return;
 
-        QNetworkRequest req(config.endpoint);
-        req.setRawHeader("Accept", "text/event-stream");
-        req.setRawHeader("Cache-Control", "no-cache");
-        req.setTransferTimeout(config.sseIdleTimeoutMs);
-        if (!sessionId.isEmpty())
-            req.setRawHeader("Mcp-Session-Id", sessionId.toUtf8());
-        if (!protocolVersion.isEmpty())
-            req.setRawHeader("MCP-Protocol-Version", protocolVersion.toUtf8());
+        QNetworkRequest req = eventStreamRequest(config);
+        applySessionHeaders(req);
         if (!lastEventId.isEmpty())
             req.setRawHeader("Last-Event-ID", lastEventId);
         applyCustomHeaders(req, config.headers);
@@ -302,9 +300,7 @@ struct McpStreamableHttpTransport::Impl
 
     void onListenHeaders()
     {
-        HttpResponse head;
-        head.statusCode = listenStream->statusCode();
-        head.rawHeaders = listenStream->rawHeaders();
+        const HttpResponse head = responseHead(*listenStream);
         if (isEventStream(head)) {
             listenAccepted = true;
             listenUptime.start();

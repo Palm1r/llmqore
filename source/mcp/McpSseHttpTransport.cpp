@@ -51,10 +51,7 @@ struct McpSseHttpTransport::Impl
 
     void openStream()
     {
-        QNetworkRequest req(config.endpoint);
-        req.setRawHeader("Accept", "text/event-stream");
-        req.setRawHeader("Cache-Control", "no-cache");
-        req.setTransferTimeout(config.sseIdleTimeoutMs);
+        QNetworkRequest req = eventStreamRequest(config);
         applyCustomHeaders(req, config.headers);
 
         sseStream = http->openStream(req, QByteArrayView("GET"));
@@ -80,9 +77,7 @@ struct McpSseHttpTransport::Impl
 
     void onHeaders()
     {
-        HttpResponse head;
-        head.statusCode = sseStream->statusCode();
-        head.rawHeaders = sseStream->rawHeaders();
+        const HttpResponse head = responseHead(*sseStream);
 
         QString reason;
         if (!head.isSuccess())

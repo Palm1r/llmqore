@@ -11,8 +11,10 @@
 #include <QString>
 
 #include <LLMQore/HttpClient.hpp>
+#include <LLMQore/HttpResponse.hpp>
 #include <LLMQore/HttpTransport.hpp>
 #include <LLMQore/Log.hpp>
+#include <LLMQore/McpHttpTransport.hpp>
 #include <LLMQore/SSEEvent.hpp>
 
 namespace LLMQore::Mcp {
@@ -31,6 +33,23 @@ inline void applyCustomHeaders(QNetworkRequest &request, const QHash<QString, QS
 {
     for (auto it = headers.constBegin(); it != headers.constEnd(); ++it)
         request.setRawHeader(it.key().toUtf8(), it.value().toUtf8());
+}
+
+inline QNetworkRequest eventStreamRequest(const HttpTransportConfig &config)
+{
+    QNetworkRequest request(config.endpoint);
+    request.setRawHeader("Accept", "text/event-stream");
+    request.setRawHeader("Cache-Control", "no-cache");
+    request.setTransferTimeout(config.sseIdleTimeoutMs);
+    return request;
+}
+
+inline HttpResponse responseHead(const HttpStreamHandle &stream)
+{
+    HttpResponse head;
+    head.statusCode = stream.statusCode();
+    head.rawHeaders = stream.rawHeaders();
+    return head;
 }
 
 inline bool isJsonRpcRequest(const QJsonObject &message)
