@@ -199,9 +199,9 @@ TEST_F(McpHttpServerTest, LatestSpecPostsStraightToTheConfiguredEndpoint)
     EXPECT_EQ(http.streamCount(), 0) << "2025-03-26 must not open a standing SSE stream";
 
     transport.send(QJsonObject{{"jsonrpc", "2.0"}, {"id", 1}, {"method", "ping"}});
-    ASSERT_EQ(http.bufferedCount(), 1);
+    ASSERT_EQ(http.streamCount(), 1);
 
-    const auto sent = http.bufferedRequest(0);
+    const auto sent = http.streamRequest(0);
     EXPECT_EQ(sent.verb, QByteArray("POST"));
     EXPECT_EQ(sent.url(), cfg.endpoint);
     EXPECT_EQ(sent.header("Accept"), QByteArray("application/json, text/event-stream"));
@@ -625,18 +625,18 @@ TEST_F(McpHttpServerTest, SessionIdFromTheFirstResponseIsEchoedOnLaterPosts)
 
     transport.start();
     transport.send(QJsonObject{{"jsonrpc", "2.0"}, {"id", 1}, {"method", "initialize"}});
-    ASSERT_EQ(http.bufferedCount(), 1);
-    EXPECT_TRUE(http.bufferedRequest(0).header("Mcp-Session-Id").isEmpty());
+    ASSERT_EQ(http.streamCount(), 1);
+    EXPECT_TRUE(http.streamRequest(0).header("Mcp-Session-Id").isEmpty());
 
-    http.respondToLast(
+    http.respondToLastStream(
         200,
         compact(jsonRpcResult(1, "ok")),
         {{"Content-Type", "application/json"}, {"Mcp-Session-Id", "sess-42"}});
     spin();
 
     transport.send(QJsonObject{{"jsonrpc", "2.0"}, {"id", 2}, {"method", "tools/list"}});
-    ASSERT_EQ(http.bufferedCount(), 2);
-    EXPECT_EQ(http.bufferedRequest(1).header("Mcp-Session-Id"), QByteArray("sess-42"));
+    ASSERT_EQ(http.streamCount(), 2);
+    EXPECT_EQ(http.streamRequest(1).header("Mcp-Session-Id"), QByteArray("sess-42"));
 }
 
 TEST_F(McpHttpServerTest, LatestSpecDropsTheSessionWhenTheServerAnswers404)
@@ -651,12 +651,12 @@ TEST_F(McpHttpServerTest, LatestSpecDropsTheSessionWhenTheServerAnswers404)
 
     transport.start();
     transport.send(jsonRpcRequest(1, "initialize"));
-    http.respondToLast(200, compact(jsonRpcResult(1, "ok")), sessionHeaders("sess-42"));
+    http.respondToLastStream(200, compact(jsonRpcResult(1, "ok")), sessionHeaders("sess-42"));
     spin();
 
     transport.send(jsonRpcRequest(2, "tools/list"));
-    ASSERT_EQ(http.bufferedRequest(1).header("Mcp-Session-Id"), QByteArray("sess-42"));
-    http.respondToLast(404, {});
+    ASSERT_EQ(http.streamRequest(1).header("Mcp-Session-Id"), QByteArray("sess-42"));
+    http.respondToLastStream(404, {});
     spin();
 
     EXPECT_EQ(closed.size(), 1) << "the owner must learn the session is gone to initialize again";
@@ -665,7 +665,7 @@ TEST_F(McpHttpServerTest, LatestSpecDropsTheSessionWhenTheServerAnswers404)
 
     transport.start();
     transport.send(jsonRpcRequest(3, "initialize"));
-    const auto reinitialize = http.bufferedRequest(http.bufferedCount() - 1);
+    const auto reinitialize = http.streamRequest(http.streamCount() - 1);
     EXPECT_EQ(reinitialize.payload().value("id").toInt(), 3);
     EXPECT_FALSE(reinitialize.request.hasRawHeader("Mcp-Session-Id"))
         << "after a 404 the client must start a new session without the old id";
@@ -681,7 +681,7 @@ TEST_F(McpHttpServerTest, LatestSpecStartsWithoutASessionAfterStop)
 
     transport.start();
     transport.send(jsonRpcRequest(1, "initialize"));
-    http.respondToLast(200, compact(jsonRpcResult(1, "ok")), sessionHeaders("sess-42"));
+    http.respondToLastStream(200, compact(jsonRpcResult(1, "ok")), sessionHeaders("sess-42"));
     spin();
     ASSERT_EQ(transport.sessionId(), QString("sess-42")) << qPrintable(transport.sessionId());
 
@@ -690,7 +690,7 @@ TEST_F(McpHttpServerTest, LatestSpecStartsWithoutASessionAfterStop)
 
     transport.start();
     transport.send(jsonRpcRequest(2, "initialize"));
-    const auto restarted = http.bufferedRequest(http.bufferedCount() - 1);
+    const auto restarted = http.streamRequest(http.streamCount() - 1);
     EXPECT_EQ(restarted.payload().value("id").toInt(), 2);
     EXPECT_FALSE(restarted.request.hasRawHeader("Mcp-Session-Id"))
         << "a restarted transport must begin a new session";
@@ -708,14 +708,17 @@ TEST_F(McpHttpServerTest, LatestSpecIgnoresResponsesToPostsSentBeforeStop)
 
     transport.start();
     transport.send(jsonRpcRequest(1, "tools/call"));
+    const QPointer<FakeHttpStream> beforeStop = http.lastStream();
     transport.stop();
 
     transport.start();
     transport.send(jsonRpcRequest(2, "initialize"));
-    http.respondToLast(200, compact(jsonRpcResult(2, "ok")), sessionHeaders("sess-new"));
-    spin();
+    http.respondToLastStream(200, compact(jsonRpcResult(2, "ok")), sessionHeaders("sess-new"));
 
-    http.respondTo(0, 200, compact(jsonRpcResult(1, "late")), sessionHeaders("sess-old"));
+    ASSERT_TRUE(beforeStop) << "the stream of the old POST must still be able to answer late";
+    beforeStop->sendHeaders(200, sessionHeaders("sess-old"));
+    beforeStop->sendChunk(compact(jsonRpcResult(1, "late")));
+    beforeStop->sendFinished();
     spin();
 
     ASSERT_EQ(messages.size(), 1)
@@ -741,7 +744,7 @@ TEST_F(McpHttpServerTest, LatestSpecIgnoresFailuresOfPostsSentBeforeStop)
     transport.stop();
     transport.start();
 
-    http.failLast("connection reset");
+    http.failLastStream("connection reset");
     spin();
 
     EXPECT_EQ(errors.size(), 0) << "a POST sent before stop() cannot fail the new session";
@@ -759,11 +762,11 @@ TEST_F(McpHttpServerTest, LatestSpecKeepsTheSessionAcrossOtherHttpErrors)
 
     transport.start();
     transport.send(jsonRpcRequest(1, "initialize"));
-    http.respondToLast(200, compact(jsonRpcResult(1, "ok")), sessionHeaders("sess-42"));
+    http.respondToLastStream(200, compact(jsonRpcResult(1, "ok")), sessionHeaders("sess-42"));
     spin();
 
     transport.send(jsonRpcRequest(2, "tools/call"));
-    http.respondToLast(503, "upstream down");
+    http.respondToLastStream(503, "upstream down");
     spin();
 
     EXPECT_EQ(closed.size(), 0);
@@ -771,7 +774,7 @@ TEST_F(McpHttpServerTest, LatestSpecKeepsTheSessionAcrossOtherHttpErrors)
 
     transport.send(jsonRpcRequest(3, "tools/list"));
     EXPECT_EQ(
-        http.bufferedRequest(http.bufferedCount() - 1).header("Mcp-Session-Id"),
+        http.streamRequest(http.streamCount() - 1).header("Mcp-Session-Id"),
         QByteArray("sess-42"))
         << "only a 404 means the server no longer knows the session";
 }
@@ -788,8 +791,65 @@ TEST_F(McpHttpServerTest, LatestSpecPostsCarryTheRequestTimeout)
     transport.start();
     transport.send(jsonRpcRequest(1, "initialize"));
 
-    ASSERT_EQ(http.bufferedCount(), 1);
-    EXPECT_EQ(http.bufferedRequest(0).request.transferTimeout(), 7000);
+    ASSERT_EQ(http.streamCount(), 1);
+    EXPECT_EQ(http.streamRequest(0).request.transferTimeout(), 7000);
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDeliversEventsBeforeTheResponseStreamEnds)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "tools/call"));
+    ASSERT_EQ(http.streamCount(), 1) << "a POST must be read as it arrives, not once it ends";
+
+    FakeHttpStream *stream = http.lastStream();
+    stream->sendHeaders(200, {{"Content-Type", "text/event-stream"}});
+    stream->sendChunk(
+        "event: message\ndata: "
+        + compact(QJsonObject{
+            {"jsonrpc", "2.0"},
+            {"id", "srv-1"},
+            {"method", "elicitation/create"},
+            {"params", QJsonObject{{"message", "Name?"}}}})
+        + "\n\n");
+    spin();
+
+    ASSERT_EQ(messages.size(), 1)
+        << "the server waits for this answer before it finishes the stream";
+    EXPECT_EQ(
+        messages.first().first().toJsonObject().value("method").toString(), "elicitation/create");
+
+    stream->sendChunk("event: message\ndata: " + compact(jsonRpcResult(1, "done")) + "\n\n");
+    stream->sendFinished();
+    spin();
+
+    EXPECT_EQ(messages.size(), 2);
+}
+
+TEST_F(McpHttpServerTest, LatestSpecFailsARequestWhoseStreamTheHttpTransportDeletes)
+{
+    auto *http = new FakeHttpTransport;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, http);
+
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "tools/call"));
+    delete http;
+
+    ASSERT_EQ(failed.size(), 1)
+        << "a reply that can no longer arrive must not leave the call hanging";
+    EXPECT_EQ(failed.first().at(0).toJsonObject().value("id").toInt(), 1);
 }
 
 TEST_F(McpHttpServerTest, FactoryBuildsTheSseTransportForTheLegacySpec)
@@ -878,7 +938,7 @@ TEST_F(McpHttpServerTest, LatestSpecFailsARequestWhosePostFails)
 
     transport.start();
     transport.send(jsonRpcRequest(1, "tools/call"));
-    http.failLast("connection reset");
+    http.failLastStream("connection reset");
     spin();
 
     ASSERT_EQ(failed.size(), 1) << "the pending request must learn its POST never got through";
@@ -922,7 +982,8 @@ TEST_F(McpHttpServerTest, LatestSpecFailsARequestThePostDidNotAnswer)
 
         transport.start();
         transport.send(jsonRpcRequest(1, "tools/call"));
-        http.respondToLast(outcome.status, outcome.body, {{"Content-Type", outcome.contentType}});
+        http.respondToLastStream(
+            outcome.status, outcome.body, {{"Content-Type", outcome.contentType}});
         spin();
 
         EXPECT_EQ(failed.size(), 1) << "an unanswered request would otherwise wait for its timer";
@@ -953,7 +1014,7 @@ TEST_F(McpHttpServerTest, LatestSpecForwardsAJsonRpcErrorFromAnHttpErrorBody)
         {"error",
          QJsonObject{{"code", -32000}, {"message", "Bad Request: No valid session ID provided"}}},
     };
-    http.respondToLast(400, compact(serverError), {{"Content-Type", "application/json"}});
+    http.respondToLastStream(400, compact(serverError), {{"Content-Type", "application/json"}});
     spin();
 
     ASSERT_EQ(messages.size(), 1) << "the server's own error says more than its status";
@@ -975,17 +1036,17 @@ TEST_F(McpHttpServerTest, LatestSpecDoesNotFailNotificationsOrAnsweredRequests)
 
     transport.start();
     transport.send(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}});
-    http.respondToLast(202, {});
+    http.respondToLastStream(202, {});
 
     transport.send(jsonRpcRequest(2, "ping"));
-    http.respondToLast(200, compact(jsonRpcResult(2, "pong")));
+    http.respondToLastStream(200, compact(jsonRpcResult(2, "pong")));
 
     transport.send(jsonRpcRequest(3, "tools/call"));
     const QByteArray sseBody
         = "event: message\ndata: "
           + compact(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/progress"}})
           + "\n\nevent: message\ndata: " + compact(jsonRpcResult(3, "done")) + "\n\n";
-    http.respondToLast(200, sseBody, {{"Content-Type", "text/event-stream"}});
+    http.respondToLastStream(200, sseBody, {{"Content-Type", "text/event-stream"}});
     spin();
 
     EXPECT_TRUE(failed.isEmpty()) << qPrintable(failed.value(0).value(1).toString());
@@ -1004,7 +1065,7 @@ TEST_F(McpHttpServerTest, JsonResponseBodyBecomesOneReceivedMessage)
 
     transport.start();
     transport.send(QJsonObject{{"jsonrpc", "2.0"}, {"id", 3}, {"method", "ping"}});
-    http.respondToLast(200, compact(jsonRpcResult(3, "pong")));
+    http.respondToLastStream(200, compact(jsonRpcResult(3, "pong")));
     spin();
 
     ASSERT_EQ(messages.size(), 1);
@@ -1027,7 +1088,7 @@ TEST_F(McpHttpServerTest, EventStreamResponseBodyYieldsEveryFramedMessage)
 
     const QByteArray sseBody = "event: message\ndata: " + compact(jsonRpcResult(4, "first"))
         + "\n\nevent: message\ndata: " + compact(jsonRpcResult(5, "second")) + "\n\n";
-    http.respondToLast(200, sseBody, {{"Content-Type", "text/event-stream"}});
+    http.respondToLastStream(200, sseBody, {{"Content-Type", "text/event-stream"}});
     spin();
 
     ASSERT_EQ(messages.size(), 2);
@@ -1049,7 +1110,7 @@ TEST_F(McpHttpServerTest, AcceptedWithoutBodyProducesNoMessageAndNoError)
 
     transport.start();
     transport.send(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}});
-    http.respondToLast(202, {});
+    http.respondToLastStream(202, {});
     spin();
 
     EXPECT_EQ(messages.size(), 0);
@@ -1069,7 +1130,7 @@ TEST_F(McpHttpServerTest, HttpErrorStatusIsReportedAsTransportError)
 
     transport.start();
     transport.send(QJsonObject{{"jsonrpc", "2.0"}, {"id", 9}, {"method", "ping"}});
-    http.respondToLast(503, "upstream down");
+    http.respondToLastStream(503, "upstream down");
     spin();
 
     ASSERT_EQ(errors.size(), 1);

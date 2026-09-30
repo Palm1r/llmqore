@@ -129,6 +129,38 @@ public:
 
     SentRequest streamRequest(int index) const { return m_streamRequests.value(index); }
 
+    void respondToStream(
+        int index,
+        int statusCode,
+        const QByteArray &body,
+        const QList<QPair<QByteArray, QByteArray>> &headers = {})
+    {
+        FakeHttpStream *stream = streamAt(index);
+        if (!stream)
+            return;
+        const QList<QPair<QByteArray, QByteArray>> json{{"Content-Type", "application/json"}};
+        stream->sendHeaders(statusCode, headers.isEmpty() ? json : headers);
+        if (!body.isEmpty())
+            stream->sendChunk(body);
+        stream->sendFinished();
+    }
+
+    void respondToLastStream(
+        int statusCode,
+        const QByteArray &body,
+        const QList<QPair<QByteArray, QByteArray>> &headers = {})
+    {
+        respondToStream(streamCount() - 1, statusCode, body, headers);
+    }
+
+    void failLastStream(
+        const QString &message,
+        QNetworkReply::NetworkError code = QNetworkReply::UnknownNetworkError)
+    {
+        if (FakeHttpStream *stream = lastStream())
+            stream->sendError(message, code);
+    }
+
     int bufferedCount() const { return m_buffered.size(); }
 
     SentRequest bufferedRequest(int index) const { return m_buffered.value(index).sent; }

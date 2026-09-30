@@ -3,13 +3,16 @@
 
 #include <LLMQore/McpHttpTransport.hpp>
 
+#include <memory>
+#include <utility>
+
 #include <QByteArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
 #include <QNetworkRequest>
+#include <QPointer>
 
-#include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/HttpResponse.hpp>
 #include <LLMQore/HttpTransport.hpp>
 #include <LLMQore/HttpTransportError.hpp>
@@ -39,13 +42,29 @@ QJsonObject jsonRpcErrorIn(const QByteArray &body)
 
 struct McpStreamableHttpTransport::Impl
 {
+    struct Exchange
+    {
+        QJsonObject message;
+        QPointer<HttpStreamHandle> stream;
+        HttpResponse response;
+        SSEParser events;
+        bool answered = false;
+        bool done = false;
+    };
+
     McpStreamableHttpTransport *q = nullptr;
     HttpTransportConfig config;
     LLMQore::HttpTransport *http = nullptr;
 
     bool open = false;
     QString sessionId;
-    quint64 generation = 0;
+    QList<std::shared_ptr<Exchange>> exchanges;
+
+    static bool isEventStream(const HttpResponse &response)
+    {
+        return response.isSuccess()
+               && response.contentType().contains(QLatin1String("text/event-stream"));
+    }
 
     void post(const QJsonObject &message)
     {
@@ -58,49 +77,118 @@ struct McpStreamableHttpTransport::Impl
         applyCustomHeaders(req, config.headers);
 
         const QByteArray body = QJsonDocument(message).toJson(QJsonDocument::Compact);
-        const quint64 postedIn = generation;
 
-        (void) LLMQore::compat(http->send(req, QByteArrayView("POST"), body))
-            .then(
-                q,
-                [this, postedIn, message](const HttpResponse &response) {
-                    if (postedIn == generation)
-                        handleResponse(message, response);
-                })
-            .onFailed(q, [this, postedIn, message](const HttpTransportError &e) {
-                if (postedIn != generation)
-                    return;
-                const QString reason = QString("HTTP error: %1").arg(e.message());
-                qCWarning(llmMcpLog).noquote() << reason;
-                emit q->errorOccurred(reason);
-                if (isJsonRpcRequest(message))
-                    emit q->sendFailed(message, reason);
+        auto exchange = std::make_shared<Exchange>();
+        exchange->message = message;
+        exchange->stream = http->openStream(req, QByteArrayView("POST"), body);
+        exchanges.append(exchange);
+
+        HttpStreamHandle *stream = exchange->stream;
+        QObject::connect(
+            stream, &HttpStreamHandle::headersReceived, q, [this, exchange]() {
+                onHeaders(*exchange);
             });
+        QObject::connect(
+            stream, &HttpStreamHandle::chunkReceived, q, [this, exchange](const QByteArray &chunk) {
+                onChunk(*exchange, chunk);
+            });
+        QObject::connect(
+            stream, &HttpStreamHandle::finished, q, [this, exchange]() { onFinished(exchange); });
+        QObject::connect(
+            stream,
+            &HttpStreamHandle::errorOccurred,
+            q,
+            [this, exchange](const HttpTransportError &e) {
+                release(exchange);
+                fail(*exchange, QString("HTTP error: %1").arg(e.message()));
+            });
+        QObject::connect(stream, &QObject::destroyed, q, [this, exchange]() {
+            release(exchange);
+            fail(*exchange, QStringLiteral("HTTP stream destroyed before the reply ended"));
+        });
     }
 
-    void handleResponse(const QJsonObject &message, const HttpResponse &response)
+    void onHeaders(Exchange &exchange)
     {
-        const QByteArray sessionHeader = response.rawHeader(QByteArrayView("Mcp-Session-Id"));
-        if (!sessionHeader.isEmpty())
-            sessionId = QString::fromUtf8(sessionHeader);
+        exchange.response.statusCode = exchange.stream->statusCode();
+        exchange.response.rawHeaders = exchange.stream->rawHeaders();
+        const QByteArray session = exchange.response.rawHeader(QByteArrayView("Mcp-Session-Id"));
+        if (!session.isEmpty())
+            sessionId = QString::fromUtf8(session);
+    }
+
+    void onChunk(Exchange &exchange, const QByteArray &chunk)
+    {
+        if (!isEventStream(exchange.response)) {
+            exchange.response.body.append(chunk);
+            return;
+        }
+        for (const SSEEvent &event : exchange.events.append(chunk)) {
+            if (exchange.done)
+                return;
+            if (event.type != QLatin1String("message"))
+                continue;
+            QJsonParseError err{};
+            const QJsonDocument doc = QJsonDocument::fromJson(event.data, &err);
+            if (err.error == QJsonParseError::NoError && doc.isObject())
+                receive(exchange, doc.object());
+        }
+    }
+
+    void onFinished(const std::shared_ptr<Exchange> &exchange)
+    {
+        release(exchange);
+        const HttpResponse &response = exchange->response;
 
         if (!response.isSuccess()) {
             const QString reason = QString("HTTP error %1").arg(response.statusCode);
             qCWarning(llmMcpLog).noquote() << reason;
             emit q->errorOccurred(reason);
-            if (isJsonRpcRequest(message))
-                failRequest(message, reason, response.body);
+            if (isJsonRpcRequest(exchange->message))
+                failRequest(exchange->message, reason, response.body);
             if (response.statusCode == 404 && !sessionId.isEmpty())
                 q->stop();
             return;
         }
 
-        if (!deliver(message, response) && isJsonRpcRequest(message)) {
+        if (!isEventStream(response))
+            deliverBody(*exchange);
+        if (isJsonRpcRequest(exchange->message) && !exchange->answered) {
             emit q->sendFailed(
-                message,
+                exchange->message,
                 QString("HTTP %1 reply carried no response to the request")
                     .arg(response.statusCode));
         }
+    }
+
+    void deliverBody(Exchange &exchange)
+    {
+        const HttpResponse &response = exchange.response;
+        if (response.statusCode == 202 || response.body.isEmpty())
+            return;
+
+        const QString contentType = response.contentType();
+        if (!contentType.contains(QLatin1String("application/json"))) {
+            qCWarning(llmMcpLog).noquote()
+                << QString("Unexpected Content-Type: %1").arg(contentType);
+            return;
+        }
+
+        QJsonParseError err{};
+        const QJsonDocument doc = QJsonDocument::fromJson(response.body, &err);
+        if (err.error == QJsonParseError::NoError && doc.isObject()) {
+            receive(exchange, doc.object());
+            return;
+        }
+        qCWarning(llmMcpLog).noquote()
+            << QString("Non-object JSON response: %1").arg(QString::fromUtf8(response.body));
+        emit q->errorOccurred(QStringLiteral("Invalid JSON response body"));
+    }
+
+    void receive(Exchange &exchange, const QJsonObject &reply)
+    {
+        exchange.answered = exchange.answered || answers(reply, exchange.message);
+        emit q->messageReceived(reply);
     }
 
     void failRequest(const QJsonObject &message, const QString &reason, const QByteArray &body)
@@ -115,45 +203,35 @@ struct McpStreamableHttpTransport::Impl
         emit q->messageReceived(error);
     }
 
-    bool deliver(const QJsonObject &message, const HttpResponse &response)
+    void fail(const Exchange &exchange, const QString &reason)
     {
-        if (response.statusCode == 202 || response.body.isEmpty())
-            return false;
+        qCWarning(llmMcpLog).noquote() << reason;
+        emit q->errorOccurred(reason);
+        if (isJsonRpcRequest(exchange.message) && !exchange.answered)
+            emit q->sendFailed(exchange.message, reason);
+    }
 
-        bool answered = false;
-        const auto receive = [&](const QJsonObject &reply) {
-            answered = answered || answers(reply, message);
-            emit q->messageReceived(reply);
-        };
-
-        const QString contentType = response.contentType();
-
-        if (contentType.contains(QLatin1String("application/json"))) {
-            QJsonParseError err{};
-            const QJsonDocument doc = QJsonDocument::fromJson(response.body, &err);
-            if (err.error == QJsonParseError::NoError && doc.isObject()) {
-                receive(doc.object());
-            } else {
-                qCWarning(llmMcpLog).noquote()
-                    << QString("Non-object JSON response: %1").arg(QString::fromUtf8(response.body));
-                emit q->errorOccurred(QStringLiteral("Invalid JSON response body"));
-            }
-        } else if (contentType.contains(QLatin1String("text/event-stream"))) {
-            SSEParser parser;
-            const QList<SSEEvent> events = parser.append(response.body);
-            for (const SSEEvent &ev : events) {
-                if (ev.type != QLatin1String("message") && !ev.type.isEmpty())
-                    continue;
-                QJsonParseError err{};
-                const QJsonDocument doc = QJsonDocument::fromJson(ev.data, &err);
-                if (err.error == QJsonParseError::NoError && doc.isObject())
-                    receive(doc.object());
-            }
-        } else {
-            qCWarning(llmMcpLog).noquote()
-                << QString("Unexpected Content-Type: %1").arg(contentType);
+    void release(const std::shared_ptr<Exchange> &exchange)
+    {
+        exchange->done = true;
+        exchanges.removeOne(exchange);
+        if (exchange->stream) {
+            exchange->stream->disconnect(q);
+            exchange->stream->deleteLater();
         }
-        return answered;
+    }
+
+    void abandonExchanges()
+    {
+        const QList<std::shared_ptr<Exchange>> pending = std::exchange(exchanges, {});
+        for (const std::shared_ptr<Exchange> &exchange : pending) {
+            exchange->done = true;
+            if (exchange->stream) {
+                exchange->stream->disconnect(q);
+                exchange->stream->abort();
+                exchange->stream->deleteLater();
+            }
+        }
     }
 };
 
@@ -191,7 +269,7 @@ void McpStreamableHttpTransport::stop()
 
     m_impl->open = false;
     m_impl->sessionId.clear();
-    ++m_impl->generation;
+    m_impl->abandonExchanges();
     emit closed();
 }
 

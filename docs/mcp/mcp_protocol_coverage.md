@@ -124,7 +124,7 @@ when it differs from the id; loading icon binaries into `IconInfo::src` (as a
 | POST JSON-RPC to single endpoint | ✅ `McpStreamableHttpTransport` | ✅ `McpHttpServerTransport` (manual HTTP/1.1 over `QTcpServer`, no `Qt6::HttpServer` dep) |
 | `Accept: application/json, text/event-stream` | ✅ | ✅ |
 | Parse JSON response | ✅ | ✅ `application/json` for single responses |
-| Parse SSE response (short-lived, per-POST) | ✅ Uses internal `SseEventParser` | ✅ Used when flushing queued server→client messages alongside the response |
+| Parse SSE response (short-lived, per-POST) | ✅ Read as a stream: each event is dispatched as it arrives, so a server request sent before the response (e.g. `elicitation/create` during `tools/call`) is answered while the call is still open | ✅ Used when flushing queued server→client messages alongside the response |
 | `Mcp-Session-Id` header tracking | ✅ | ✅ Generated as a UUIDv4 at `start()`, echoed on every response, rejects a mismatched id with HTTP 400 |
 | 202 Accepted with empty body | ✅ Treated as notification ack | ✅ Replied for inbound notifications when no queued server messages |
 | Long-lived `GET /mcp` server-to-client push | ❌ Explicitly out of scope for v1 (client). | ❌ Server replies HTTP 405 Method Not Allowed for non-POST. Spontaneous server→client traffic is instead **buffered and flushed on the next inbound POST's response** via SSE — workable for sampling round-trips, insufficient for purely spontaneous notifications while no client is polling. |
