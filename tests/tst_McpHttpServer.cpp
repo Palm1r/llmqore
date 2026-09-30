@@ -1021,6 +1021,153 @@ TEST_F(McpHttpServerTest, LatestSpecClosesTheListenStreamOnStop)
     EXPECT_TRUE(listen->isAborted()) << "a stopped transport must not keep a connection open";
 }
 
+TEST_F(McpHttpServerTest, LatestSpecRetriesAListenStreamTheServerRefusesForNow)
+{
+    for (const int status : {409, 429, 503}) {
+        SCOPED_TRACE(status);
+        FakeHttpTransport http;
+
+        HttpTransportConfig cfg;
+        cfg.endpoint = QUrl("http://mcp.local/mcp");
+        McpStreamableHttpTransport transport(cfg, &http);
+        ASSERT_TRUE(openSession(transport, http));
+
+        http.lastStream()->sendHeaders(200, eventStreamHeaders());
+        http.lastStream()->sendFinished();
+        fireListenRetry(transport);
+        ASSERT_EQ(http.streamCount(), 3);
+
+        QtWarningCapture capture;
+        http.respondToLastStream(status, "busy", {{"Content-Type", "text/plain"}});
+
+        ASSERT_TRUE(listenRetryTimer(transport));
+        EXPECT_TRUE(listenRetryTimer(transport)->isActive())
+            << "the old stream may still be registered, or the server is briefly away";
+        EXPECT_TRUE(capture.warnings().isEmpty());
+
+        fireListenRetry(transport);
+        EXPECT_EQ(http.streamCount(), 4);
+    }
+}
+
+TEST_F(McpHttpServerTest, LatestSpecEndsTheSessionWhenTheListenStreamFindsItGone)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    http.lastStream()->sendHeaders(200, eventStreamHeaders());
+    http.lastStream()->sendFinished();
+    fireListenRetry(transport);
+    ASSERT_EQ(http.streamCount(), 3);
+
+    QSignalSpy closed(&transport, &Rpc::Transport::closed);
+    QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+
+    http.respondToLastStream(
+        404,
+        compact(QJsonObject{
+            {"jsonrpc", "2.0"},
+            {"error", QJsonObject{{"code", -32001}, {"message", "Session not found"}}},
+            {"id", QJsonValue::Null},
+        }));
+
+    EXPECT_EQ(closed.size(), 1) << "a 404 to a request carrying the session means it is gone";
+    EXPECT_EQ(errors.size(), 1);
+    EXPECT_FALSE(transport.isOpen());
+    EXPECT_TRUE(transport.sessionId().isEmpty());
+}
+
+TEST_F(McpHttpServerTest, LatestSpecStopsAskingWhenTheFirstListenStreamIsNotFound)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    QSignalSpy closed(&transport, &Rpc::Transport::closed);
+
+    http.respondToLastStream(404, "Not Found", {{"Content-Type", "text/plain"}});
+
+    EXPECT_TRUE(closed.isEmpty()) << "a server that routes only POST answers a GET with 404";
+    EXPECT_TRUE(transport.isOpen());
+    ASSERT_TRUE(listenRetryTimer(transport));
+    EXPECT_FALSE(listenRetryTimer(transport)->isActive());
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDropsAnEventCursorTheServerNoLongerKnows)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    FakeHttpStream *listen = http.lastStream();
+    listen->sendHeaders(200, eventStreamHeaders());
+    listen->sendChunk(
+        "id: 7\nevent: message\ndata: "
+        + compact(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/message"}})
+        + "\n\n");
+    listen->sendFinished();
+    fireListenRetry(transport);
+    ASSERT_EQ(http.streamCount(), 3);
+    ASSERT_EQ(http.streamRequest(2).header("Last-Event-ID"), QByteArray("7"));
+
+    http.respondToLastStream(
+        400,
+        compact(QJsonObject{
+            {"jsonrpc", "2.0"},
+            {"error", QJsonObject{{"code", -32000}, {"message", "Invalid event ID format"}}},
+            {"id", QJsonValue::Null},
+        }));
+    fireListenRetry(transport);
+
+    ASSERT_EQ(http.streamCount(), 4);
+    EXPECT_FALSE(http.streamRequest(3).request.hasRawHeader("Last-Event-ID"))
+        << "a cursor the server cannot resolve would be refused on every reconnect";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecStartsEachSessionWithAFreshListenStream)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    FakeHttpStream *listen = http.lastStream();
+    listen->sendHeaders(200, eventStreamHeaders());
+    listen->sendChunk(
+        "id: 7\nevent: message\ndata: "
+        + compact(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/message"}})
+        + "\n\n");
+    listen->sendFinished();
+    fireListenRetry(transport);
+    http.respondToLastStream(405, "Method Not Allowed", {{"Content-Type", "text/plain"}});
+    ASSERT_EQ(http.streamCount(), 3);
+
+    transport.stop();
+    transport.start();
+    transport.send(jsonRpcRequest(2, "initialize"));
+    http.respondToLastStream(200, compact(initializeReply(2)), sessionHeaders("sess-43"));
+    spin();
+
+    ASSERT_EQ(http.streamCount(), 5) << "a refusal belongs to the session that got it";
+    EXPECT_FALSE(http.streamRequest(4).request.hasRawHeader("Last-Event-ID"));
+
+    QSignalSpy closed(&transport, &Rpc::Transport::closed);
+    http.respondToLastStream(404, "Not Found", {{"Content-Type", "text/plain"}});
+    EXPECT_TRUE(closed.isEmpty()) << "the new session has not had a listen stream yet";
+}
+
 TEST_F(McpHttpServerTest, LatestSpecForgetsAPendingReconnectOnStop)
 {
     FakeHttpTransport http;

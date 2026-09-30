@@ -43,6 +43,12 @@ QJsonObject jsonRpcErrorIn(const QByteArray &body)
     return reply.value("error").isObject() ? reply : QJsonObject{};
 }
 
+bool isTransientRefusal(int statusCode)
+{
+    return statusCode == 408 || statusCode == 409 || statusCode == 425 || statusCode == 429
+           || (statusCode >= 500 && statusCode != 501);
+}
+
 } // namespace
 
 struct McpStreamableHttpTransport::Impl
@@ -69,6 +75,7 @@ struct McpStreamableHttpTransport::Impl
     QPointer<HttpStreamHandle> listenStream;
     SSEParser listenEvents;
     QByteArray lastEventId;
+    bool listenAccepted = false;
     bool listenRefused = false;
     int listenBackoffMs = kInitialListenBackoffMs;
     QTimer *listenRetryTimer = nullptr;
@@ -296,17 +303,39 @@ struct McpStreamableHttpTransport::Impl
         HttpResponse head;
         head.statusCode = listenStream->statusCode();
         head.rawHeaders = listenStream->rawHeaders();
-        if (isEventStream(head))
+        if (isEventStream(head)) {
+            listenAccepted = true;
             return;
+        }
 
-        if (head.statusCode != 405) {
+        abandonListenStream();
+        const int status = head.statusCode;
+        if (status == 404 && listenAccepted && !sessionId.isEmpty()) {
+            const QString reason
+                = QString("Server message stream: session not found (HTTP %1)").arg(status);
+            qCWarning(llmMcpLog).noquote() << reason;
+            emit q->errorOccurred(reason);
+            q->stop();
+            return;
+        }
+        if (status == 400 && !lastEventId.isEmpty()) {
+            lastEventId.clear();
+            scheduleListenRetry();
+            return;
+        }
+        if (isTransientRefusal(status)) {
+            qCDebug(llmMcpLog).noquote()
+                << QString("Server message stream refused for now (HTTP %1)").arg(status);
+            scheduleListenRetry();
+            return;
+        }
+        if (status != 405) {
             qCWarning(llmMcpLog).noquote()
                 << QString("Server message stream unavailable (HTTP %1, %2)")
-                       .arg(head.statusCode)
+                       .arg(status)
                        .arg(head.contentType());
         }
         listenRefused = true;
-        abandonListenStream();
     }
 
     void onListenChunk(const QByteArray &chunk)
@@ -329,6 +358,11 @@ struct McpStreamableHttpTransport::Impl
     void onListenEnded()
     {
         releaseListenStream();
+        scheduleListenRetry();
+    }
+
+    void scheduleListenRetry()
+    {
         if (!open || !http || listenRefused)
             return;
         listenRetryTimer->start(listenBackoffMs);
@@ -362,6 +396,7 @@ struct McpStreamableHttpTransport::Impl
         abandonListenStream();
         listenEvents.clear();
         lastEventId.clear();
+        listenAccepted = false;
         listenRefused = false;
         listenBackoffMs = kInitialListenBackoffMs;
     }
