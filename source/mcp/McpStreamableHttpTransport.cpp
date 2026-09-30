@@ -3,6 +3,7 @@
 
 #include <LLMQore/McpHttpTransport.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <utility>
 
@@ -12,6 +13,7 @@
 #include <QList>
 #include <QNetworkRequest>
 #include <QPointer>
+#include <QTimer>
 
 #include <LLMQore/HttpResponse.hpp>
 #include <LLMQore/HttpTransport.hpp>
@@ -24,6 +26,9 @@
 namespace LLMQore::Mcp {
 
 namespace {
+
+constexpr int kInitialListenBackoffMs = 1000;
+constexpr int kMaxListenBackoffMs = 30000;
 
 bool answers(const QJsonObject &reply, const QJsonObject &request)
 {
@@ -54,12 +59,19 @@ struct McpStreamableHttpTransport::Impl
 
     McpStreamableHttpTransport *q = nullptr;
     HttpTransportConfig config;
-    LLMQore::HttpTransport *http = nullptr;
+    QPointer<LLMQore::HttpTransport> http;
 
     bool open = false;
     QString sessionId;
     QString protocolVersion;
     QList<std::shared_ptr<Exchange>> exchanges;
+
+    QPointer<HttpStreamHandle> listenStream;
+    SSEParser listenEvents;
+    QByteArray lastEventId;
+    bool listenRefused = false;
+    int listenBackoffMs = kInitialListenBackoffMs;
+    QTimer *listenRetryTimer = nullptr;
 
     static bool isEventStream(const HttpResponse &response)
     {
@@ -69,6 +81,15 @@ struct McpStreamableHttpTransport::Impl
 
     void post(const QJsonObject &message)
     {
+        if (!http) {
+            const QString reason = QStringLiteral("HTTP transport destroyed");
+            qCWarning(llmMcpLog).noquote() << reason;
+            emit q->errorOccurred(reason);
+            if (isJsonRpcRequest(message))
+                emit q->sendFailed(message, reason);
+            return;
+        }
+
         QNetworkRequest req(config.endpoint);
         req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
         req.setRawHeader("Accept", "application/json, text/event-stream");
@@ -194,8 +215,10 @@ struct McpStreamableHttpTransport::Impl
             if (exchange.message.value("method").toString() == QLatin1String("initialize")) {
                 const QString version
                     = reply.value("result").toObject().value("protocolVersion").toString();
-                if (!version.isEmpty())
+                if (!version.isEmpty()) {
                     protocolVersion = version;
+                    openListenStream();
+                }
             }
         }
         emit q->messageReceived(reply);
@@ -231,6 +254,118 @@ struct McpStreamableHttpTransport::Impl
         }
     }
 
+    void openListenStream()
+    {
+        if (!open || !http || listenStream || listenRefused)
+            return;
+
+        QNetworkRequest req(config.endpoint);
+        req.setRawHeader("Accept", "text/event-stream");
+        req.setRawHeader("Cache-Control", "no-cache");
+        req.setTransferTimeout(config.sseIdleTimeoutMs);
+        if (!sessionId.isEmpty())
+            req.setRawHeader("Mcp-Session-Id", sessionId.toUtf8());
+        if (!protocolVersion.isEmpty())
+            req.setRawHeader("MCP-Protocol-Version", protocolVersion.toUtf8());
+        if (!lastEventId.isEmpty())
+            req.setRawHeader("Last-Event-ID", lastEventId);
+        applyCustomHeaders(req, config.headers);
+
+        listenEvents.clear();
+        listenStream = http->openStream(req, QByteArrayView("GET"));
+
+        HttpStreamHandle *stream = listenStream;
+        QObject::connect(
+            stream, &HttpStreamHandle::headersReceived, q, [this]() { onListenHeaders(); });
+        QObject::connect(
+            stream, &HttpStreamHandle::chunkReceived, q, [this](const QByteArray &chunk) {
+                onListenChunk(chunk);
+            });
+        QObject::connect(stream, &HttpStreamHandle::finished, q, [this]() { onListenEnded(); });
+        QObject::connect(
+            stream, &HttpStreamHandle::errorOccurred, q, [this](const HttpTransportError &e) {
+                qCDebug(llmMcpLog).noquote()
+                    << QString("Server message stream dropped: %1").arg(e.message());
+                onListenEnded();
+            });
+        QObject::connect(stream, &QObject::destroyed, q, [this]() { onListenEnded(); });
+    }
+
+    void onListenHeaders()
+    {
+        HttpResponse head;
+        head.statusCode = listenStream->statusCode();
+        head.rawHeaders = listenStream->rawHeaders();
+        if (isEventStream(head))
+            return;
+
+        if (head.statusCode != 405) {
+            qCWarning(llmMcpLog).noquote()
+                << QString("Server message stream unavailable (HTTP %1, %2)")
+                       .arg(head.statusCode)
+                       .arg(head.contentType());
+        }
+        listenRefused = true;
+        abandonListenStream();
+    }
+
+    void onListenChunk(const QByteArray &chunk)
+    {
+        for (const SSEEvent &event : listenEvents.append(chunk)) {
+            if (!listenStream)
+                return;
+            if (!event.id.isEmpty())
+                lastEventId = event.id;
+            if (event.type != QLatin1String("message"))
+                continue;
+            const QJsonObject message = jsonRpcMessageIn(event);
+            if (message.isEmpty())
+                continue;
+            listenBackoffMs = kInitialListenBackoffMs;
+            emit q->messageReceived(message);
+        }
+    }
+
+    void onListenEnded()
+    {
+        releaseListenStream();
+        if (!open || !http || listenRefused)
+            return;
+        listenRetryTimer->start(listenBackoffMs);
+        listenBackoffMs = (std::min)(listenBackoffMs * 2, kMaxListenBackoffMs);
+    }
+
+    void releaseListenStream()
+    {
+        HttpStreamHandle *stream = listenStream;
+        listenStream = nullptr;
+        if (!stream)
+            return;
+        stream->disconnect(q);
+        stream->deleteLater();
+    }
+
+    void abandonListenStream()
+    {
+        HttpStreamHandle *stream = listenStream;
+        listenStream = nullptr;
+        if (!stream)
+            return;
+        stream->disconnect(q);
+        stream->abort();
+        stream->deleteLater();
+    }
+
+    void stopListening()
+    {
+        listenRetryTimer->stop();
+        abandonListenStream();
+        listenEvents.clear();
+        lastEventId.clear();
+        listenRefused = false;
+        listenBackoffMs = kInitialListenBackoffMs;
+    }
+
     void abandonExchanges()
     {
         const QList<std::shared_ptr<Exchange>> pending = std::exchange(exchanges, {});
@@ -254,6 +389,15 @@ McpStreamableHttpTransport::McpStreamableHttpTransport(
     m_impl->config = std::move(config);
     m_impl->config.spec = McpHttpSpec::V2025_03_26;
     m_impl->http = resolveHttpTransport(transport, this, m_impl->config.requestTimeoutMs);
+    m_impl->listenRetryTimer = new QTimer(this);
+    m_impl->listenRetryTimer->setObjectName(QStringLiteral("listenRetryTimer"));
+    m_impl->listenRetryTimer->setSingleShot(true);
+    connect(m_impl->listenRetryTimer, &QTimer::timeout, this, [this]() {
+        m_impl->openListenStream();
+    });
+    connect(m_impl->http, &QObject::destroyed, this, [this]() {
+        m_impl->listenRetryTimer->stop();
+    });
 }
 
 McpStreamableHttpTransport::~McpStreamableHttpTransport()
@@ -281,6 +425,7 @@ void McpStreamableHttpTransport::stop()
     m_impl->sessionId.clear();
     m_impl->protocolVersion.clear();
     m_impl->abandonExchanges();
+    m_impl->stopListening();
     emit closed();
 }
 

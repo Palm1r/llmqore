@@ -15,6 +15,10 @@ The one exception is `BaseClient::cancelRequest()`. It marshals itself onto the 
 thread, so it is safe to call from anywhere — cancelling from a UI thread while the client
 runs on a worker is a supported pattern.
 
+The MCP HTTP transports follow the same rule together with the `HttpTransport` they send
+through: the two must share a thread. Build them there, or move both with `moveToThread()`
+before `start()`; moving them mid-session is not supported.
+
 ## Consuming from another thread
 
 Connect with `Qt::AutoConnection` (the default). Qt queues the delivery and copies the

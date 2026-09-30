@@ -106,11 +106,11 @@ classDiagram
 
 ## Two HTTP client transports, one choice point
 
-`McpStreamableHttpTransport` speaks `2025-03-26` (POST, `Mcp-Session-Id` echoed from the first response). `McpSseHttpTransport` speaks `2024-11-05` (a long-lived `GET` SSE stream that announces a POST endpoint, with sends queued until it arrives). They share the `Rpc::Transport` seam and nothing else -- the state each keeps is meaningless to the other, which is why holding both in one object meant a reader could not tell which half of the fields were live.
+`McpStreamableHttpTransport` speaks `2025-03-26` (POST, `Mcp-Session-Id` echoed from the first response, and once `initialize` returns a `GET` stream for the requests the server starts on its own). `McpSseHttpTransport` speaks `2024-11-05` (a long-lived `GET` SSE stream that announces a POST endpoint, with sends queued until it arrives). They share the `Rpc::Transport` seam and nothing else -- the state each keeps is meaningless to the other, which is why holding both in one object meant a reader could not tell which half of the fields were live.
 
 `Mcp::makeHttpTransport()` is the only place that reads `HttpTransportConfig::spec`; `Mcp::makeTransport()` builds that config from a `ServerEndpoint` and hands it over, and each transport's `config().spec` reports its own revision whatever it was given. Everything downstream -- `McpClient`, `McpToolBinder`, the bridge -- sees an `Rpc::Transport` and cannot tell the revisions apart. That is what lets a decorator be applied to one revision and not the other without a second switch appearing somewhere else.
 
-Timeouts travel on each request, not on the `HttpTransport`. POSTs carry `HttpTransportConfig::requestTimeoutMs`; the 2024-11-05 `GET` stream carries `sseIdleTimeoutMs` (five minutes by default), because the stream is quiet by design and the request timeout would cut an idle session every two minutes. A transport the caller injects keeps its own timeout -- only the private `HttpClient` a transport creates for itself is set to `requestTimeoutMs`.
+Timeouts travel on each request, not on the `HttpTransport`. POSTs carry `HttpTransportConfig::requestTimeoutMs`; both `GET` streams -- the 2024-11-05 session stream and the 2025-03-26 listen stream -- carry `sseIdleTimeoutMs` (five minutes by default), because they are quiet by design and the request timeout would cut them every two minutes. A transport the caller injects keeps its own timeout -- only the private `HttpClient` a transport creates for itself is set to `requestTimeoutMs`.
 
 ## What ships with each seam
 

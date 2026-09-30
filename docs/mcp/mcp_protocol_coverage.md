@@ -23,7 +23,7 @@ Accepted during negotiation: `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-
 | Base protocol & framing   | ✅ Full       |
 | Lifecycle & negotiation   | ✅ Full       |
 | Transport: stdio          | ✅ Full (client + server) |
-| Transport: Streamable HTTP (2025-03-26+) | 🟡 Client + server (no long-lived GET push) |
+| Transport: Streamable HTTP (2025-03-26+) | 🟡 Client + server (server: no long-lived GET push) |
 | Transport: HTTP+SSE (2024-11-05 legacy)  | 🟡 Client only |
 | Authorization             | ❌ Not implemented |
 | Server → Tools            | ✅ Full (incl. rich content blocks, title, icons, outputSchema, _meta) |
@@ -128,8 +128,8 @@ when it differs from the id; loading icon binaries into `IconInfo::src` (as a
 | `MCP-Protocol-Version` header (2025-06-18) | ✅ Sent on every request after `initialize` with the negotiated revision; forgotten on `stop()` | ❌ Not validated |
 | `Mcp-Session-Id` header tracking | ✅ | ✅ Generated as a UUIDv4 at `start()`, echoed on every response, rejects a mismatched id with HTTP 400 |
 | 202 Accepted with empty body | ✅ Treated as notification ack | ✅ Replied for inbound notifications when no queued server messages |
-| Long-lived `GET /mcp` server-to-client push | ❌ Explicitly out of scope for v1 (client). | ❌ Server replies HTTP 405 Method Not Allowed for non-POST. Spontaneous server→client traffic is instead **buffered and flushed on the next inbound POST's response** via SSE — workable for sampling round-trips, insufficient for purely spontaneous notifications while no client is polling. |
-| Polling SSE / resumption via GET / event-id encoding (2025-11-25) | ❌ Depends on the long-lived GET stream we skip. | ❌ Same. |
+| Long-lived `GET /mcp` server-to-client push | ✅ Opened as soon as `initialize` returns, carrying `Mcp-Session-Id` and `MCP-Protocol-Version`; requests and notifications on it reach the session like any other message. A dropped stream reconnects after 1 s, doubling to 30 s, and a received message restarts the backoff. Any answer other than a 2xx event stream ends listening until the next session: quietly for HTTP 405, which means the server offers no such stream, with a warning otherwise. Reconnects stop once the injected `HttpTransport` is deleted. | ❌ Server replies HTTP 405 Method Not Allowed for non-POST. Spontaneous server→client traffic is instead **buffered and flushed on the next inbound POST's response** via SSE — workable for sampling round-trips, insufficient for purely spontaneous notifications while no client is polling. |
+| Polling SSE / resumption via GET / event-id encoding (2025-11-25) | 🟡 A reconnecting `GET` sends `Last-Event-ID` from the last event that carried data; an id on an event without data (the 2025-11-25 priming event) is not recorded, the `retry` field is not read, and POST streams are not resumed. | ❌ No `GET` stream. |
 | HTTP 403 Forbidden for invalid Origin headers (2025-11-25 requirement) | n/a | ✅ Enforced when `HttpServerConfig::allowedOrigins` is non-empty. Empty list = accept any (local-dev default). |
 | Tests | — | ✅ `tst_McpHttpServer.HandshakeAndToolCallOverHttp` — full initialize + tools/list + tools/call round-trip via `McpStreamableHttpTransport` → `McpHttpServerTransport` over TCP loopback. |
 

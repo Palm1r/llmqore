@@ -129,6 +129,15 @@ public:
 
     SentRequest streamRequest(int index) const { return m_streamRequests.value(index); }
 
+    SentRequest lastStreamRequest(const QByteArray &verb) const
+    {
+        for (auto it = m_streamRequests.crbegin(); it != m_streamRequests.crend(); ++it) {
+            if (it->verb == verb)
+                return *it;
+        }
+        return {};
+    }
+
     void respondToStream(
         int index,
         int statusCode,
