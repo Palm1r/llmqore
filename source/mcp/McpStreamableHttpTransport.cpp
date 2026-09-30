@@ -8,6 +8,7 @@
 #include <utility>
 
 #include <QByteArray>
+#include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
@@ -78,6 +79,7 @@ struct McpStreamableHttpTransport::Impl
     bool listenAccepted = false;
     bool listenRefused = false;
     int listenBackoffMs = kInitialListenBackoffMs;
+    QElapsedTimer listenUptime;
     QTimer *listenRetryTimer = nullptr;
 
     static bool isEventStream(const HttpResponse &response)
@@ -305,6 +307,7 @@ struct McpStreamableHttpTransport::Impl
         head.rawHeaders = listenStream->rawHeaders();
         if (isEventStream(head)) {
             listenAccepted = true;
+            listenUptime.start();
             return;
         }
 
@@ -357,6 +360,9 @@ struct McpStreamableHttpTransport::Impl
 
     void onListenEnded()
     {
+        if (listenUptime.isValid() && listenUptime.elapsed() >= kInitialListenBackoffMs)
+            listenBackoffMs = kInitialListenBackoffMs;
+        listenUptime.invalidate();
         releaseListenStream();
         scheduleListenRetry();
     }
@@ -399,6 +405,7 @@ struct McpStreamableHttpTransport::Impl
         listenAccepted = false;
         listenRefused = false;
         listenBackoffMs = kInitialListenBackoffMs;
+        listenUptime.invalidate();
     }
 
     void abandonExchanges()

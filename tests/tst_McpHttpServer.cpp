@@ -1003,6 +1003,59 @@ TEST_F(McpHttpServerTest, LatestSpecReconnectsTheListenStreamFromTheLastEvent)
         << "the server can resume where the old stream stopped";
 }
 
+TEST_F(McpHttpServerTest, LatestSpecRestartsTheListenBackoffAfterASteadyStream)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    http.lastStream()->sendHeaders(200, eventStreamHeaders());
+    http.lastStream()->sendFinished();
+    QTimer *retry = listenRetryTimer(transport);
+    ASSERT_TRUE(retry);
+    EXPECT_EQ(retry->interval(), 1000);
+
+    fireListenRetry(transport);
+    http.failLastStream("Connection refused", QNetworkReply::ConnectionRefusedError);
+    EXPECT_EQ(retry->interval(), 2000) << "attempts that keep failing back off";
+
+    fireListenRetry(transport);
+    ASSERT_EQ(http.streamCount(), 4);
+    http.lastStream()->sendHeaders(200, eventStreamHeaders());
+    pumpEventLoop(std::chrono::milliseconds(1100));
+    http.lastStream()->sendFinished();
+
+    EXPECT_EQ(retry->interval(), 1000)
+        << "a quiet stream that stayed up is healthy, whatever cut it in the end";
+
+    fireListenRetry(transport);
+    http.failLastStream("Connection refused", QNetworkReply::ConnectionRefusedError);
+    EXPECT_EQ(retry->interval(), 2000) << "the failure after it counts as a failure again";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecBacksOffFromAServerThatClosesEveryListenStreamAtOnce)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    for (const int expected : {1000, 2000, 4000}) {
+        http.lastStream()->sendHeaders(200, eventStreamHeaders());
+        http.lastStream()->sendFinished();
+        ASSERT_TRUE(listenRetryTimer(transport));
+        ASSERT_TRUE(listenRetryTimer(transport)->isActive());
+        EXPECT_EQ(listenRetryTimer(transport)->interval(), expected)
+            << "accepting and closing at once is not a working stream";
+        fireListenRetry(transport);
+    }
+}
+
 TEST_F(McpHttpServerTest, LatestSpecClosesTheListenStreamOnStop)
 {
     FakeHttpTransport http;
