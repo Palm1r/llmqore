@@ -96,6 +96,7 @@ signals:
 
 private slots:
     void onMessageReceived(const QJsonObject &message);
+    void onSendFailed(const QJsonObject &message, const QString &reason);
     void onTransportClosed();
 
 private:

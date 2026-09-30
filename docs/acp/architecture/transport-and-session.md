@@ -15,7 +15,11 @@ and an ACP agent simply never triggers.
 
 [`Rpc::Transport`](../../../include/LLMQore/RpcTransport.hpp) is fully
 protocol-agnostic: `start/stop/isOpen/send(QJsonObject)` plus `messageReceived`,
-`errorOccurred`, `closed`. [`Rpc::StdioClientTransport`](../../../source/rpc/RpcStdioClientTransport.cpp)
+`errorOccurred`, `sendFailed`, `closed`. `sendFailed(message, reason)` is for a transport
+that learns a request it sent will never be answered -- an HTTP POST that failed or came
+back without the response; `JsonRpcSession` fails that request at once with a
+`TransportError` instead of leaving it to its timer.
+[`Rpc::StdioClientTransport`](../../../source/rpc/RpcStdioClientTransport.cpp)
 launches a child process, frames stdout with
 [`Rpc::LineFramer`](../../../include/LLMQore/RpcLineFramer.hpp), writes
 `QJsonDocument(...).toJson(Compact) + "\n"`, and surfaces child stderr via its own

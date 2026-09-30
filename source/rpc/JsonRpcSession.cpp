@@ -100,6 +100,7 @@ JsonRpcSession::JsonRpcSession(Transport *transport, QObject *parent)
             &Transport::messageReceived,
             this,
             &JsonRpcSession::onMessageReceived);
+        connect(m_transport, &Transport::sendFailed, this, &JsonRpcSession::onSendFailed);
         connect(m_transport, &Transport::closed, this, &JsonRpcSession::onTransportClosed);
     }
 
@@ -532,6 +533,28 @@ void JsonRpcSession::sendError(
     };
     logWire("-->", msg);
     m_transport->send(msg);
+}
+
+void JsonRpcSession::onSendFailed(const QJsonObject &message, const QString &reason)
+{
+    if (!message.contains("method"))
+        return;
+
+    auto it = m_pending.find(idToString(message.value("id")));
+    if (it == m_pending.end())
+        return;
+
+    auto promise = it->promise;
+    if (it->timer) {
+        it->timer->stop();
+        it->timer->deleteLater();
+    }
+    if (!it->progressToken.isEmpty())
+        clearProgressHandler(it->progressToken);
+    m_pending.erase(it);
+
+    promise->setException(std::make_exception_ptr(TransportError(reason)));
+    promise->finish();
 }
 
 void JsonRpcSession::onTransportClosed()

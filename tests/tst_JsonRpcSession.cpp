@@ -148,6 +148,37 @@ TEST_F(JsonRpcSessionTest, ClosingTheTransportFailsPendingRequests)
     held.releaseAll();
 }
 
+TEST_F(JsonRpcSessionTest, AFailedSendFailsItsRequestAtOnce)
+{
+    SessionPair pair;
+    HeldAnswer held;
+    pair.remote->setRequestHandler(QStringLiteral("slow"), held.handler());
+
+    const auto request = pair.local->sendCancellableRequest(
+        QStringLiteral("slow"), {}, std::chrono::seconds(30));
+    const QJsonObject sent{{"jsonrpc", "2.0"}, {"id", request.requestId}, {"method", "slow"}};
+
+    emit pair.localTransport->sendFailed(sent, QStringLiteral("HTTP 503: upstream down"));
+
+    const QString failure = failureOf(request.future, std::chrono::milliseconds(500));
+    EXPECT_EQ(failure, QStringLiteral("HTTP 503: upstream down"))
+        << "the request must fail with the transport's reason, not wait for its timer, got "
+        << qPrintable(failure);
+
+    bool isTransportError = false;
+    if (request.future.isFinished()) {
+        try {
+            request.future.result();
+        } catch (const Rpc::TransportError &) {
+            isTransportError = true;
+        } catch (...) {
+        }
+    }
+    EXPECT_TRUE(isTransportError) << "a failed send is the transport's failure, not the peer's";
+
+    held.releaseAll();
+}
+
 TEST_F(JsonRpcSessionTest, CancellingAnOutgoingRequestTellsThePeerAndDropsTheAnswer)
 {
     SessionPair pair;

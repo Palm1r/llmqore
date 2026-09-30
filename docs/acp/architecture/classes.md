@@ -6,7 +6,7 @@ classDiagram
         <<abstract>>
         // transport lifecycle + message I/O
         // start() stop() isOpen() send(QJsonObject)
-        // messageReceived() closed() errorOccurred()
+        // messageReceived() sendFailed() closed() errorOccurred()
     }
 
     class StdioClientTransport {

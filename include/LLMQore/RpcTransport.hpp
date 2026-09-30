@@ -26,6 +26,7 @@ public:
 signals:
     void messageReceived(const QJsonObject &message);
     void errorOccurred(const QString &reason);
+    void sendFailed(const QJsonObject &message, const QString &reason);
     void closed();
 };
 
