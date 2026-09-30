@@ -74,7 +74,7 @@ flowchart TD
    the MCP-specific helpers.
 
 MCP-specific transports — `McpStdioServerTransport` (server stdio) and the Streamable
-HTTP transports `McpHttpTransport` / `McpHttpServerTransport` — stay in `LLMQore::Mcp`
+HTTP transports `McpStreamableHttpTransport` / `McpSseHttpTransport` / `McpHttpServerTransport` — stay in `LLMQore::Mcp`
 and inherit `Rpc::Transport`.
 
 ## Stdio framing — reused verbatim

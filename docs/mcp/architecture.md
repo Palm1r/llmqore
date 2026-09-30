@@ -97,6 +97,7 @@ flowchart TD
     MT --> StdioC
     MT --> StdioS
     MT --> Http
+    MT --> HttpLegacy
     MT --> HttpS
 ```
 

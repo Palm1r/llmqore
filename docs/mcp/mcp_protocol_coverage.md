@@ -121,7 +121,7 @@ when it differs from the id; loading icon binaries into `IconInfo::src` (as a
 
 | Feature | Client | Server |
 |---|---|---|
-| POST JSON-RPC to single endpoint | ✅ `McpHttpTransport::postV2025` | ✅ `McpHttpServerTransport` (manual HTTP/1.1 over `QTcpServer`, no `Qt6::HttpServer` dep) |
+| POST JSON-RPC to single endpoint | ✅ `McpStreamableHttpTransport` | ✅ `McpHttpServerTransport` (manual HTTP/1.1 over `QTcpServer`, no `Qt6::HttpServer` dep) |
 | `Accept: application/json, text/event-stream` | ✅ | ✅ |
 | Parse JSON response | ✅ | ✅ `application/json` for single responses |
 | Parse SSE response (short-lived, per-POST) | ✅ Uses internal `SseEventParser` | ✅ Used when flushing queued server→client messages alongside the response |
@@ -130,7 +130,7 @@ when it differs from the id; loading icon binaries into `IconInfo::src` (as a
 | Long-lived `GET /mcp` server-to-client push | ❌ Explicitly out of scope for v1 (client). | ❌ Server replies HTTP 405 Method Not Allowed for non-POST. Spontaneous server→client traffic is instead **buffered and flushed on the next inbound POST's response** via SSE — workable for sampling round-trips, insufficient for purely spontaneous notifications while no client is polling. |
 | Polling SSE / resumption via GET / event-id encoding (2025-11-25) | ❌ Depends on the long-lived GET stream we skip. | ❌ Same. |
 | HTTP 403 Forbidden for invalid Origin headers (2025-11-25 requirement) | n/a | ✅ Enforced when `HttpServerConfig::allowedOrigins` is non-empty. Empty list = accept any (local-dev default). |
-| Tests | — | ✅ `tst_McpHttpServer.HandshakeAndToolCallOverHttp` — full initialize + tools/list + tools/call round-trip via `McpHttpTransport` → `McpHttpServerTransport` over TCP loopback. |
+| Tests | — | ✅ `tst_McpHttpServer.HandshakeAndToolCallOverHttp` — full initialize + tools/list + tools/call round-trip via `McpStreamableHttpTransport` → `McpHttpServerTransport` over TCP loopback. |
 
 ### Legacy HTTP+SSE (2024-11-05)
 
@@ -289,7 +289,7 @@ the host wants to expose to the connected client.
 | `McpTypes` JSON round-trips | `tests/tst_McpTypes.cpp` — `Implementation`, `ToolInfo` (incl. title/icons/_meta), `InitializeResult`, `ResourceContents` text + blob, `ResourceTemplate`, `Root`, `PromptInfo`, `PromptGetResult`, `ServerCapabilities` (prompts + logging + completions), `ClientCapabilities` (roots + sampling + elicitation), `CompletionReference`/`CompletionArgument`/`CompletionResult`, `SamplingMessage`/`ModelHint`/`ModelPreferences`/`CreateMessageParams`/`CreateMessageResult`, `ElicitRequestParams` (form + url mode) / `ElicitResult` (accept + decline) — **20 cases** |
 | `ToolResult` factories, `asText()` flattening, content block round-trips, full envelope round-trip with `structuredContent` and `isError` | `tests/tst_ToolResult.cpp` (18 cases) |
 | End-to-end loopback: handshake, tools/list + call, tools/list_changed, `McpToolBinder`, resources/list + read, resources/templates/list, prompts/list + get, roots/list (server→client), ping, logging/setLevel + notifications/message, progress, cancellation, completion/complete (prompt, resource template, default empty, capability advertisement), sampling/createMessage (happy path, MethodNotFound guard, provider refusal), elicitation/create (happy path, capability guard, provider refusal) | `tests/tst_McpLoopback.cpp` — **22 cases** via `Rpc::PipeTransport` |
-| Server-side HTTP hosting round-trip (handshake + tools/list + tools/call) | `tests/tst_McpHttpServer.cpp` — **1 case** pairing `McpHttpTransport` against `McpHttpServerTransport` over TCP loopback |
+| Server-side HTTP hosting round-trip (handshake + tools/list + tools/call) | `tests/tst_McpHttpServer.cpp` — **1 case** pairing `McpStreamableHttpTransport` against `McpHttpServerTransport` over TCP loopback |
 | Real stdio transport (Windows `QProcess` path) | Manual: `mcp_probe_*.jsonl` piped into `example-mcp-server.exe` |
 | Real HTTP+SSE transport (`2024-11-05`) | Manual: `example-mcp-http-probe --spec 2024-11-05 http://127.0.0.1:3001/sse` against Qt Creator 19.0.0 MCP server |
 | Chat example end-to-end (MCP tools appear alongside local tools in any provider's `ToolsManager`) | `example/example-chat.exe` + `example/mcp-servers.json` |

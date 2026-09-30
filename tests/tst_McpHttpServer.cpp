@@ -140,13 +140,6 @@ protected:
 
 } // namespace
 
-// End-to-end: spin up McpHttpServerTransport on a random port, point
-// McpHttpTransport (2025-03-26 spec) at it, run a real handshake + tool
-// call over the loop. Proves that the server transport correctly:
-//   - parses HTTP/1.1 POSTs with Content-Length
-//   - routes JSON-RPC requests into the session
-//   - matches outgoing responses to the socket that originated the request
-//   - sets Mcp-Session-Id on every response
 TEST_F(McpHttpServerTest, HandshakeAndToolCallOverHttp)
 {
     HttpServerConfig serverCfg;
