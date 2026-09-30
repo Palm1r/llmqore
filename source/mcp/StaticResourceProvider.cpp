@@ -26,8 +26,8 @@ void StaticResourceProvider::put(Entry entry)
         emit listChanged();
 }
 
-void StaticResourceProvider::addText(
-    const QString &uri, const QString &text, const QString &name, const QString &mimeType)
+StaticResourceProvider::Entry StaticResourceProvider::entryFor(
+    const QString &uri, const QString &name, const QString &mimeType)
 {
     Entry entry;
     entry.info.uri = uri;
@@ -35,22 +35,22 @@ void StaticResourceProvider::addText(
     entry.info.mimeType = mimeType;
     entry.contents.uri = uri;
     entry.contents.mimeType = mimeType;
-    entry.contents.text = text;
+    return entry;
+}
 
+void StaticResourceProvider::addText(
+    const QString &uri, const QString &text, const QString &name, const QString &mimeType)
+{
+    Entry entry = entryFor(uri, name, mimeType);
+    entry.contents.text = text;
     put(std::move(entry));
 }
 
 void StaticResourceProvider::addBlob(
     const QString &uri, const QByteArray &blob, const QString &name, const QString &mimeType)
 {
-    Entry entry;
-    entry.info.uri = uri;
-    entry.info.name = name.isEmpty() ? uri : name;
-    entry.info.mimeType = mimeType;
-    entry.contents.uri = uri;
-    entry.contents.mimeType = mimeType;
+    Entry entry = entryFor(uri, name, mimeType);
     entry.contents.blob = blob;
-
     put(std::move(entry));
 }
 
@@ -78,19 +78,27 @@ bool StaticResourceProvider::contains(const QString &uri) const
     return m_entries.contains(uri);
 }
 
-int StaticResourceProvider::count() const
+int StaticResourceProvider::size() const
 {
     return static_cast<int>(m_entries.size());
+}
+
+bool StaticResourceProvider::isEmpty() const
+{
+    return m_entries.isEmpty();
 }
 
 QFuture<QList<ResourceInfo>> StaticResourceProvider::listResources()
 {
     QList<ResourceInfo> resources;
     resources.reserve(m_order.size());
-    for (const QString &uri : m_order)
-        resources.append(m_entries.value(uri).info);
+    for (const QString &uri : m_order) {
+        const auto entry = m_entries.constFind(uri);
+        if (entry != m_entries.constEnd())
+            resources.append(entry->info);
+    }
 
-    return readyFuture(resources);
+    return readyFuture(std::move(resources));
 }
 
 QFuture<ResourceContents> StaticResourceProvider::readResource(const QString &uri)

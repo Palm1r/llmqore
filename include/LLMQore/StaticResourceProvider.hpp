@@ -6,6 +6,7 @@
 #include <QByteArray>
 #include <QHash>
 #include <QString>
+#include <QStringList>
 
 #include <LLMQore/BaseResourceProvider.hpp>
 #include <LLMQore/LLMQore_global.h>
@@ -34,7 +35,8 @@ public:
     void clear();
 
     [[nodiscard]] bool contains(const QString &uri) const;
-    [[nodiscard]] int count() const;
+    [[nodiscard]] int size() const;
+    [[nodiscard]] bool isEmpty() const;
 
     QFuture<QList<ResourceInfo>> listResources() override;
     QFuture<ResourceContents> readResource(const QString &uri) override;
@@ -46,9 +48,10 @@ private:
         ResourceContents contents;
     };
 
+    static Entry entryFor(const QString &uri, const QString &name, const QString &mimeType);
     void put(Entry entry);
 
-    QList<QString> m_order;
+    QStringList m_order;
     QHash<QString, Entry> m_entries;
 };
 
