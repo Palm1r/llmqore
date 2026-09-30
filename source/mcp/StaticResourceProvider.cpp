@@ -15,12 +15,15 @@ StaticResourceProvider::StaticResourceProvider(QObject *parent)
 void StaticResourceProvider::put(Entry entry)
 {
     const QString uri = entry.info.uri;
-    if (!m_entries.contains(uri))
+    const auto existing = m_entries.constFind(uri);
+    const bool isNew = existing == m_entries.constEnd();
+    const bool listed = isNew || existing->info.toJson() != entry.info.toJson();
+    if (isNew)
         m_order.append(uri);
 
     m_entries.insert(uri, std::move(entry));
-    emit listChanged();
-    emit resourceUpdated(uri);
+    if (listed)
+        emit listChanged();
 }
 
 void StaticResourceProvider::addText(

@@ -27,6 +27,7 @@
 #include <LLMQore/RpcPipeTransport.hpp>
 #include <LLMQore/McpServer.hpp>
 #include <LLMQore/JsonRpcSession.hpp>
+#include <LLMQore/StaticResourceProvider.hpp>
 #include "clients/claude/ClaudeMessage.hpp"
 #include "clients/openai/OpenAIMessage.hpp"
 #include "LoopbackHarness.hpp"
@@ -637,6 +638,34 @@ TEST_F(McpLoopbackTest, RegistryToolAdditionSendsListChangedNotification)
     const QList<ToolInfo> tools = waitForFuture(client.listTools());
     ASSERT_EQ(tools.size(), 1);
     EXPECT_EQ(tools.first().name, "echo");
+
+    delete serverTransport;
+    delete clientTransport;
+}
+
+TEST_F(McpLoopbackTest, ResourceListChangesInOneTurnReachTheClientOnce)
+{
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
+
+    McpServer server(serverTransport, McpServerConfig{});
+    StaticResourceProvider resources;
+    server.addResourceProvider(&resources);
+
+    McpClient client(clientTransport);
+    server.start();
+    waitForFuture(client.connectAndInitialize());
+
+    QSignalSpy changedSpy(&client, &McpClient::resourcesChanged);
+
+    resources.addText(QStringLiteral("mem://a"), QStringLiteral("1"));
+    resources.addText(QStringLiteral("mem://b"), QStringLiteral("2"));
+    resources.addText(QStringLiteral("mem://c"), QStringLiteral("3"));
+
+    QEventLoop loop;
+    QTimer::singleShot(300, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    EXPECT_EQ(changedSpy.size(), 1) << "three additions in one turn are one change on the wire";
 
     delete serverTransport;
     delete clientTransport;

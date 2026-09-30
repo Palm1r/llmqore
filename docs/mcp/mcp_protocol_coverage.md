@@ -194,7 +194,7 @@ type for the whole library.
 | `resources/templates/list` (URI-templated resources) | ✅ `McpClient::listResourceTemplates` | ✅ `BaseResourceProvider::listResourceTemplates` virtual (default: empty list). Aggregates across all providers. | `tst_McpLoopback.ResourceTemplatesListRoundTrips` |
 | `resources/subscribe` | ✅ `McpClient::subscribeResource` | ✅ Delegated to providers that declare `supportsSubscription()` | — |
 | `resources/unsubscribe` | ✅ `McpClient::unsubscribeResource` | ✅ | — |
-| `notifications/resources/list_changed` | ✅ Client emits `resourcesChanged` signal | ✅ Server forwards from provider's `listChanged` signal | — |
+| `notifications/resources/list_changed` | ✅ Client emits `resourcesChanged` signal | ✅ Server forwards from provider's `listChanged` signal, one notification per event-loop turn | `tst_McpLoopback.ResourceListChangesInOneTurnReachTheClientOnce` |
 | `notifications/resources/updated` | ✅ Client emits `resourceUpdated(uri)` signal | ✅ Server forwards from provider's `resourceUpdated` signal | — |
 | Server declares `resources.listChanged` / `resources.subscribe` capabilities | — | ✅ Conditional on provider presence + subscription support | — |
 | Resource `title` / `icons` / `_meta` (2025-11-25) | ✅ Round-tripped on `ResourceInfo` and `ResourceTemplate` | ✅ | `tst_McpTypes.ResourceTemplateAndRootRoundTrip` |

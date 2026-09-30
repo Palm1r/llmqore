@@ -151,23 +151,50 @@ TEST(StaticResourceProviderTest, AnUnknownUriFailsRatherThanReturningEmptyConten
     EXPECT_TRUE(threw) << "an empty ResourceContents would look like an empty file";
 }
 
-TEST(StaticResourceProviderTest, ReplacingAResourceAnnouncesAnUpdate)
+TEST(StaticResourceProviderTest, ReplacingAResourceKeepsOneEntryWithTheNewContents)
 {
     StaticResourceProvider provider;
-    QSignalSpy listChanged(&provider, &BaseResourceProvider::listChanged);
-    QSignalSpy updated(&provider, &BaseResourceProvider::resourceUpdated);
 
     provider.addText(QStringLiteral("mem://a"), QStringLiteral("one"));
     provider.addText(QStringLiteral("mem://a"), QStringLiteral("two"));
 
     EXPECT_EQ(provider.count(), 1);
-    EXPECT_EQ(updated.count(), 2);
-    EXPECT_EQ(updated.last().at(0).toString(), QStringLiteral("mem://a"));
     EXPECT_EQ(resultOf(provider.readResource(QStringLiteral("mem://a"))).text, QStringLiteral("two"));
 
     provider.remove(QStringLiteral("mem://a"));
     EXPECT_FALSE(provider.contains(QStringLiteral("mem://a")));
-    EXPECT_EQ(listChanged.count(), 3);
+}
+
+TEST(StaticResourceProviderTest, AnnouncesAListChangeOnlyWhenTheListChanges)
+{
+    StaticResourceProvider provider;
+    QSignalSpy listChanged(&provider, &BaseResourceProvider::listChanged);
+
+    provider.addText(QStringLiteral("mem://a"), QStringLiteral("one"));
+    EXPECT_EQ(listChanged.size(), 1) << "a new resource is a new entry in resources/list";
+
+    provider.addText(QStringLiteral("mem://a"), QStringLiteral("two"));
+    EXPECT_EQ(listChanged.size(), 1)
+        << "new contents under the same entry leave resources/list as it was";
+
+    provider.addText(QStringLiteral("mem://a"), QStringLiteral("three"), QStringLiteral("Renamed"));
+    EXPECT_EQ(listChanged.size(), 2) << "a new name is a change of the listed entry";
+
+    provider.remove(QStringLiteral("mem://a"));
+    EXPECT_EQ(listChanged.size(), 3);
+}
+
+TEST(StaticResourceProviderTest, NeverAnnouncesUpdatesNobodyCanSubscribeTo)
+{
+    StaticResourceProvider provider;
+    QSignalSpy updated(&provider, &BaseResourceProvider::resourceUpdated);
+
+    provider.addText(QStringLiteral("mem://a"), QStringLiteral("one"));
+    provider.addText(QStringLiteral("mem://a"), QStringLiteral("two"));
+    provider.remove(QStringLiteral("mem://a"));
+
+    EXPECT_TRUE(updated.isEmpty())
+        << "resources/updated goes to subscribers only, and this provider takes no subscriptions";
 }
 
 TEST(StaticResourceProviderTest, InheritsTheOptionalHalfOfTheSeam)

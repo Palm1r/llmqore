@@ -454,6 +454,18 @@ void McpServer::setToolRegistry(LLMQore::ToolRegistry *registry)
     }
 }
 
+void McpServer::notifyResourcesChanged()
+{
+    if (!m_initialized || m_resourcesNotifyPending)
+        return;
+    m_resourcesNotifyPending = true;
+    QTimer::singleShot(0, this, [this]() {
+        m_resourcesNotifyPending = false;
+        if (m_initialized)
+            m_peer->session()->sendNotification(QLatin1String(Method::ResourcesListChanged));
+    });
+}
+
 void McpServer::notifyToolsChanged()
 {
     if (!m_initialized || m_toolsNotifyPending)
@@ -488,10 +500,8 @@ void McpServer::addResourceProvider(BaseResourceProvider *provider)
     if (!provider)
         return;
     m_resourceProviders.append(provider);
-    connect(provider, &BaseResourceProvider::listChanged, this, [this]() {
-        if (m_initialized)
-            m_peer->session()->sendNotification(QLatin1String(Method::ResourcesListChanged));
-    });
+    connect(
+        provider, &BaseResourceProvider::listChanged, this, &McpServer::notifyResourcesChanged);
     connect(provider, &BaseResourceProvider::resourceUpdated, this, [this](const QString &uri) {
         if (m_initialized) {
             m_peer->session()->sendNotification(
