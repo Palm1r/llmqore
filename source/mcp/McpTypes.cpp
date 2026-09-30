@@ -190,11 +190,10 @@ QJsonObject ResourceContents::toJson() const
     obj.insert("uri", uri);
     if (!mimeType.isEmpty())
         obj.insert("mimeType", mimeType);
-    if (!text.isEmpty()) {
-        obj.insert("text", text);
-    } else if (!blob.isEmpty()) {
+    if (text.isEmpty() && !blob.isEmpty())
         obj.insert("blob", QString::fromUtf8(blob.toBase64()));
-    }
+    else
+        obj.insert("text", text);
     return obj;
 }
 

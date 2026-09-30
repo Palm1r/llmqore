@@ -272,6 +272,19 @@ TEST(McpTypesTest, ResourceContentsRoundTripBlob)
     EXPECT_EQ(back.blob, contents.blob);
 }
 
+TEST(McpTypesTest, EmptyResourceContentsStillCarryText)
+{
+    ResourceContents contents;
+    contents.uri = "mem://empty.log";
+    contents.mimeType = "text/plain";
+
+    const QJsonObject obj = contents.toJson();
+    ASSERT_TRUE(obj.value("text").isString())
+        << "the schema needs text or blob on every item, even an empty one";
+    EXPECT_TRUE(obj.value("text").toString().isEmpty());
+    EXPECT_FALSE(obj.contains("blob"));
+}
+
 TEST(McpTypesTest, SamplingMessageAndParamsRoundTrip)
 {
     SamplingMessage msg;
