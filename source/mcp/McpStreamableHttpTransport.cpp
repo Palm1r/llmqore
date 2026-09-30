@@ -58,6 +58,7 @@ struct McpStreamableHttpTransport::Impl
 
     bool open = false;
     QString sessionId;
+    QString protocolVersion;
     QList<std::shared_ptr<Exchange>> exchanges;
 
     static bool isEventStream(const HttpResponse &response)
@@ -74,6 +75,8 @@ struct McpStreamableHttpTransport::Impl
         req.setTransferTimeout(config.requestTimeoutMs);
         if (!sessionId.isEmpty())
             req.setRawHeader("Mcp-Session-Id", sessionId.toUtf8());
+        if (!protocolVersion.isEmpty())
+            req.setRawHeader("MCP-Protocol-Version", protocolVersion.toUtf8());
         applyCustomHeaders(req, config.headers);
 
         const QByteArray body = QJsonDocument(message).toJson(QJsonDocument::Compact);
@@ -186,7 +189,15 @@ struct McpStreamableHttpTransport::Impl
 
     void receive(Exchange &exchange, const QJsonObject &reply)
     {
-        exchange.answered = exchange.answered || answers(reply, exchange.message);
+        if (answers(reply, exchange.message)) {
+            exchange.answered = true;
+            if (exchange.message.value("method").toString() == QLatin1String("initialize")) {
+                const QString version
+                    = reply.value("result").toObject().value("protocolVersion").toString();
+                if (!version.isEmpty())
+                    protocolVersion = version;
+            }
+        }
         emit q->messageReceived(reply);
     }
 
@@ -268,6 +279,7 @@ void McpStreamableHttpTransport::stop()
 
     m_impl->open = false;
     m_impl->sessionId.clear();
+    m_impl->protocolVersion.clear();
     m_impl->abandonExchanges();
     emit closed();
 }

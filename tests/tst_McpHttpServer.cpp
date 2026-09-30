@@ -833,6 +833,38 @@ TEST_F(McpHttpServerTest, LatestSpecDeliversEventsBeforeTheResponseStreamEnds)
     EXPECT_EQ(messages.size(), 2);
 }
 
+TEST_F(McpHttpServerTest, LatestSpecSendsTheNegotiatedProtocolVersion)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "initialize"));
+    EXPECT_FALSE(http.streamRequest(0).request.hasRawHeader("MCP-Protocol-Version"))
+        << "nothing is negotiated before initialize returns";
+
+    const QJsonObject initialized{
+        {"jsonrpc", "2.0"},
+        {"id", 1},
+        {"result", QJsonObject{{"protocolVersion", "2025-06-18"}}},
+    };
+    http.respondToLastStream(200, compact(initialized));
+    spin();
+
+    transport.send(jsonRpcRequest(2, "tools/list"));
+    EXPECT_EQ(http.streamRequest(1).header("MCP-Protocol-Version"), QByteArray("2025-06-18"))
+        << "every request after initialize must name the negotiated revision";
+
+    transport.stop();
+    transport.start();
+    transport.send(jsonRpcRequest(3, "initialize"));
+    EXPECT_FALSE(http.streamRequest(2).request.hasRawHeader("MCP-Protocol-Version"))
+        << "a new session negotiates again";
+}
+
 TEST_F(McpHttpServerTest, LatestSpecFailsARequestWhoseStreamTheHttpTransportDeletes)
 {
     auto *http = new FakeHttpTransport;
