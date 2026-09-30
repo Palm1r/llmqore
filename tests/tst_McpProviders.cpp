@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include <QDir>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -116,6 +118,28 @@ TEST(DirectoryRootsProviderTest, IgnoresEmptyAndRelativePaths)
     provider.addPath(QStringLiteral("relative/dir"));
     EXPECT_TRUE(changed.isEmpty());
     EXPECT_EQ(waitForFuture(provider.listRoots()).size(), 1);
+}
+
+TEST(DirectoryRootsProviderTest, EncodesRootUrisAsPlainAsciiUris)
+{
+    QTemporaryDir sandbox;
+    ASSERT_TRUE(sandbox.isValid());
+    const QString directory
+        = QDir(sandbox.path()).absoluteFilePath(QString::fromUtf8("My Проект"));
+    ASSERT_TRUE(QDir().mkpath(directory));
+
+    DirectoryRootsProvider provider(QStringList{directory});
+
+    const QList<Root> roots = waitForFuture(provider.listRoots());
+    ASSERT_EQ(roots.size(), 1);
+    const QString uri = roots[0].uri;
+    EXPECT_TRUE(std::all_of(uri.cbegin(), uri.cend(), [](QChar c) {
+        return c.unicode() > 0x20 && c.unicode() < 0x7f;
+    })) << "Root.uri is a URI, so spaces and non-ASCII must be percent-encoded: "
+        << qPrintable(uri);
+    EXPECT_EQ(QUrl(uri).toLocalFile(), directory)
+        << "the encoded uri must still name the directory";
+    EXPECT_EQ(provider.paths(), QStringList{directory});
 }
 
 TEST(StaticResourceProviderTest, ListsInInsertionOrderAndReadsBack)

@@ -27,7 +27,7 @@ Root rootFor(const QString &path, const QString &name)
 {
     const QString absolute = QDir(path).absolutePath();
     return Root{
-        QUrl::fromLocalFile(absolute).toString(),
+        QUrl::fromLocalFile(absolute).toString(QUrl::FullyEncoded),
         name.isEmpty() ? QFileInfo(absolute).fileName() : name};
 }
 
