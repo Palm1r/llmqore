@@ -97,6 +97,18 @@ McpHttpSpec parseHttpSpec(const QString &spec)
     return McpHttpSpec::Latest;
 }
 
+Rpc::Transport *makeHttpTransport(
+    HttpTransportConfig config, LLMQore::HttpTransport *transport, QObject *parent)
+{
+    switch (config.spec) {
+    case McpHttpSpec::V2024_11_05:
+        return new McpSseHttpTransport(std::move(config), transport, parent);
+    case McpHttpSpec::V2025_03_26:
+        return new McpStreamableHttpTransport(std::move(config), transport, parent);
+    }
+    return nullptr;
+}
+
 Rpc::Transport *makeTransport(const ServerEndpoint &endpoint, QObject *parent)
 {
     if (endpoint.hasHttpEndpoint()) {
@@ -104,14 +116,7 @@ Rpc::Transport *makeTransport(const ServerEndpoint &endpoint, QObject *parent)
         cfg.endpoint = endpoint.url;
         cfg.headers = endpoint.headers;
         cfg.spec = parseHttpSpec(endpoint.httpSpec);
-
-        switch (cfg.spec) {
-        case McpHttpSpec::V2024_11_05:
-            return new McpSseHttpTransport(cfg, nullptr, parent);
-        case McpHttpSpec::V2025_03_26:
-            return new McpStreamableHttpTransport(cfg, nullptr, parent);
-        }
-        return nullptr;
+        return makeHttpTransport(std::move(cfg), nullptr, parent);
     }
 
     if (!endpoint.command.isEmpty()) {

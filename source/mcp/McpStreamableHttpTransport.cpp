@@ -165,6 +165,7 @@ McpStreamableHttpTransport::McpStreamableHttpTransport(
 {
     m_impl->q = this;
     m_impl->config = std::move(config);
+    m_impl->config.spec = McpHttpSpec::V2025_03_26;
     m_impl->http = resolveHttpTransport(transport, this, m_impl->config.requestTimeoutMs);
 }
 

@@ -200,6 +200,7 @@ McpSseHttpTransport::McpSseHttpTransport(
 {
     m_impl->q = this;
     m_impl->config = std::move(config);
+    m_impl->config.spec = McpHttpSpec::V2024_11_05;
     m_impl->http = resolveHttpTransport(transport, this, m_impl->config.requestTimeoutMs);
 }
 

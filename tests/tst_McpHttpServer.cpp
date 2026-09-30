@@ -799,6 +799,64 @@ TEST_F(McpHttpServerTest, LatestSpecPostsCarryTheRequestTimeout)
     EXPECT_EQ(http.bufferedRequest(0).request.transferTimeout(), 7000);
 }
 
+TEST_F(McpHttpServerTest, FactoryBuildsTheSseTransportForTheLegacySpec)
+{
+    FakeHttpTransport http;
+    QObject owner;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    cfg.spec = McpHttpSpec::V2024_11_05;
+    cfg.requestTimeoutMs = 7000;
+
+    Rpc::Transport *transport = makeHttpTransport(cfg, &http, &owner);
+
+    auto *sse = qobject_cast<McpSseHttpTransport *>(transport);
+    ASSERT_NE(sse, nullptr);
+    EXPECT_EQ(transport->parent(), &owner);
+    EXPECT_EQ(sse->config().requestTimeoutMs, 7000);
+
+    transport->start();
+    EXPECT_EQ(http.streamCount(), 1) << "the injected HttpTransport must carry the traffic";
+}
+
+TEST_F(McpHttpServerTest, FactoryBuildsTheStreamableTransportForTheCurrentSpec)
+{
+    FakeHttpTransport http;
+    QObject owner;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    cfg.spec = McpHttpSpec::V2025_03_26;
+
+    Rpc::Transport *transport = makeHttpTransport(cfg, &http, &owner);
+
+    ASSERT_NE(qobject_cast<McpStreamableHttpTransport *>(transport), nullptr);
+    EXPECT_EQ(transport->parent(), &owner);
+
+    transport->start();
+    transport->send(jsonRpcRequest(1, "initialize"));
+    EXPECT_EQ(http.bufferedCount() + http.streamCount(), 1)
+        << "the injected HttpTransport must carry the traffic";
+}
+
+TEST_F(McpHttpServerTest, EachHttpTransportReportsItsOwnWireRevision)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+
+    cfg.spec = McpHttpSpec::V2025_03_26;
+    McpSseHttpTransport sse(cfg, &http);
+    EXPECT_EQ(sse.config().spec, McpHttpSpec::V2024_11_05)
+        << "config() must describe the wire the object speaks";
+
+    cfg.spec = McpHttpSpec::V2024_11_05;
+    McpStreamableHttpTransport streamable(cfg, &http);
+    EXPECT_EQ(streamable.config().spec, McpHttpSpec::V2025_03_26);
+}
+
 TEST_F(McpHttpServerTest, InjectedHttpTransportKeepsItsOwnTimeout)
 {
     FakeHttpTransport http;

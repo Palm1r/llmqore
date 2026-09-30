@@ -78,4 +78,9 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
+[[nodiscard]] LLMQORE_EXPORT Rpc::Transport *makeHttpTransport(
+    HttpTransportConfig config,
+    LLMQore::HttpTransport *transport = nullptr,
+    QObject *parent = nullptr);
+
 } // namespace LLMQore::Mcp

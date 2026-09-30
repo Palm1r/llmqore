@@ -42,7 +42,7 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName("mcp-http-probe");
 
     QCommandLineParser parser;
-    parser.setApplicationDescription("Smoke-test LLMQore's McpHttpTransport.");
+    parser.setApplicationDescription("Smoke-test LLMQore's MCP HTTP client transports.");
     parser.addHelpOption();
     QCommandLineOption specOpt(
         "spec",
@@ -76,10 +76,7 @@ int main(int argc, char *argv[])
     qInfo().noquote() << "Endpoint:" << cfg.endpoint.toString();
     qInfo().noquote() << "Spec:   " << specStr;
 
-    Rpc::Transport *transport
-        = cfg.spec == McpHttpSpec::V2024_11_05
-              ? static_cast<Rpc::Transport *>(new McpSseHttpTransport(cfg, nullptr, &app))
-              : static_cast<Rpc::Transport *>(new McpStreamableHttpTransport(cfg, nullptr, &app));
+    Rpc::Transport *transport = makeHttpTransport(cfg, nullptr, &app);
     auto *client = new McpClient(transport, Implementation{"mcp-http-probe", "0.1.0"}, &app);
     g_client = client;
 
