@@ -108,7 +108,7 @@ target_sources(LLMQore PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpServer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpRemoteTool.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpStdioServerTransport.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpHttpOwnership.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpHttpCommon.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpSseHttpTransport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpStreamableHttpTransport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpProvisioning.cpp

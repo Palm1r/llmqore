@@ -17,7 +17,7 @@
 #include <LLMQore/Log.hpp>
 #include <LLMQore/SSEParser.hpp>
 
-#include "McpHttpOwnership.hpp"
+#include "McpHttpCommon.hpp"
 
 namespace LLMQore::Mcp {
 
@@ -121,15 +121,10 @@ struct McpSseHttpTransport::Impl
                 pendingSends.clear();
                 for (const QJsonObject &msg : queued)
                     post(msg);
-            } else if (ev.type == QLatin1String("message") || ev.type.isEmpty()) {
-                QJsonParseError perr{};
-                const QJsonDocument doc = QJsonDocument::fromJson(ev.data, &perr);
-                if (perr.error != QJsonParseError::NoError || !doc.isObject()) {
-                    qCWarning(llmMcpLog).noquote() << QString("SSE: cannot parse data as JSON: %1")
-                                                          .arg(QString::fromUtf8(ev.data));
-                    continue;
-                }
-                emit q->messageReceived(doc.object());
+            } else if (ev.type == QLatin1String("message")) {
+                const QJsonObject message = jsonRpcMessageIn(ev);
+                if (!message.isEmpty())
+                    emit q->messageReceived(message);
             }
         }
     }

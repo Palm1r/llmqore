@@ -19,7 +19,7 @@
 #include <LLMQore/Log.hpp>
 #include <LLMQore/SSEParser.hpp>
 
-#include "McpHttpOwnership.hpp"
+#include "McpHttpCommon.hpp"
 
 namespace LLMQore::Mcp {
 
@@ -128,10 +128,9 @@ struct McpStreamableHttpTransport::Impl
                 return;
             if (event.type != QLatin1String("message"))
                 continue;
-            QJsonParseError err{};
-            const QJsonDocument doc = QJsonDocument::fromJson(event.data, &err);
-            if (err.error == QJsonParseError::NoError && doc.isObject())
-                receive(exchange, doc.object());
+            const QJsonObject reply = jsonRpcMessageIn(event);
+            if (!reply.isEmpty())
+                receive(exchange, reply);
         }
     }
 

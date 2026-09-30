@@ -4,6 +4,7 @@
 #pragma once
 
 #include <QHash>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkRequest>
 #include <QObject>
@@ -11,6 +12,8 @@
 
 #include <LLMQore/HttpClient.hpp>
 #include <LLMQore/HttpTransport.hpp>
+#include <LLMQore/Log.hpp>
+#include <LLMQore/SSEEvent.hpp>
 
 namespace LLMQore::Mcp {
 
@@ -33,6 +36,17 @@ inline void applyCustomHeaders(QNetworkRequest &request, const QHash<QString, QS
 inline bool isJsonRpcRequest(const QJsonObject &message)
 {
     return message.contains("method") && message.contains("id");
+}
+
+inline QJsonObject jsonRpcMessageIn(const SSEEvent &event)
+{
+    QJsonParseError error{};
+    const QJsonDocument doc = QJsonDocument::fromJson(event.data, &error);
+    if (error.error == QJsonParseError::NoError && doc.isObject())
+        return doc.object();
+    qCWarning(llmMcpLog).noquote()
+        << QString("SSE: cannot parse data as JSON: %1").arg(QString::fromUtf8(event.data));
+    return {};
 }
 
 } // namespace LLMQore::Mcp
