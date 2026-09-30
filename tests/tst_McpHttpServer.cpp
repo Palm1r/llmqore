@@ -492,6 +492,70 @@ TEST_F(McpHttpServerTest, LegacySpecPostsCarryTheRequestTimeout)
     EXPECT_EQ(http.bufferedRequest(0).request.transferTimeout(), 7000);
 }
 
+TEST_F(McpHttpServerTest, LegacySpecFailsARequestWhosePostFails)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+
+    transport.start();
+    http.lastStream()->sendChunk("event: endpoint\ndata: /messages\n\n");
+    transport.send(jsonRpcRequest(1, "tools/call"));
+    http.failLast("connection reset");
+    spin();
+
+    ASSERT_EQ(failed.size(), 1) << "the answer will never come over the stream for this request";
+    EXPECT_EQ(failed.first().at(0).toJsonObject().value("id").toInt(), 1);
+    EXPECT_TRUE(failed.first().at(1).toString().contains("connection reset"))
+        << qPrintable(failed.first().at(1).toString());
+}
+
+TEST_F(McpHttpServerTest, LegacySpecFailsARequestWhosePostIsRejected)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+
+    transport.start();
+    http.lastStream()->sendChunk("event: endpoint\ndata: /messages\n\n");
+    transport.send(jsonRpcRequest(1, "tools/call"));
+    http.respondToLast(500, "session lost", {{"Content-Type", "text/plain"}});
+    spin();
+
+    ASSERT_EQ(failed.size(), 1);
+    EXPECT_EQ(failed.first().at(0).toJsonObject().value("id").toInt(), 1);
+    EXPECT_TRUE(failed.first().at(1).toString().contains("500"))
+        << qPrintable(failed.first().at(1).toString());
+}
+
+TEST_F(McpHttpServerTest, LegacySpecDoesNotFailAnAcceptedPost)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+
+    transport.start();
+    http.lastStream()->sendChunk("event: endpoint\ndata: /messages\n\n");
+    transport.send(jsonRpcRequest(1, "tools/call"));
+    http.respondToLast(202, {});
+    spin();
+
+    EXPECT_TRUE(failed.isEmpty())
+        << "on 2024-11-05 the answer arrives over the stream, not the POST";
+}
+
 TEST_F(McpHttpServerTest, LegacySpecReportsAnHttpErrorOnTheStream)
 {
     FakeHttpTransport http;
@@ -749,6 +813,131 @@ TEST_F(McpHttpServerTest, InjectedHttpTransportKeepsItsOwnTimeout)
 
     EXPECT_EQ(http.transferTimeoutMs(), 45000)
         << "an injected transport belongs to the caller, and so does its timeout";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecFailsARequestWhosePostFails)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "tools/call"));
+    http.failLast("connection reset");
+    spin();
+
+    ASSERT_EQ(failed.size(), 1) << "the pending request must learn its POST never got through";
+    EXPECT_EQ(failed.first().at(0).toJsonObject().value("id").toInt(), 1);
+    EXPECT_TRUE(failed.first().at(1).toString().contains("connection reset"))
+        << qPrintable(failed.first().at(1).toString());
+}
+
+TEST_F(McpHttpServerTest, LatestSpecFailsARequestThePostDidNotAnswer)
+{
+    struct Outcome
+    {
+        const char *name;
+        int status;
+        QByteArray contentType;
+        QByteArray body;
+        QString reasonPart;
+    };
+    const QByteArray progressEvent
+        = "event: message\ndata: "
+          + compact(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/progress"}})
+          + "\n\n";
+    const QList<Outcome> outcomes{
+        {"http error", 503, "text/plain", "upstream down", "503"},
+        {"accepted without a body", 202, "application/json", {}, {}},
+        {"broken json", 200, "application/json", "not json", {}},
+        {"unexpected content type", 200, "text/plain", "hello", {}},
+        {"event stream without the response", 200, "text/event-stream", progressEvent, {}},
+    };
+
+    for (const Outcome &outcome : outcomes) {
+        SCOPED_TRACE(outcome.name);
+
+        FakeHttpTransport http;
+
+        HttpTransportConfig cfg;
+        cfg.endpoint = QUrl("http://mcp.local/mcp");
+        McpStreamableHttpTransport transport(cfg, &http);
+
+        QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+
+        transport.start();
+        transport.send(jsonRpcRequest(1, "tools/call"));
+        http.respondToLast(outcome.status, outcome.body, {{"Content-Type", outcome.contentType}});
+        spin();
+
+        EXPECT_EQ(failed.size(), 1) << "an unanswered request would otherwise wait for its timer";
+        if (failed.size() != 1)
+            continue;
+        EXPECT_EQ(failed.first().at(0).toJsonObject().value("id").toInt(), 1);
+        EXPECT_TRUE(failed.first().at(1).toString().contains(outcome.reasonPart))
+            << qPrintable(failed.first().at(1).toString());
+    }
+}
+
+TEST_F(McpHttpServerTest, LatestSpecForwardsAJsonRpcErrorFromAnHttpErrorBody)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "tools/list"));
+    const QJsonObject serverError{
+        {"jsonrpc", "2.0"},
+        {"id", QJsonValue(QJsonValue::Null)},
+        {"error",
+         QJsonObject{{"code", -32000}, {"message", "Bad Request: No valid session ID provided"}}},
+    };
+    http.respondToLast(400, compact(serverError), {{"Content-Type", "application/json"}});
+    spin();
+
+    ASSERT_EQ(messages.size(), 1) << "the server's own error says more than its status";
+    const QJsonObject forwarded = messages.first().first().toJsonObject();
+    EXPECT_EQ(forwarded.value("id").toInt(), 1) << "the error must reach the request it answers";
+    EXPECT_EQ(forwarded.value("error").toObject().value("code").toInt(), -32000);
+    EXPECT_TRUE(failed.isEmpty());
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDoesNotFailNotificationsOrAnsweredRequests)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+
+    transport.start();
+    transport.send(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}});
+    http.respondToLast(202, {});
+
+    transport.send(jsonRpcRequest(2, "ping"));
+    http.respondToLast(200, compact(jsonRpcResult(2, "pong")));
+
+    transport.send(jsonRpcRequest(3, "tools/call"));
+    const QByteArray sseBody
+        = "event: message\ndata: "
+          + compact(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/progress"}})
+          + "\n\nevent: message\ndata: " + compact(jsonRpcResult(3, "done")) + "\n\n";
+    http.respondToLast(200, sseBody, {{"Content-Type", "text/event-stream"}});
+    spin();
+
+    EXPECT_TRUE(failed.isEmpty()) << qPrintable(failed.value(0).value(1).toString());
 }
 
 TEST_F(McpHttpServerTest, JsonResponseBodyBecomesOneReceivedMessage)

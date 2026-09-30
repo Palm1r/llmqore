@@ -173,18 +173,22 @@ struct McpSseHttpTransport::Impl
         (void) LLMQore::compat(http->send(req, QByteArrayView("POST"), body))
             .then(
                 q,
-                [this](const HttpResponse &response) {
+                [this, message](const HttpResponse &response) {
                     if (!response.isSuccess()) {
                         const QString reason
                             = QString("POST failed (HTTP %1)").arg(response.statusCode);
                         qCWarning(llmMcpLog).noquote() << reason;
                         emit q->errorOccurred(reason);
+                        if (isJsonRpcRequest(message))
+                            emit q->sendFailed(message, reason);
                     }
                 })
-            .onFailed(q, [this](const HttpTransportError &e) {
+            .onFailed(q, [this, message](const HttpTransportError &e) {
                 const QString reason = QString("POST failed: %1").arg(e.message());
                 qCWarning(llmMcpLog).noquote() << reason;
                 emit q->errorOccurred(reason);
+                if (isJsonRpcRequest(message))
+                    emit q->sendFailed(message, reason);
             });
     }
 };

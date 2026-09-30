@@ -21,6 +21,23 @@
 
 namespace LLMQore::Mcp {
 
+namespace {
+
+bool answers(const QJsonObject &reply, const QJsonObject &request)
+{
+    const QJsonValue id = reply.value("id");
+    return !reply.contains("method") && !id.isNull() && !id.isUndefined()
+           && id.toVariant().toString() == request.value("id").toVariant().toString();
+}
+
+QJsonObject jsonRpcErrorIn(const QByteArray &body)
+{
+    const QJsonObject reply = QJsonDocument::fromJson(body).object();
+    return reply.value("error").isObject() ? reply : QJsonObject{};
+}
+
+} // namespace
+
 struct McpStreamableHttpTransport::Impl
 {
     McpStreamableHttpTransport *q = nullptr;
@@ -47,20 +64,22 @@ struct McpStreamableHttpTransport::Impl
         (void) LLMQore::compat(http->send(req, QByteArrayView("POST"), body))
             .then(
                 q,
-                [this, postedIn](const HttpResponse &response) {
+                [this, postedIn, message](const HttpResponse &response) {
                     if (postedIn == generation)
-                        handleResponse(response);
+                        handleResponse(message, response);
                 })
-            .onFailed(q, [this, postedIn](const HttpTransportError &e) {
+            .onFailed(q, [this, postedIn, message](const HttpTransportError &e) {
                 if (postedIn != generation)
                     return;
                 const QString reason = QString("HTTP error: %1").arg(e.message());
                 qCWarning(llmMcpLog).noquote() << reason;
                 emit q->errorOccurred(reason);
+                if (isJsonRpcRequest(message))
+                    emit q->sendFailed(message, reason);
             });
     }
 
-    void handleResponse(const HttpResponse &response)
+    void handleResponse(const QJsonObject &message, const HttpResponse &response)
     {
         const QByteArray sessionHeader = response.rawHeader(QByteArrayView("Mcp-Session-Id"));
         if (!sessionHeader.isEmpty())
@@ -70,13 +89,43 @@ struct McpStreamableHttpTransport::Impl
             const QString reason = QString("HTTP error %1").arg(response.statusCode);
             qCWarning(llmMcpLog).noquote() << reason;
             emit q->errorOccurred(reason);
+            if (isJsonRpcRequest(message))
+                failRequest(message, reason, response.body);
             if (response.statusCode == 404 && !sessionId.isEmpty())
                 q->stop();
             return;
         }
 
-        if (response.statusCode == 202 || response.body.isEmpty())
+        if (!deliver(message, response) && isJsonRpcRequest(message)) {
+            emit q->sendFailed(
+                message,
+                QString("HTTP %1 reply carried no response to the request")
+                    .arg(response.statusCode));
+        }
+    }
+
+    void failRequest(const QJsonObject &message, const QString &reason, const QByteArray &body)
+    {
+        QJsonObject error = jsonRpcErrorIn(body);
+        if (error.isEmpty()) {
+            emit q->sendFailed(message, reason);
             return;
+        }
+        error.insert("jsonrpc", "2.0");
+        error.insert("id", message.value("id"));
+        emit q->messageReceived(error);
+    }
+
+    bool deliver(const QJsonObject &message, const HttpResponse &response)
+    {
+        if (response.statusCode == 202 || response.body.isEmpty())
+            return false;
+
+        bool answered = false;
+        const auto receive = [&](const QJsonObject &reply) {
+            answered = answered || answers(reply, message);
+            emit q->messageReceived(reply);
+        };
 
         const QString contentType = response.contentType();
 
@@ -84,7 +133,7 @@ struct McpStreamableHttpTransport::Impl
             QJsonParseError err{};
             const QJsonDocument doc = QJsonDocument::fromJson(response.body, &err);
             if (err.error == QJsonParseError::NoError && doc.isObject()) {
-                emit q->messageReceived(doc.object());
+                receive(doc.object());
             } else {
                 qCWarning(llmMcpLog).noquote()
                     << QString("Non-object JSON response: %1").arg(QString::fromUtf8(response.body));
@@ -99,12 +148,13 @@ struct McpStreamableHttpTransport::Impl
                 QJsonParseError err{};
                 const QJsonDocument doc = QJsonDocument::fromJson(ev.data, &err);
                 if (err.error == QJsonParseError::NoError && doc.isObject())
-                    emit q->messageReceived(doc.object());
+                    receive(doc.object());
             }
         } else {
             qCWarning(llmMcpLog).noquote()
                 << QString("Unexpected Content-Type: %1").arg(contentType);
         }
+        return answered;
     }
 };
 
