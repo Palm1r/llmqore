@@ -80,7 +80,8 @@ struct McpStreamableHttpTransport::Impl
     bool listenAccepted = false;
     bool listenRefused = false;
     bool listenResumed = false;
-    bool listenDelivered = false;
+    bool listenHeard = false;
+    QList<SSEEvent> listenBacklog;
     int listenBackoffMs = kInitialListenBackoffMs;
     std::optional<int> serverRetryMs;
     QElapsedTimer listenUptime;
@@ -287,7 +288,7 @@ struct McpStreamableHttpTransport::Impl
         listenEvents.clear();
         listenEvents.setLastEventId(lastEventId);
         listenResumed = !lastEventId.isEmpty();
-        listenDelivered = false;
+        listenHeard = false;
         listenStream = http->openStream(req, QByteArrayView("GET"));
 
         HttpStreamHandle *stream = listenStream;
@@ -351,11 +352,12 @@ struct McpStreamableHttpTransport::Impl
         const QList<SSEEvent> events = listenEvents.append(chunk);
         if (const std::optional<int> retry = listenEvents.retryMs())
             serverRetryMs = retry;
-        for (const SSEEvent &event : events) {
-            if (!listenStream)
-                return;
-            listenDelivered = true;
-            lastEventId = event.id;
+        if (!events.isEmpty() || listenEvents.lastEventId() != lastEventId)
+            listenHeard = true;
+        lastEventId = listenEvents.lastEventId();
+        listenBacklog += events;
+        while (!listenBacklog.isEmpty()) {
+            const SSEEvent event = listenBacklog.takeFirst();
             if (event.type != QLatin1String("message"))
                 continue;
             const QJsonObject message = jsonRpcMessageIn(event);
@@ -364,10 +366,6 @@ struct McpStreamableHttpTransport::Impl
             listenBackoffMs = kInitialListenBackoffMs;
             emit q->messageReceived(message);
         }
-        if (listenStream && listenEvents.lastEventId() != lastEventId) {
-            listenDelivered = true;
-            lastEventId = listenEvents.lastEventId();
-        }
     }
 
     void onListenEnded()
@@ -375,7 +373,7 @@ struct McpStreamableHttpTransport::Impl
         if (listenUptime.isValid()) {
             if (listenUptime.elapsed() >= kInitialListenBackoffMs)
                 listenBackoffMs = kInitialListenBackoffMs;
-            else if (listenResumed && !listenDelivered)
+            else if (listenResumed && !listenHeard)
                 lastEventId.clear();
         }
         listenUptime.invalidate();
@@ -421,7 +419,8 @@ struct McpStreamableHttpTransport::Impl
         listenAccepted = false;
         listenRefused = false;
         listenResumed = false;
-        listenDelivered = false;
+        listenHeard = false;
+        listenBacklog.clear();
         listenBackoffMs = kInitialListenBackoffMs;
         serverRetryMs.reset();
         listenUptime.invalidate();

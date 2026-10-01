@@ -79,6 +79,12 @@ QList<QPair<QByteArray, QByteArray>> eventStreamHeaders()
     return {{"Content-Type", "text/event-stream"}};
 }
 
+QByteArray listenEvent(const QString &method, const QByteArray &id = {})
+{
+    const QByteArray data = compact(QJsonObject{{"jsonrpc", "2.0"}, {"method", method}});
+    return (id.isEmpty() ? QByteArray() : "id: " + id + "\n") + "data: " + data + "\n\n";
+}
+
 bool openSession(McpStreamableHttpTransport &transport, FakeHttpTransport &http)
 {
     transport.start();
@@ -1168,6 +1174,83 @@ TEST_F(McpHttpServerTest, LatestSpecForgetsAnEventCursorTheServerDoesNotResume)
     ASSERT_EQ(http.streamCount(), 4);
     EXPECT_FALSE(http.streamRequest(3).request.hasRawHeader("Last-Event-ID"))
         << "a resumed stream that closes at once with nothing in it cannot resume that cursor";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecKeepsListenEventsInOrderWhenAHandlerReenters)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    FakeHttpStream *listen = http.lastStream();
+    listen->sendHeaders(200, eventStreamHeaders());
+
+    QStringList order;
+    QObject::connect(
+        &transport, &Rpc::Transport::messageReceived, &transport, [&](const QJsonObject &message) {
+            order.append(message.value("method").toString());
+            if (order.size() == 1)
+                listen->sendChunk(listenEvent("third"));
+        });
+    listen->sendChunk(listenEvent("first") + listenEvent("second"));
+
+    EXPECT_EQ(order.join(' ').toStdString(), "first second third")
+        << "a chunk that arrives while a handler runs, as in a modal dialog, must queue";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDeliversNoListenEventAfterStop)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    FakeHttpStream *listen = http.lastStream();
+    listen->sendHeaders(200, eventStreamHeaders());
+
+    QStringList order;
+    QObject::connect(
+        &transport, &Rpc::Transport::messageReceived, &transport, [&](const QJsonObject &message) {
+            order.append(message.value("method").toString());
+            transport.stop();
+        });
+    listen->sendChunk(listenEvent("first") + listenEvent("second"));
+
+    EXPECT_EQ(order.join(' ').toStdString(), "first") << "the session ended with the first";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecResumesAfterTheLastEventReceivedNotDelivered)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    FakeHttpStream *listen = http.lastStream();
+    listen->sendHeaders(200, eventStreamHeaders());
+
+    QStringList order;
+    QObject::connect(
+        &transport, &Rpc::Transport::messageReceived, &transport, [&](const QJsonObject &message) {
+            order.append(message.value("method").toString());
+            if (order.size() != 1)
+                return;
+            listen->sendFinished();
+            fireListenRetry(transport);
+        });
+    listen->sendChunk(listenEvent("first", "1") + listenEvent("second", "2"));
+
+    ASSERT_EQ(http.streamCount(), 3);
+    EXPECT_EQ(http.streamRequest(2).header("Last-Event-ID"), QByteArray("2"))
+        << "the server would otherwise replay an event that is already on its way";
+    EXPECT_EQ(order.join(' ').toStdString(), "first second");
 }
 
 TEST_F(McpHttpServerTest, LatestSpecClosesTheListenStreamOnStop)
