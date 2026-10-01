@@ -81,6 +81,7 @@ struct McpStreamableHttpTransport::Impl
     bool listenRefused = false;
     bool listenResumed = false;
     bool listenHeard = false;
+    bool listenOutageReported = false;
     QList<SSEEvent> listenBacklog;
     int listenBackoffMs = kInitialListenBackoffMs;
     std::optional<int> serverRetryMs;
@@ -378,7 +379,7 @@ struct McpStreamableHttpTransport::Impl
             const QJsonObject message = jsonRpcMessageIn(event);
             if (message.isEmpty())
                 continue;
-            listenBackoffMs = kInitialListenBackoffMs;
+            restartListenBackoff();
             emit q->messageReceived(message);
         }
     }
@@ -387,7 +388,7 @@ struct McpStreamableHttpTransport::Impl
     {
         if (listenUptime.isValid()) {
             if (listenUptime.elapsed() >= kInitialListenBackoffMs)
-                listenBackoffMs = kInitialListenBackoffMs;
+                restartListenBackoff();
             else if (listenResumed && !listenHeard)
                 lastEventId.clear();
         }
@@ -400,8 +401,24 @@ struct McpStreamableHttpTransport::Impl
     {
         if (!open || !http || listenRefused)
             return;
-        listenRetryTimer->start((std::max)(serverRetryMs.value_or(0), listenBackoffMs));
+        const int delayMs = (std::max)(serverRetryMs.value_or(0), listenBackoffMs);
+        if (listenBackoffMs >= kMaxListenBackoffMs && !listenOutageReported) {
+            listenOutageReported = true;
+            const QString reason
+                = QString("Server message stream keeps failing; retrying every %1 s")
+                      .arg(delayMs / 1000);
+            qCWarning(llmMcpLog).noquote() << reason;
+            emit q->errorOccurred(reason);
+        }
+        listenRetryTimer->start(delayMs);
         listenBackoffMs = (std::min)(listenBackoffMs * 2, kMaxListenBackoffMs);
+    }
+
+    void restartListenBackoff()
+    {
+        listenBackoffMs = kInitialListenBackoffMs;
+        if (std::exchange(listenOutageReported, false))
+            qCInfo(llmMcpLog).noquote() << QStringLiteral("Server message stream is back");
     }
 
     void releaseListenStream()
@@ -436,6 +453,7 @@ struct McpStreamableHttpTransport::Impl
         listenResumed = false;
         listenHeard = false;
         listenBacklog.clear();
+        listenOutageReported = false;
         listenBackoffMs = kInitialListenBackoffMs;
         serverRetryMs.reset();
         listenUptime.invalidate();

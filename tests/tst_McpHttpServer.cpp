@@ -1317,6 +1317,35 @@ TEST_F(McpHttpServerTest, LatestSpecResumesAfterTheLastEventReceivedNotDelivered
     EXPECT_EQ(order.join(' ').toStdString(), "first second");
 }
 
+TEST_F(McpHttpServerTest, LatestSpecReportsAListenOutageOnceUntilItRecovers)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+    QtWarningCapture capture;
+    for (int attempt = 0; attempt < 7; ++attempt) {
+        http.failLastStream("Connection refused", QNetworkReply::ConnectionRefusedError);
+        fireListenRetry(transport);
+    }
+    EXPECT_EQ(errors.size(), 1) << "otherwise a deaf session looks exactly like a quiet one";
+    EXPECT_EQ(capture.warnings().filter("Server message stream").size(), 1);
+
+    http.lastStream()->sendHeaders(200, eventStreamHeaders());
+    http.lastStream()->sendChunk(listenEvent("notifications/message"));
+    http.lastStream()->sendFinished();
+    fireListenRetry(transport);
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        http.failLastStream("Connection refused", QNetworkReply::ConnectionRefusedError);
+        fireListenRetry(transport);
+    }
+    EXPECT_EQ(errors.size(), 2) << "an outage after a recovery is a new one";
+}
+
 TEST_F(McpHttpServerTest, LatestSpecClosesTheListenStreamOnStop)
 {
     FakeHttpTransport http;
