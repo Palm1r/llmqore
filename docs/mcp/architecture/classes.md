@@ -112,6 +112,8 @@ classDiagram
 
 Timeouts travel on each request, not on the `HttpTransport`. POSTs carry `HttpTransportConfig::requestTimeoutMs`; both `GET` streams -- the 2024-11-05 session stream and the 2025-03-26 listen stream -- carry `sseIdleTimeoutMs` (five minutes by default), because they are quiet by design and the request timeout would cut them every two minutes. A transport the caller injects keeps its own timeout -- only the private `HttpClient` a transport creates for itself is set to `requestTimeoutMs`.
 
+The 2025-03-26 listen stream holds one HTTP connection for as long as the session lives. Qt runs at most six HTTP/1.1 requests in parallel per host and port, so over plain `http://` -- where Qt does not negotiate HTTP/2 -- and on Qt 5.15, where HTTP/2 is off by default, five are left for POSTs. A sixth concurrent POST waits until one of them finishes. That only bites when five calls each hold their stream open waiting on the client, for instance on elicitation answers. Over `https://` with Qt 6 and a server that speaks HTTP/2, all requests share one connection and the limit does not apply.
+
 ## What ships with each seam
 
 An abstract class with no implementation is a shape nobody has confirmed. Three of the four provider seams now ship one, so the seam is answered by code rather than by a promise:
