@@ -1221,6 +1221,45 @@ TEST_F(McpHttpServerTest, LatestSpecStartsEachSessionWithAFreshListenStream)
     EXPECT_TRUE(closed.isEmpty()) << "the new session has not had a listen stream yet";
 }
 
+TEST_F(McpHttpServerTest, LatestSpecStartsANewSessionWithEveryInitialize)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    const QPointer<FakeHttpStream> listen = http.lastStream();
+    listen->sendHeaders(200, eventStreamHeaders());
+    listen->sendChunk(
+        "id: 7\nevent: message\ndata: "
+        + compact(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/message"}})
+        + "\n\n");
+    transport.send(jsonRpcRequest(2, "tools/call"));
+
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+    transport.send(jsonRpcRequest(3, "initialize"));
+
+    const auto reinitialize = http.lastStreamRequest("POST");
+    EXPECT_FALSE(reinitialize.request.hasRawHeader("Mcp-Session-Id"))
+        << "a new InitializeRequest goes without a session ID, or the server refuses it";
+    EXPECT_FALSE(reinitialize.request.hasRawHeader("MCP-Protocol-Version"));
+    ASSERT_EQ(failed.size(), 1) << "a call from the old session cannot be answered any more";
+    EXPECT_EQ(failed.first().at(0).toJsonObject().value("id").toInt(), 2);
+    ASSERT_TRUE(listen);
+    EXPECT_TRUE(listen->isAborted());
+
+    http.respondToLastStream(200, compact(initializeReply(3)), sessionHeaders("sess-43"));
+    spin();
+
+    EXPECT_EQ(transport.sessionId(), QString("sess-43"));
+    const auto listenAgain = http.lastStreamRequest("GET");
+    EXPECT_EQ(listenAgain.header("Mcp-Session-Id"), QByteArray("sess-43"));
+    EXPECT_FALSE(listenAgain.request.hasRawHeader("Last-Event-ID"))
+        << "an event cursor belongs to the session that issued it";
+}
+
 TEST_F(McpHttpServerTest, LatestSpecForgetsAPendingReconnectOnStop)
 {
     FakeHttpTransport http;

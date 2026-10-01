@@ -85,6 +85,59 @@ struct Loopback
     void initialize() { waitForFuture(client->connectAndInitialize()); }
 };
 
+struct ToollessUpstream
+{
+    Rpc::PipeTransport *serverTransport = nullptr;
+    Rpc::PipeTransport *clientTransport = nullptr;
+    McpClient *client = nullptr;
+    int toolListings = 0;
+
+    ToollessUpstream()
+    {
+        auto [st, ct] = Rpc::PipeTransport::createPair();
+        serverTransport = st;
+        clientTransport = ct;
+        QObject::connect(
+            serverTransport,
+            &Rpc::Transport::messageReceived,
+            serverTransport,
+            [this](const QJsonObject &message) { answer(message); });
+        serverTransport->start();
+        client = new McpClient(clientTransport);
+    }
+    ~ToollessUpstream()
+    {
+        delete client;
+        delete serverTransport;
+        delete clientTransport;
+    }
+
+    void answer(const QJsonObject &message)
+    {
+        if (!message.contains("id"))
+            return;
+        const QString method = message.value("method").toString();
+        QJsonObject reply{{"jsonrpc", "2.0"}, {"id", message.value("id")}};
+        if (method == "initialize") {
+            reply.insert(
+                "result",
+                QJsonObject{
+                    {"protocolVersion", "2025-06-18"},
+                    {"capabilities", QJsonObject{}},
+                    {"serverInfo", QJsonObject{{"name", "quiet"}, {"version", "0.0.1"}}},
+                });
+        } else {
+            if (method == "tools/list")
+                ++toolListings;
+            reply.insert(
+                "error", QJsonObject{{"code", -32601}, {"message", "Method not found"}});
+        }
+        serverTransport->send(reply);
+    }
+
+    void initialize() { waitForFuture(client->connectAndInitialize()); }
+};
+
 class McpToolBinderTest : public ::testing::Test
 {
 protected:
@@ -242,6 +295,26 @@ TEST_F(McpToolBinderTest, ReconnectsAfterTransportLoss)
     ASSERT_TRUE(waitForSignal(synced, 2, std::chrono::seconds(10)));
     EXPECT_NE(registry.tool("srv_echo"), nullptr);
     EXPECT_EQ(waitForFuture(registry.tool("srv_echo")->executeAsync(QJsonObject{})).asText(), "hi");
+}
+
+TEST_F(McpToolBinderTest, BindsAServerWithoutToolsWithoutListingThem)
+{
+    ToollessUpstream upstream;
+    upstream.initialize();
+
+    ToolRegistry registry;
+    McpToolBinder binder(&registry);
+    QSignalSpy synced(&binder, &McpToolBinder::toolsSynced);
+
+    binder.addClient(upstream.client, "quiet", /*autoReconnect*/ true);
+    ASSERT_TRUE(waitForSignal(synced, 1));
+    EXPECT_EQ(synced.first().at(1).toInt(), 0);
+    EXPECT_EQ(upstream.toolListings, 0) << "a server that offers no tools has none to list";
+
+    upstream.clientTransport->stop();
+    ASSERT_TRUE(waitForSignal(synced, 2, std::chrono::seconds(10)));
+    EXPECT_EQ(upstream.toolListings, 0)
+        << "a failed listing would count as a failed initialize and be retried forever";
 }
 
 TEST_F(McpToolBinderTest, ToolsManagerRelaysToolsSyncedAndTheServerName)

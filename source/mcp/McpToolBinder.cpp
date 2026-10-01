@@ -23,6 +23,13 @@ constexpr int kInitialBackoffMs = 1000;
 constexpr int kMaxBackoffMs = 30000;
 constexpr auto kInitializeTimeout = std::chrono::seconds(30);
 
+QFuture<QList<ToolInfo>> listToolsOf(McpClient *client)
+{
+    if (client->isInitialized() && !client->serverInfo().capabilities.tools)
+        return readyFuture(QList<ToolInfo>{});
+    return client->listTools();
+}
+
 } // namespace
 
 McpToolBinder::McpToolBinder(LLMQore::ToolRegistry *registry, QObject *parent)
@@ -148,7 +155,7 @@ void McpToolBinder::initializeClient(McpClient *client)
         .then(this, [guard](const InitializeResult &) {
             if (!guard)
                 throw Rpc::TransportError(QStringLiteral("Client destroyed during initialize"));
-            return guard->listTools();
+            return listToolsOf(guard);
         })
         .unwrap()
         .then(this, [this, guard, name](const QList<ToolInfo> &tools) {
@@ -185,7 +192,7 @@ void McpToolBinder::resyncClient(McpClient *client)
     QPointer<McpClient> guard(client);
     const QString name = it->name;
 
-    (void)LLMQore::compat(client->listTools())
+    (void)LLMQore::compat(listToolsOf(client))
         .then(this, [this, guard, name](const QList<ToolInfo> &tools) {
             if (!guard || !m_bindings.contains(guard))
                 return;

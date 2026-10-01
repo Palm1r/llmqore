@@ -98,6 +98,8 @@ struct McpStreamableHttpTransport::Impl
                 emit q->sendFailed(message, reason);
             return;
         }
+        if (message.value("method").toString() == QLatin1String("initialize"))
+            startNewSession();
 
         QNetworkRequest req(config.endpoint);
         req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
@@ -404,7 +406,7 @@ struct McpStreamableHttpTransport::Impl
         listenUptime.invalidate();
     }
 
-    void abandonExchanges()
+    QList<std::shared_ptr<Exchange>> abandonExchanges()
     {
         const QList<std::shared_ptr<Exchange>> pending = std::exchange(exchanges, {});
         for (const std::shared_ptr<Exchange> &exchange : pending) {
@@ -415,6 +417,20 @@ struct McpStreamableHttpTransport::Impl
                 exchange->stream->deleteLater();
             }
         }
+        return pending;
+    }
+
+    void startNewSession()
+    {
+        for (const std::shared_ptr<Exchange> &exchange : abandonExchanges()) {
+            if (isJsonRpcRequest(exchange->message) && !exchange->answered) {
+                emit q->sendFailed(
+                    exchange->message, QStringLiteral("Superseded by a new session"));
+            }
+        }
+        sessionId.clear();
+        protocolVersion.clear();
+        stopListening();
     }
 };
 
