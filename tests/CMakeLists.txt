@@ -34,6 +34,7 @@ add_executable(LLMQoreUnitTests
     tst_RpcNdJsonCodec.cpp
     tst_McpTypes.cpp
     tst_McpLoopback.cpp
+    tst_McpProviders.cpp
     tst_McpToolBinder.cpp
     tst_McpStdioServerTransport.cpp
     tst_AcpTypes.cpp

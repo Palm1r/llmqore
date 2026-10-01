@@ -108,12 +108,19 @@ target_sources(LLMQore PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpServer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpRemoteTool.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpStdioServerTransport.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpHttpTransport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpHttpCommon.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpSseHttpTransport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpStreamableHttpTransport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpProvisioning.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpToolBinder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/McpHttpServerTransport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/BaseResourceProvider.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp/BasePromptProvider.cpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/CallbackElicitationProvider.hpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/DirectoryRootsProvider.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/DirectoryRootsProvider.cpp
+    ${PROJECT_SOURCE_DIR}/include/LLMQore/StaticResourceProvider.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mcp/StaticResourceProvider.cpp
 
     # --- ACP (Agent Client Protocol, host side) ---
     ${PROJECT_SOURCE_DIR}/include/LLMQore/Acp

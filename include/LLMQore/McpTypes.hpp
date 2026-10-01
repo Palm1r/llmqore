@@ -329,6 +329,12 @@ struct LLMQORE_EXPORT Root
 
     QJsonObject toJson() const;
     static Root fromJson(const QJsonObject &obj);
+
+    friend bool operator==(const Root &a, const Root &b) noexcept
+    {
+        return a.uri == b.uri && a.name == b.name;
+    }
+    friend bool operator!=(const Root &a, const Root &b) noexcept { return !(a == b); }
 };
 
 struct LLMQORE_EXPORT SamplingMessage

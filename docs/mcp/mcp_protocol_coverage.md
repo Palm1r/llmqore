@@ -23,7 +23,7 @@ Accepted during negotiation: `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-
 | Base protocol & framing   | ✅ Full       |
 | Lifecycle & negotiation   | ✅ Full       |
 | Transport: stdio          | ✅ Full (client + server) |
-| Transport: Streamable HTTP (2025-03-26+) | 🟡 Client + server (no long-lived GET push) |
+| Transport: Streamable HTTP (2025-03-26+) | 🟡 Client + server (server: no long-lived GET push) |
 | Transport: HTTP+SSE (2024-11-05 legacy)  | 🟡 Client only |
 | Authorization             | ❌ Not implemented |
 | Server → Tools            | ✅ Full (incl. rich content blocks, title, icons, outputSchema, _meta) |
@@ -121,22 +121,23 @@ when it differs from the id; loading icon binaries into `IconInfo::src` (as a
 
 | Feature | Client | Server |
 |---|---|---|
-| POST JSON-RPC to single endpoint | ✅ `McpHttpTransport::postV2025` | ✅ `McpHttpServerTransport` (manual HTTP/1.1 over `QTcpServer`, no `Qt6::HttpServer` dep) |
+| POST JSON-RPC to single endpoint | ✅ `McpStreamableHttpTransport` | ✅ `McpHttpServerTransport` (manual HTTP/1.1 over `QTcpServer`, no `Qt6::HttpServer` dep) |
 | `Accept: application/json, text/event-stream` | ✅ | ✅ |
 | Parse JSON response | ✅ | ✅ `application/json` for single responses |
-| Parse SSE response (short-lived, per-POST) | ✅ Uses internal `SseEventParser` | ✅ Used when flushing queued server→client messages alongside the response |
-| `Mcp-Session-Id` header tracking | ✅ | ✅ Generated as a UUIDv4 at `start()`, echoed on every response, rejects a mismatched id with HTTP 400 |
+| Parse SSE response (short-lived, per-POST) | ✅ Read as a stream: each event is dispatched as it arrives, so a server request sent before the response (e.g. `elicitation/create` during `tools/call`) is answered while the call is still open | ✅ Used when flushing queued server→client messages alongside the response |
+| `MCP-Protocol-Version` header (2025-06-18) | ✅ Sent on every request after `initialize` with the negotiated revision; forgotten on `stop()` | ❌ Not validated |
+| `Mcp-Session-Id` header tracking | ✅ Echoed on every request. A new `initialize` goes without it and starts a new session; calls still open in the old one fail | ✅ Generated as a UUIDv4 at `start()`, echoed on every response, rejects a mismatched id with HTTP 400 |
 | 202 Accepted with empty body | ✅ Treated as notification ack | ✅ Replied for inbound notifications when no queued server messages |
-| Long-lived `GET /mcp` server-to-client push | ❌ Explicitly out of scope for v1 (client). | ❌ Server replies HTTP 405 Method Not Allowed for non-POST. Spontaneous server→client traffic is instead **buffered and flushed on the next inbound POST's response** via SSE — workable for sampling round-trips, insufficient for purely spontaneous notifications while no client is polling. |
-| Polling SSE / resumption via GET / event-id encoding (2025-11-25) | ❌ Depends on the long-lived GET stream we skip. | ❌ Same. |
+| Long-lived `GET /mcp` server-to-client push | ✅ Opened as soon as `initialize` returns, carrying `Mcp-Session-Id` and `MCP-Protocol-Version`; requests and notifications on it reach the session like any other message, in the order they arrived, even when a handler spins a nested event loop. A dropped stream reconnects after 1 s, doubling to 30 s while attempts keep failing, and never sooner than the `retry` the server last sent; a stream that stayed up for a second or delivered a message restarts the backoff. Once the wait has grown to its maximum the transport says so once, as a warning and through `errorOccurred`, and logs when a stream works again. HTTP 408, 409, 425, 429 and 5xx other than 501 are retried the same way, and a 400 to a `GET` that carried `Last-Event-ID` is retried without it. A 404 once the stream has been accepted means the session is gone and ends it, as on POST. Any other answer that is not a 2xx event stream ends listening until the next session: quietly for HTTP 405, which means the server offers no such stream, with a warning otherwise. Reconnects stop once the injected `HttpTransport` is deleted. | ❌ Server replies HTTP 405 Method Not Allowed for non-POST. Spontaneous server→client traffic is instead **buffered and flushed on the next inbound POST's response** via SSE — workable for sampling round-trips, insufficient for purely spontaneous notifications while no client is polling. |
+| Polling SSE / resumption via GET / event-id encoding (2025-11-25) | 🟡 A reconnecting `GET` sends `Last-Event-ID`: the id in effect when the last event ended, including an id on an event without data (the 2025-11-25 priming event); an empty `id:` clears it. The cursor is dropped when the server answers 400, or when a resumed stream closes at once without sending anything. The `retry` field is honoured. POST streams are not resumed. | ❌ No `GET` stream. |
 | HTTP 403 Forbidden for invalid Origin headers (2025-11-25 requirement) | n/a | ✅ Enforced when `HttpServerConfig::allowedOrigins` is non-empty. Empty list = accept any (local-dev default). |
-| Tests | — | ✅ `tst_McpHttpServer.HandshakeAndToolCallOverHttp` — full initialize + tools/list + tools/call round-trip via `McpHttpTransport` → `McpHttpServerTransport` over TCP loopback. |
+| Tests | — | ✅ `tst_McpHttpServer.HandshakeAndToolCallOverHttp` — full initialize + tools/list + tools/call round-trip via `McpStreamableHttpTransport` → `McpHttpServerTransport` over TCP loopback. |
 
 ### Legacy HTTP+SSE (2024-11-05)
 
 | Feature | Client | Server |
 |---|---|---|
-| Long-lived `GET /sse` event stream | ✅ `McpHttpTransport::startV2024` | — |
+| Long-lived `GET /sse` event stream | ✅ `McpSseHttpTransport` | — |
 | Parse `event: endpoint` | ✅ | — |
 | Queue outbound messages until endpoint is resolved | ✅ | — |
 | POST to announced endpoint | ✅ | — |
@@ -193,7 +194,7 @@ type for the whole library.
 | `resources/templates/list` (URI-templated resources) | ✅ `McpClient::listResourceTemplates` | ✅ `BaseResourceProvider::listResourceTemplates` virtual (default: empty list). Aggregates across all providers. | `tst_McpLoopback.ResourceTemplatesListRoundTrips` |
 | `resources/subscribe` | ✅ `McpClient::subscribeResource` | ✅ Delegated to providers that declare `supportsSubscription()` | — |
 | `resources/unsubscribe` | ✅ `McpClient::unsubscribeResource` | ✅ | — |
-| `notifications/resources/list_changed` | ✅ Client emits `resourcesChanged` signal | ✅ Server forwards from provider's `listChanged` signal | — |
+| `notifications/resources/list_changed` | ✅ Client emits `resourcesChanged` signal | ✅ Server forwards from provider's `listChanged` signal, one notification per event-loop turn | `tst_McpLoopback.ResourceListChangesInOneTurnReachTheClientOnce` |
 | `notifications/resources/updated` | ✅ Client emits `resourceUpdated(uri)` signal | ✅ Server forwards from provider's `resourceUpdated` signal | — |
 | Server declares `resources.listChanged` / `resources.subscribe` capabilities | — | ✅ Conditional on provider presence + subscription support | — |
 | Resource `title` / `icons` / `_meta` (2025-11-25) | ✅ Round-tripped on `ResourceInfo` and `ResourceTemplate` | ✅ | `tst_McpTypes.ResourceTemplateAndRootRoundTrip` |
@@ -289,7 +290,7 @@ the host wants to expose to the connected client.
 | `McpTypes` JSON round-trips | `tests/tst_McpTypes.cpp` — `Implementation`, `ToolInfo` (incl. title/icons/_meta), `InitializeResult`, `ResourceContents` text + blob, `ResourceTemplate`, `Root`, `PromptInfo`, `PromptGetResult`, `ServerCapabilities` (prompts + logging + completions), `ClientCapabilities` (roots + sampling + elicitation), `CompletionReference`/`CompletionArgument`/`CompletionResult`, `SamplingMessage`/`ModelHint`/`ModelPreferences`/`CreateMessageParams`/`CreateMessageResult`, `ElicitRequestParams` (form + url mode) / `ElicitResult` (accept + decline) — **20 cases** |
 | `ToolResult` factories, `asText()` flattening, content block round-trips, full envelope round-trip with `structuredContent` and `isError` | `tests/tst_ToolResult.cpp` (18 cases) |
 | End-to-end loopback: handshake, tools/list + call, tools/list_changed, `McpToolBinder`, resources/list + read, resources/templates/list, prompts/list + get, roots/list (server→client), ping, logging/setLevel + notifications/message, progress, cancellation, completion/complete (prompt, resource template, default empty, capability advertisement), sampling/createMessage (happy path, MethodNotFound guard, provider refusal), elicitation/create (happy path, capability guard, provider refusal) | `tests/tst_McpLoopback.cpp` — **22 cases** via `Rpc::PipeTransport` |
-| Server-side HTTP hosting round-trip (handshake + tools/list + tools/call) | `tests/tst_McpHttpServer.cpp` — **1 case** pairing `McpHttpTransport` against `McpHttpServerTransport` over TCP loopback |
+| Server-side HTTP hosting round-trip (handshake + tools/list + tools/call) | `tests/tst_McpHttpServer.cpp` — **1 case** pairing `McpStreamableHttpTransport` against `McpHttpServerTransport` over TCP loopback |
 | Real stdio transport (Windows `QProcess` path) | Manual: `mcp_probe_*.jsonl` piped into `example-mcp-server.exe` |
 | Real HTTP+SSE transport (`2024-11-05`) | Manual: `example-mcp-http-probe --spec 2024-11-05 http://127.0.0.1:3001/sse` against Qt Creator 19.0.0 MCP server |
 | Chat example end-to-end (MCP tools appear alongside local tools in any provider's `ToolsManager`) | `example/example-chat.exe` + `example/mcp-servers.json` |

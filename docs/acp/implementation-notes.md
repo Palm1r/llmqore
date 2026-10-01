@@ -52,8 +52,18 @@ refactor with no compatibility aliases. The renames were:
 | `Mcp::McpRemoteError` / `McpException` / … | `Rpc::RemoteError` / `Rpc::JsonRpcException` / … |
 | `Mcp::ErrorCode` | `Rpc::ErrorCode` |
 
-MCP-specific transports (`McpStdioServerTransport`, `McpHttpTransport`,
-`McpHttpServerTransport`) stay in `Mcp` and inherit `Rpc::Transport`.
+MCP-specific transports (`McpStdioServerTransport`, `McpStreamableHttpTransport`,
+`McpSseHttpTransport`, `McpHttpServerTransport`) stay in `Mcp` and inherit `Rpc::Transport`.
+
+`Mcp::McpHttpTransport` was later split by wire revision, again without an alias, because
+one name cannot stand for two protocols:
+
+| Removed MCP name | replaced by |
+|---|---|
+| `Mcp::McpHttpTransport` | `Mcp::McpStreamableHttpTransport` (2025-03-26) / `Mcp::McpSseHttpTransport` (2024-11-05) |
+
+Code that picked the revision through `HttpTransportConfig::spec` keeps doing so:
+`new McpHttpTransport(cfg, http, parent)` becomes `makeHttpTransport(cfg, http, parent)`.
 
 Two design choices to note:
 

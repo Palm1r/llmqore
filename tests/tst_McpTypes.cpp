@@ -272,6 +272,19 @@ TEST(McpTypesTest, ResourceContentsRoundTripBlob)
     EXPECT_EQ(back.blob, contents.blob);
 }
 
+TEST(McpTypesTest, EmptyResourceContentsStillCarryText)
+{
+    ResourceContents contents;
+    contents.uri = "mem://empty.log";
+    contents.mimeType = "text/plain";
+
+    const QJsonObject obj = contents.toJson();
+    ASSERT_TRUE(obj.value("text").isString())
+        << "the schema needs text or blob on every item, even an empty one";
+    EXPECT_TRUE(obj.value("text").toString().isEmpty());
+    EXPECT_FALSE(obj.contains("blob"));
+}
+
 TEST(McpTypesTest, SamplingMessageAndParamsRoundTrip)
 {
     SamplingMessage msg;
@@ -455,7 +468,7 @@ TEST(McpProvisioning, HttpSpecStringsMapToTheRightWireSpec)
     EXPECT_EQ(LLMQore::Mcp::parseHttpSpec("nonsense"), LLMQore::Mcp::McpHttpSpec::Latest);
 }
 
-TEST(McpProvisioning, UrlEndpointBuildsAnHttpTransport)
+TEST(McpProvisioning, LegacySpecBuildsTheSseTransport)
 {
     QObject owner;
 
@@ -467,10 +480,27 @@ TEST(McpProvisioning, UrlEndpointBuildsAnHttpTransport)
     auto *transport = LLMQore::Mcp::makeTransport(endpoint, &owner);
     ASSERT_NE(transport, nullptr);
 
-    auto *http = qobject_cast<LLMQore::Mcp::McpHttpTransport *>(transport);
-    ASSERT_NE(http, nullptr);
+    auto *http = qobject_cast<LLMQore::Mcp::McpSseHttpTransport *>(transport);
+    ASSERT_NE(http, nullptr) << "the revision is chosen by makeTransport, once";
     EXPECT_EQ(http->config().endpoint, endpoint.url);
     EXPECT_EQ(http->config().spec, LLMQore::Mcp::McpHttpSpec::V2024_11_05);
+    EXPECT_EQ(transport->parent(), &owner);
+}
+
+TEST(McpProvisioning, CurrentSpecBuildsTheStreamableTransport)
+{
+    QObject owner;
+
+    LLMQore::Mcp::ServerEndpoint endpoint;
+    endpoint.name = "remote";
+    endpoint.url = QUrl("http://mcp.local/mcp");
+
+    auto *transport = LLMQore::Mcp::makeTransport(endpoint, &owner);
+    ASSERT_NE(transport, nullptr);
+
+    auto *http = qobject_cast<LLMQore::Mcp::McpStreamableHttpTransport *>(transport);
+    ASSERT_NE(http, nullptr) << "an endpoint without an explicit spec is 2025-03-26";
+    EXPECT_EQ(http->config().spec, LLMQore::Mcp::McpHttpSpec::V2025_03_26);
     EXPECT_EQ(transport->parent(), &owner);
 }
 

@@ -6,14 +6,14 @@ Sits between provider clients and `QNetworkAccessManager`. Three goals:
 2. Transport errors (`HttpTransportError`) vs HTTP status codes (`HttpResponse`) kept separate.
 3. The two shapes are an interface (`HttpTransport`), not a class, so anything above it can be driven without a socket.
 
-LLM-agnostic -- knows nothing about JSON, SSE events, MCP. Also backs `McpHttpTransport`.
+LLM-agnostic -- knows nothing about JSON, SSE events, MCP. Also backs the MCP HTTP client transports.
 
-Authentication and request headers are not part of this layer: a fully-formed `QNetworkRequest` arrives here. `BaseClient` builds it from its own `AuthScheme` and header map (see [BaseClient contract](clients/base-client.md)); `McpHttpTransport` carries its own header map. The transport just sends what it is handed.
+Authentication and request headers are not part of this layer: a fully-formed `QNetworkRequest` arrives here. `BaseClient` builds it from its own `AuthScheme` and header map (see [BaseClient contract](clients/base-client.md)); the MCP HTTP transports carry their own header map. The transport just sends what it is handed.
 
 ```mermaid
 flowchart TD
     subgraph User["Caller"]
-        C1["provider BaseClient subclass<br/>(or McpHttpTransport, ...)"]
+        C1["provider BaseClient subclass<br/>(or an MCP HTTP transport, ...)"]
     end
 
     subgraph Api["HttpTransport interface"]
@@ -60,7 +60,9 @@ flowchart TD
 
 The abstract seam every request passes through. It declares exactly what the layer above needs: a **buffered** send returning a future of `HttpResponse`, a **streaming** `openStream` returning an `HttpStreamHandle`, and the transfer timeout. Nothing else -- proxies, network managers, and reply objects belong to implementations.
 
-`BaseClient` takes an `HttpTransport *` as an optional constructor argument (every provider client forwards it), and `McpHttpTransport` takes one on the same terms. A null transport means "create a private `HttpClient`"; a supplied transport stays owned by the caller. That is the only injection point -- there is no setter, so the transport cannot change under an in-flight request.
+`BaseClient` takes an `HttpTransport *` as an optional constructor argument (every provider client forwards it), and `McpStreamableHttpTransport` / `McpSseHttpTransport` take one on the same terms. A null transport means "create a private `HttpClient`"; a supplied transport stays owned by the caller. That is the only injection point -- there is no setter, so the transport cannot change under an in-flight request. The MCP transports hold a supplied one through a `QPointer`: once the caller deletes it, sends fail and no stream is opened through it.
+
+`openStream()` may return null. `HttpClient` never does, but a custom transport can, and every caller treats it as a failure rather than a stream: `BaseClient` and the MCP POST fail the request at once, the 2025-03-26 listen stream is retried like a dropped one, and the 2024-11-05 transport reports an error and stays closed.
 
 Tests use it to drive provider clients and MCP-over-HTTP end to end without a socket: `tests/FakeHttpTransport.hpp` records the outgoing `QNetworkRequest` and body, and hands back a stream the test writes arbitrary bytes, statuses, and terminal events into.
 
@@ -72,7 +74,7 @@ The production `HttpTransport`. Wraps one `QNetworkAccessManager`. Must be used 
 
 The **buffered** mode returns a future that resolves to an `HttpResponse` containing the status code, headers, and body. Any HTTP status (including 4xx/5xx) produces a valid response; only transport-level failures (DNS, timeout, SSL, abort, connection refused) propagate as exceptions. This mode is used for model listing, MCP HTTP transports, and non-streamed endpoints. The **streaming** mode returns a live `HttpStream` (caller takes ownership) used for all streamed LLM requests and HTTP MCP client transport.
 
-Additional configuration includes proxy settings (forwarded to the underlying network manager) and a transfer timeout (default 120 seconds, can be disabled).
+Additional configuration includes proxy settings (forwarded to the underlying network manager) and a transfer timeout (default 120 seconds, can be disabled). The transport's timeout applies to requests that carry none of their own: a request with a non-zero `QNetworkRequest::transferTimeout()` keeps it, the same rule `QNetworkAccessManager` follows.
 
 ---
 
@@ -86,7 +88,7 @@ Additional configuration includes proxy settings (forwarded to the underlying ne
 
 ## SSEParser
 
-Incremental, spec-compliant (WHATWG HTML section 9.2) Server-Sent Events parser. Accepts byte chunks and returns completed events, each carrying a type (defaulting to "message"), data (multi-line joined), and an optional ID. Supports flushing at end-of-stream, clearing between independent streams, and formatting events for the inverse direction (used by `McpHttpServerTransport`). A configurable buffer size limit (default 16 MiB) protects against memory exhaustion.
+Incremental Server-Sent Events parser following WHATWG HTML section 9.2. Accepts byte chunks and returns completed events, each carrying a type (defaulting to "message"), data (multi-line joined) and the last event ID in effect when the event ended. Lines may end in CRLF, LF or CR, also when a CR and its LF arrive in separate chunks, and each byte is scanned once. An `id` field sets the last event ID for that event and the ones after it; an empty one clears it, and one containing NUL is ignored. `lastEventId()` moves at the end of every event, including one with an id and no data -- the priming event MCP 2025-11-25 servers send -- and `setLastEventId()` seeds it when a stream is resumed, so blank lines and events without an id keep it. `retryMs()` reports the latest `retry` field made of digits only. Supports flushing at end-of-stream, clearing between independent streams, and formatting events for the inverse direction (used by `McpHttpServerTransport`). A configurable limit (default 16 MiB) applies both to a line that never ends and to the data of one event; either is dropped with a warning.
 
 Used by all providers except Ollama.
 

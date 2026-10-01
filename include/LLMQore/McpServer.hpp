@@ -88,6 +88,7 @@ signals:
 private:
     void installHandlers();
     void notifyToolsChanged();
+    void notifyResourcesChanged();
     QList<LLMQore::BaseTool *> collectTools() const;
     LLMQore::BaseTool *findTool(const QString &name) const;
 
@@ -102,6 +103,7 @@ private:
     QString m_logLevel = QStringLiteral("info");
     bool m_initialized = false;
     bool m_toolsNotifyPending = false;
+    bool m_resourcesNotifyPending = false;
     ClientCapabilities m_clientCapabilities;
 };
 

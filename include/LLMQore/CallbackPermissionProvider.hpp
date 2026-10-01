@@ -6,9 +6,8 @@
 #include <functional>
 #include <utility>
 
-#include <QPromise>
-
 #include <LLMQore/AcpPermissionProvider.hpp>
+#include <LLMQore/FutureUtils.hpp>
 #include <LLMQore/LLMQore_global.h>
 
 namespace LLMQore::Acp {
@@ -32,14 +31,9 @@ public:
         const ToolCall &toolCall,
         const QList<PermissionOption> &options) override
     {
-        QPromise<RequestPermissionResult> promise;
-        promise.start();
-        if (m_callback)
-            promise.addResult(m_callback(sessionId, toolCall, options));
-        else
-            promise.addResult(RequestPermissionResult::cancelled());
-        promise.finish();
-        return promise.future();
+        if (!m_callback)
+            return readyFuture(RequestPermissionResult::cancelled());
+        return readyFuture(m_callback(sessionId, toolCall, options));
     }
 
 private:

@@ -30,28 +30,57 @@ struct LLMQORE_EXPORT HttpTransportConfig
     McpHttpSpec spec = McpHttpSpec::Latest;
     QHash<QString, QString> headers;
     int requestTimeoutMs = 120000;
+    int sseIdleTimeoutMs = 300000;
 };
 
-class LLMQORE_EXPORT McpHttpTransport : public Rpc::Transport
+class LLMQORE_EXPORT McpStreamableHttpTransport : public Rpc::Transport
 {
     Q_OBJECT
 public:
-    explicit McpHttpTransport(
+    explicit McpStreamableHttpTransport(
         HttpTransportConfig config,
         LLMQore::HttpTransport *transport = nullptr,
         QObject *parent = nullptr);
-    ~McpHttpTransport() override;
+    ~McpStreamableHttpTransport() override;
 
     void start() override;
     void stop() override;
     bool isOpen() const override;
     void send(const QJsonObject &message) override;
 
-    const HttpTransportConfig &config() const;
+    [[nodiscard]] const HttpTransportConfig &config() const;
+    [[nodiscard]] QString sessionId() const;
 
 private:
     struct Impl;
     std::unique_ptr<Impl> m_impl;
 };
+
+class LLMQORE_EXPORT McpSseHttpTransport : public Rpc::Transport
+{
+    Q_OBJECT
+public:
+    explicit McpSseHttpTransport(
+        HttpTransportConfig config,
+        LLMQore::HttpTransport *transport = nullptr,
+        QObject *parent = nullptr);
+    ~McpSseHttpTransport() override;
+
+    void start() override;
+    void stop() override;
+    bool isOpen() const override;
+    void send(const QJsonObject &message) override;
+
+    [[nodiscard]] const HttpTransportConfig &config() const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
+};
+
+[[nodiscard]] LLMQORE_EXPORT Rpc::Transport *makeHttpTransport(
+    HttpTransportConfig config,
+    LLMQore::HttpTransport *transport = nullptr,
+    QObject *parent = nullptr);
 
 } // namespace LLMQore::Mcp

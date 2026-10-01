@@ -12,4 +12,4 @@ Server-side HTTP transport. Speaks 2025-03-26 Streamable HTTP on a `QTcpServer`-
 
 ## Smoke test
 
-`tst_McpHttpServer.HandshakeAndToolCallOverHttp` — pairs `McpHttpTransport` (client) against `McpHttpServerTransport` (server) over TCP: handshake + `tools/list` + `tools/call` round-trip.
+`tst_McpHttpServer.HandshakeAndToolCallOverHttp` — pairs `McpStreamableHttpTransport` (client) against `McpHttpServerTransport` (server) over TCP: handshake + `tools/list` + `tools/call` round-trip.

@@ -363,6 +363,46 @@ TEST_F(HttpClientTest, TransportErrorOnTimeout)
     EXPECT_TRUE(caughtTransportError);
 }
 
+TEST_F(HttpClientTest, BufferedKeepsTheRequestTransferTimeout)
+{
+    m_server->setHandler([](const QByteArray &, QTcpSocket *) {});
+    m_client->setTransferTimeout(200);
+
+    QNetworkRequest req(m_server->url());
+    req.setTransferTimeout(5000);
+    auto future = m_client->send(req, QByteArrayView("POST"), "{}");
+
+    EXPECT_FALSE(waitFor([&]() { return future.isFinished(); }, 800))
+        << "a request with its own 5 s timeout must outlive the client's 200 ms default";
+}
+
+TEST_F(HttpClientTest, StreamingKeepsTheRequestTransferTimeout)
+{
+    m_server->setHandler([](const QByteArray &, QTcpSocket *socket) {
+        socket->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n");
+        socket->flush();
+    });
+    m_client->setTransferTimeout(200);
+
+    QNetworkRequest req(m_server->url());
+    req.setTransferTimeout(5000);
+    HttpStream *stream = m_client->openStream(req, QByteArrayView("GET"));
+    ASSERT_NE(stream, nullptr);
+
+    bool ended = false;
+    QObject::connect(stream, &HttpStream::finished, stream, [&]() { ended = true; });
+    QObject::connect(
+        stream, &HttpStream::errorOccurred, stream, [&](const HttpTransportError &) {
+            ended = true;
+        });
+
+    EXPECT_FALSE(waitFor([&]() { return ended; }, 800))
+        << "a stream with its own 5 s timeout must outlive the client's 200 ms default";
+
+    stream->abort();
+    stream->deleteLater();
+}
+
 TEST_F(HttpClientTest, StreamingDeliversChunks)
 {
     // Server responds with a small body split manually into two writes to
