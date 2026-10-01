@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include <QByteArray>
@@ -78,7 +79,10 @@ struct McpStreamableHttpTransport::Impl
     QByteArray lastEventId;
     bool listenAccepted = false;
     bool listenRefused = false;
+    bool listenResumed = false;
+    bool listenDelivered = false;
     int listenBackoffMs = kInitialListenBackoffMs;
+    std::optional<int> serverRetryMs;
     QElapsedTimer listenUptime;
     QTimer *listenRetryTimer = nullptr;
 
@@ -281,6 +285,9 @@ struct McpStreamableHttpTransport::Impl
         applyCustomHeaders(req, config.headers);
 
         listenEvents.clear();
+        listenEvents.setLastEventId(lastEventId);
+        listenResumed = !lastEventId.isEmpty();
+        listenDelivered = false;
         listenStream = http->openStream(req, QByteArrayView("GET"));
 
         HttpStreamHandle *stream = listenStream;
@@ -341,11 +348,14 @@ struct McpStreamableHttpTransport::Impl
 
     void onListenChunk(const QByteArray &chunk)
     {
-        for (const SSEEvent &event : listenEvents.append(chunk)) {
+        const QList<SSEEvent> events = listenEvents.append(chunk);
+        if (const std::optional<int> retry = listenEvents.retryMs())
+            serverRetryMs = retry;
+        for (const SSEEvent &event : events) {
             if (!listenStream)
                 return;
-            if (!event.id.isEmpty())
-                lastEventId = event.id;
+            listenDelivered = true;
+            lastEventId = event.id;
             if (event.type != QLatin1String("message"))
                 continue;
             const QJsonObject message = jsonRpcMessageIn(event);
@@ -354,12 +364,20 @@ struct McpStreamableHttpTransport::Impl
             listenBackoffMs = kInitialListenBackoffMs;
             emit q->messageReceived(message);
         }
+        if (listenStream && listenEvents.lastEventId() != lastEventId) {
+            listenDelivered = true;
+            lastEventId = listenEvents.lastEventId();
+        }
     }
 
     void onListenEnded()
     {
-        if (listenUptime.isValid() && listenUptime.elapsed() >= kInitialListenBackoffMs)
-            listenBackoffMs = kInitialListenBackoffMs;
+        if (listenUptime.isValid()) {
+            if (listenUptime.elapsed() >= kInitialListenBackoffMs)
+                listenBackoffMs = kInitialListenBackoffMs;
+            else if (listenResumed && !listenDelivered)
+                lastEventId.clear();
+        }
         listenUptime.invalidate();
         releaseListenStream();
         scheduleListenRetry();
@@ -369,7 +387,7 @@ struct McpStreamableHttpTransport::Impl
     {
         if (!open || !http || listenRefused)
             return;
-        listenRetryTimer->start(listenBackoffMs);
+        listenRetryTimer->start((std::max)(serverRetryMs.value_or(0), listenBackoffMs));
         listenBackoffMs = (std::min)(listenBackoffMs * 2, kMaxListenBackoffMs);
     }
 
@@ -402,7 +420,10 @@ struct McpStreamableHttpTransport::Impl
         lastEventId.clear();
         listenAccepted = false;
         listenRefused = false;
+        listenResumed = false;
+        listenDelivered = false;
         listenBackoffMs = kInitialListenBackoffMs;
+        serverRetryMs.reset();
         listenUptime.invalidate();
     }
 

@@ -89,12 +89,25 @@ TEST(SSEParser, EventOnlyBlockIsDiscarded)
     EXPECT_EQ(events.size(), 0);
 }
 
-TEST(SSEParser, RetryFieldIgnored)
+TEST(SSEParser, RetryFieldSetsTheReconnectionTime)
 {
     SSEParser p;
+    EXPECT_FALSE(p.retryMs().has_value());
     const auto events = p.append("retry: 5000\ndata: hi\n\n");
     ASSERT_EQ(events.size(), 1);
     EXPECT_EQ(events[0].data, "hi");
+    EXPECT_EQ(p.retryMs(), 5000);
+}
+
+TEST(SSEParser, RetryFieldThatIsNotDigitsIsIgnored)
+{
+    SSEParser p;
+    (void) p.append("retry: 3000\n");
+    for (const char *value : {"retry: 5s\n", "retry: -1\n", "retry:\n", "retry: 1 2\n"}) {
+        SCOPED_TRACE(value);
+        (void) p.append(value);
+        EXPECT_EQ(p.retryMs(), 3000);
+    }
 }
 
 TEST(SSEParser, IdFieldCaptured)
@@ -104,6 +117,66 @@ TEST(SSEParser, IdFieldCaptured)
     ASSERT_EQ(events.size(), 1);
     EXPECT_EQ(events[0].id, QByteArray("42"));
     EXPECT_EQ(events[0].data, "hello");
+}
+
+TEST(SSEParser, IdCarriesOverToLaterEvents)
+{
+    SSEParser p;
+    const auto events = p.append("id: 42\ndata: one\n\ndata: two\n\n");
+    ASSERT_EQ(events.size(), 2);
+    EXPECT_EQ(events[1].id, QByteArray("42"));
+    EXPECT_EQ(p.lastEventId(), QByteArray("42"));
+}
+
+TEST(SSEParser, IdOnAnEventWithoutDataStillMovesTheLastEventId)
+{
+    SSEParser p;
+    EXPECT_TRUE(p.append("id: 41\ndata:\n\n").isEmpty());
+    EXPECT_EQ(p.lastEventId(), QByteArray("41"));
+
+    const auto events = p.append("data: next\n\n");
+    ASSERT_EQ(events.size(), 1);
+    EXPECT_EQ(events[0].id, QByteArray("41"));
+}
+
+TEST(SSEParser, EmptyIdClearsTheLastEventId)
+{
+    SSEParser p;
+    (void) p.append("id: 7\ndata: a\n\n");
+    const auto events = p.append("id:\ndata: b\n\n");
+    ASSERT_EQ(events.size(), 1);
+    EXPECT_TRUE(events[0].id.isEmpty());
+    EXPECT_TRUE(p.lastEventId().isEmpty());
+}
+
+TEST(SSEParser, IdContainingNulIsIgnored)
+{
+    SSEParser p;
+    (void) p.append("id: 7\ndata: a\n\n");
+    const auto events = p.append(QByteArray("id: 8\0x\ndata: b\n\n", 18));
+    ASSERT_EQ(events.size(), 1);
+    EXPECT_EQ(events[0].id, QByteArray("7"));
+}
+
+TEST(SSEParser, LastEventIdMovesWhenTheEventEnds)
+{
+    SSEParser p;
+    (void) p.append("id: 9\ndata: a\n");
+    EXPECT_TRUE(p.lastEventId().isEmpty()) << "the event has not ended yet";
+    (void) p.append("\n");
+    EXPECT_EQ(p.lastEventId(), QByteArray("9"));
+}
+
+TEST(SSEParser, ResumesFromAGivenLastEventId)
+{
+    SSEParser p;
+    p.setLastEventId("7");
+    (void) p.append(": keep-alive\n\n");
+    EXPECT_EQ(p.lastEventId(), QByteArray("7")) << "a blank line alone does not lose the cursor";
+
+    const auto events = p.append("data: replayed\n\n");
+    ASSERT_EQ(events.size(), 1);
+    EXPECT_EQ(events[0].id, QByteArray("7"));
 }
 
 TEST(SSEParser, LeadingSpaceAfterColonStripped)
@@ -118,6 +191,38 @@ TEST(SSEParser, LeadingSpaceAfterColonStripped)
     events = p.append("data: foo\n\n");
     ASSERT_EQ(events.size(), 1);
     EXPECT_EQ(events[0].data, "foo");
+}
+
+TEST(SSEParser, CrLfSplitAcrossChunksEndsOneLine)
+{
+    SSEParser p;
+    EXPECT_TRUE(p.append("data: a\r").isEmpty());
+    const auto events = p.append("\ndata: b\r\n\r\n");
+    ASSERT_EQ(events.size(), 1);
+    EXPECT_EQ(events[0].data, QByteArray("a\nb"));
+}
+
+TEST(SSEParser, BareCrAtTheEndOfAChunkEndsTheLine)
+{
+    SSEParser p;
+    EXPECT_TRUE(p.append("data: a\r").isEmpty());
+    const auto events = p.append("\r");
+    ASSERT_EQ(events.size(), 1);
+    EXPECT_EQ(events[0].data, QByteArray("a"));
+}
+
+TEST(SSEParser, OneByteAtATimeParsesLikeOneChunk)
+{
+    const QByteArray wire = "event: x\r\ndata: a\r\ndata: b\r\nid: 5\r\n\r\ndata: c\r\r";
+    SSEParser p;
+    QList<SSEEvent> events;
+    for (const char byte : wire)
+        events += p.append(QByteArray(1, byte));
+    ASSERT_EQ(events.size(), 2);
+    EXPECT_EQ(events[0].type, QStringLiteral("x"));
+    EXPECT_EQ(events[0].data, QByteArray("a\nb"));
+    EXPECT_EQ(events[0].id, QByteArray("5"));
+    EXPECT_EQ(events[1].data, QByteArray("c"));
 }
 
 TEST(SSEParser, EventSplitAcrossChunks)
@@ -183,6 +288,28 @@ TEST(SSEParser, BufferCeilingDropsGarbage)
     events = p.append("data: ok\n\n");
     ASSERT_EQ(events.size(), 1);
     EXPECT_EQ(events[0].data, "ok");
+}
+
+TEST(SSEParser, EventCeilingDropsAnOversizedEvent)
+{
+    SSEParser p;
+    p.setMaxBufferBytes(64);
+    const QByteArray line = "data: " + QByteArray(40, 'x') + "\n";
+    EXPECT_TRUE(p.append(line + line + line).isEmpty());
+    EXPECT_TRUE(p.append("\n").isEmpty()) << "the oversized event is dropped, not dispatched";
+
+    const auto events = p.append("data: ok\n\n");
+    ASSERT_EQ(events.size(), 1);
+    EXPECT_EQ(events[0].data, "ok");
+}
+
+TEST(SSEParser, ClearForgetsTheLastEventIdAndRetry)
+{
+    SSEParser p;
+    (void) p.append("id: 3\nretry: 100\ndata: a\n\n");
+    p.clear();
+    EXPECT_TRUE(p.lastEventId().isEmpty());
+    EXPECT_FALSE(p.retryMs().has_value());
 }
 
 // ---- format() ----

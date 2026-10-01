@@ -86,7 +86,7 @@ Additional configuration includes proxy settings (forwarded to the underlying ne
 
 ## SSEParser
 
-Incremental, spec-compliant (WHATWG HTML section 9.2) Server-Sent Events parser. Accepts byte chunks and returns completed events, each carrying a type (defaulting to "message"), data (multi-line joined), and an optional ID. Supports flushing at end-of-stream, clearing between independent streams, and formatting events for the inverse direction (used by `McpHttpServerTransport`). A configurable buffer size limit (default 16 MiB) protects against memory exhaustion.
+Incremental Server-Sent Events parser following WHATWG HTML section 9.2. Accepts byte chunks and returns completed events, each carrying a type (defaulting to "message"), data (multi-line joined) and the last event ID in effect when the event ended. Lines may end in CRLF, LF or CR, also when a CR and its LF arrive in separate chunks, and each byte is scanned once. An `id` field sets the last event ID for that event and the ones after it; an empty one clears it, and one containing NUL is ignored. `lastEventId()` moves at the end of every event, including one with an id and no data -- the priming event MCP 2025-11-25 servers send -- and `setLastEventId()` seeds it when a stream is resumed, so blank lines and events without an id keep it. `retryMs()` reports the latest `retry` field made of digits only. Supports flushing at end-of-stream, clearing between independent streams, and formatting events for the inverse direction (used by `McpHttpServerTransport`). A configurable limit (default 16 MiB) applies both to a line that never ends and to the data of one event; either is dropped with a warning.
 
 Used by all providers except Ollama.
 

@@ -1056,6 +1056,120 @@ TEST_F(McpHttpServerTest, LatestSpecBacksOffFromAServerThatClosesEveryListenStre
     }
 }
 
+TEST_F(McpHttpServerTest, LatestSpecResumesFromAPrimingEvent)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    FakeHttpStream *listen = http.lastStream();
+    listen->sendHeaders(200, eventStreamHeaders());
+    listen->sendChunk("id: 41\ndata:\n\n");
+    listen->sendFinished();
+    fireListenRetry(transport);
+
+    ASSERT_EQ(http.streamCount(), 3);
+    EXPECT_EQ(http.streamRequest(2).header("Last-Event-ID"), QByteArray("41"))
+        << "an event id with empty data is how a server primes the client to resume";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecWaitsAsLongAsTheServerAsksBeforeReconnecting)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    FakeHttpStream *listen = http.lastStream();
+    listen->sendHeaders(200, eventStreamHeaders());
+    listen->sendChunk("id: 1\nretry: 5000\ndata:\n\n");
+    listen->sendFinished();
+
+    QTimer *retry = listenRetryTimer(transport);
+    ASSERT_TRUE(retry);
+    ASSERT_TRUE(retry->isActive());
+    EXPECT_EQ(retry->interval(), 5000) << "the client MUST respect the retry field";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecClearsTheEventCursorOnAnEmptyId)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    const QByteArray notification
+        = compact(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/message"}});
+    FakeHttpStream *listen = http.lastStream();
+    listen->sendHeaders(200, eventStreamHeaders());
+    listen->sendChunk("id: 7\ndata: " + notification + "\n\nid:\ndata: " + notification + "\n\n");
+    listen->sendFinished();
+    fireListenRetry(transport);
+
+    ASSERT_EQ(http.streamCount(), 3);
+    EXPECT_FALSE(http.streamRequest(2).request.hasRawHeader("Last-Event-ID"));
+}
+
+TEST_F(McpHttpServerTest, LatestSpecKeepsTheEventCursorThroughEventsWithoutIds)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    const QByteArray notification
+        = compact(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/message"}});
+    http.lastStream()->sendHeaders(200, eventStreamHeaders());
+    http.lastStream()->sendChunk("id: 7\ndata: " + notification + "\n\n");
+    http.lastStream()->sendFinished();
+    fireListenRetry(transport);
+    ASSERT_EQ(http.streamCount(), 3);
+
+    http.lastStream()->sendHeaders(200, eventStreamHeaders());
+    http.lastStream()->sendChunk(": keep-alive\n\ndata: " + notification + "\n\n");
+    http.lastStream()->sendFinished();
+    fireListenRetry(transport);
+
+    ASSERT_EQ(http.streamCount(), 4);
+    EXPECT_EQ(http.streamRequest(3).header("Last-Event-ID"), QByteArray("7"));
+}
+
+TEST_F(McpHttpServerTest, LatestSpecForgetsAnEventCursorTheServerDoesNotResume)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    http.lastStream()->sendHeaders(200, eventStreamHeaders());
+    http.lastStream()->sendChunk(
+        "id: 7\nevent: message\ndata: "
+        + compact(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/message"}})
+        + "\n\n");
+    http.lastStream()->sendFinished();
+    fireListenRetry(transport);
+    ASSERT_EQ(http.streamRequest(2).header("Last-Event-ID"), QByteArray("7"));
+
+    http.lastStream()->sendHeaders(200, eventStreamHeaders());
+    http.lastStream()->sendFinished();
+    fireListenRetry(transport);
+
+    ASSERT_EQ(http.streamCount(), 4);
+    EXPECT_FALSE(http.streamRequest(3).request.hasRawHeader("Last-Event-ID"))
+        << "a resumed stream that closes at once with nothing in it cannot resume that cursor";
+}
+
 TEST_F(McpHttpServerTest, LatestSpecClosesTheListenStreamOnStop)
 {
     FakeHttpTransport http;
