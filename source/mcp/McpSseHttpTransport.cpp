@@ -40,7 +40,7 @@ struct McpSseHttpTransport::Impl
 {
     McpSseHttpTransport *q = nullptr;
     HttpTransportConfig config;
-    LLMQore::HttpTransport *http = nullptr;
+    QPointer<LLMQore::HttpTransport> http;
 
     bool open = false;
 
@@ -51,10 +51,23 @@ struct McpSseHttpTransport::Impl
 
     void openStream()
     {
+        if (!http) {
+            const QString reason = QStringLiteral("HTTP transport destroyed");
+            qCWarning(llmMcpLog).noquote() << reason;
+            emit q->errorOccurred(reason);
+            return;
+        }
+
         QNetworkRequest req = eventStreamRequest(config);
         applyCustomHeaders(req, config.headers);
 
         sseStream = http->openStream(req, QByteArrayView("GET"));
+        if (!sseStream) {
+            const QString reason = QStringLiteral("HTTP transport opened no SSE stream");
+            qCWarning(llmMcpLog).noquote() << reason;
+            emit q->errorOccurred(reason);
+            return;
+        }
 
         QObject::connect(
             sseStream, &HttpStreamHandle::headersReceived, q, [this]() { onHeaders(); });
@@ -149,6 +162,14 @@ struct McpSseHttpTransport::Impl
     {
         if (postEndpoint.isEmpty()) {
             pendingSends.append(message);
+            return;
+        }
+        if (!http) {
+            const QString reason = QStringLiteral("HTTP transport destroyed");
+            qCWarning(llmMcpLog).noquote() << reason;
+            emit q->errorOccurred(reason);
+            if (isJsonRpcRequest(message))
+                emit q->sendFailed(message, reason);
             return;
         }
 

@@ -60,7 +60,9 @@ flowchart TD
 
 The abstract seam every request passes through. It declares exactly what the layer above needs: a **buffered** send returning a future of `HttpResponse`, a **streaming** `openStream` returning an `HttpStreamHandle`, and the transfer timeout. Nothing else -- proxies, network managers, and reply objects belong to implementations.
 
-`BaseClient` takes an `HttpTransport *` as an optional constructor argument (every provider client forwards it), and `McpStreamableHttpTransport` / `McpSseHttpTransport` take one on the same terms. A null transport means "create a private `HttpClient`"; a supplied transport stays owned by the caller. That is the only injection point -- there is no setter, so the transport cannot change under an in-flight request.
+`BaseClient` takes an `HttpTransport *` as an optional constructor argument (every provider client forwards it), and `McpStreamableHttpTransport` / `McpSseHttpTransport` take one on the same terms. A null transport means "create a private `HttpClient`"; a supplied transport stays owned by the caller. That is the only injection point -- there is no setter, so the transport cannot change under an in-flight request. The MCP transports hold a supplied one through a `QPointer`: once the caller deletes it, sends fail and no stream is opened through it.
+
+`openStream()` may return null. `HttpClient` never does, but a custom transport can, and every caller treats it as a failure rather than a stream: `BaseClient` and the MCP POST fail the request at once, the 2025-03-26 listen stream is retried like a dropped one, and the 2024-11-05 transport reports an error and stays closed.
 
 Tests use it to drive provider clients and MCP-over-HTTP end to end without a socket: `tests/FakeHttpTransport.hpp` records the outgoing `QNetworkRequest` and body, and hands back a stream the test writes arbitrary bytes, statuses, and terminal events into.
 

@@ -3,6 +3,8 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QFutureWatcher>
@@ -283,6 +285,68 @@ TEST_F(McpHttpServerTest, LegacySpecOpensSseStreamAndWaitsForTheEndpointEvent)
     EXPECT_EQ(posted.verb, QByteArray("POST"));
     EXPECT_EQ(posted.url(), QUrl("http://mcp.local/messages?sessionId=abc"));
     EXPECT_EQ(posted.header("X-Tenant"), QByteArray("acme"));
+}
+
+TEST_F(McpHttpServerTest, LegacySpecReportsAStreamTheHttpTransportOpensNoStreamFor)
+{
+    FakeHttpTransport http;
+    http.refuseStreams("GET");
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    QtWarningCapture capture;
+    QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+    transport.start();
+
+    EXPECT_FALSE(transport.isOpen()) << "an open transport would queue sends forever";
+    EXPECT_EQ(errors.size(), 1);
+    EXPECT_TRUE(capture.warnings().filter("nullptr").isEmpty())
+        << capture.warnings().join('\n').toStdString();
+}
+
+TEST_F(McpHttpServerTest, LegacySpecStaysClosedOnceTheHttpTransportIsDeleted)
+{
+    auto *http = new FakeHttpTransport;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, http);
+    transport.start();
+    ASSERT_TRUE(transport.isOpen());
+
+    delete http;
+    ASSERT_FALSE(transport.isOpen());
+
+    QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+    transport.start();
+
+    EXPECT_FALSE(transport.isOpen());
+    EXPECT_EQ(errors.size(), 1) << "starting again must not reach a deleted HttpTransport";
+}
+
+TEST_F(McpHttpServerTest, LegacySpecFailsASendOnceTheHttpTransportIsDeleted)
+{
+    auto *http = new FakeHttpTransport;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, http);
+    transport.start();
+    http->lastStream()->sendHeaders(200, {{"Content-Type", "text/event-stream"}});
+    http->lastStream()->sendChunk("event: endpoint\ndata: /messages\n\n");
+
+    const std::unique_ptr<FakeHttpStream> stream(http->lastStream());
+    stream->setParent(nullptr);
+    delete http;
+    ASSERT_TRUE(transport.isOpen()) << "a custom HttpTransport may not own its streams";
+
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+    transport.send(jsonRpcRequest(1, "tools/call"));
+
+    ASSERT_EQ(failed.size(), 1) << "the send must not reach the deleted HttpTransport";
+    EXPECT_EQ(failed.first().at(0).toJsonObject().value("id").toInt(), 1);
 }
 
 TEST_F(McpHttpServerTest, LegacySpecDeliversServerMessagesOverTheSseStream)
@@ -1535,6 +1599,48 @@ TEST_F(McpHttpServerTest, LatestSpecFailsASendOnceTheHttpTransportIsDeleted)
 
     ASSERT_EQ(failed.size(), 1) << "the request fails instead of reaching a deleted HttpTransport";
     EXPECT_EQ(failed.first().at(0).toJsonObject().value("id").toInt(), 1);
+}
+
+TEST_F(McpHttpServerTest, LatestSpecFailsARequestTheHttpTransportOpensNoStreamFor)
+{
+    FakeHttpTransport http;
+    http.refuseStreams("POST");
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    transport.start();
+
+    QtWarningCapture capture;
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+    transport.send(jsonRpcRequest(1, "tools/call"));
+
+    ASSERT_EQ(failed.size(), 1) << "no stream means no reply; waiting for one only times out";
+    EXPECT_EQ(failed.first().at(0).toJsonObject().value("id").toInt(), 1);
+    EXPECT_TRUE(capture.warnings().filter("nullptr").isEmpty())
+        << capture.warnings().join('\n').toStdString();
+}
+
+TEST_F(McpHttpServerTest, LatestSpecRetriesAListenStreamTheHttpTransportOpensNoStreamFor)
+{
+    FakeHttpTransport http;
+    http.refuseStreams("GET");
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    transport.start();
+    transport.send(jsonRpcRequest(1, "initialize"));
+
+    QtWarningCapture capture;
+    http.respondToLastStream(200, compact(initializeReply(1)), sessionHeaders("sess-42"));
+    spin();
+
+    EXPECT_EQ(http.refusedStreams(), 1);
+    ASSERT_TRUE(listenRetryTimer(transport));
+    EXPECT_TRUE(listenRetryTimer(transport)->isActive()) << "treated like a dropped stream";
+    EXPECT_TRUE(capture.warnings().filter("nullptr").isEmpty())
+        << capture.warnings().join('\n').toStdString();
 }
 
 TEST_F(McpHttpServerTest, LatestSpecKeepsItsListenRetryTimerOnItsOwnThread)

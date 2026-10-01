@@ -96,11 +96,7 @@ struct McpStreamableHttpTransport::Impl
     void post(const QJsonObject &message)
     {
         if (!http) {
-            const QString reason = QStringLiteral("HTTP transport destroyed");
-            qCWarning(llmMcpLog).noquote() << reason;
-            emit q->errorOccurred(reason);
-            if (isJsonRpcRequest(message))
-                emit q->sendFailed(message, reason);
+            failUnsent(message, QStringLiteral("HTTP transport destroyed"));
             return;
         }
         if (message.value("method").toString() == QLatin1String("initialize"))
@@ -115,12 +111,17 @@ struct McpStreamableHttpTransport::Impl
 
         const QByteArray body = QJsonDocument(message).toJson(QJsonDocument::Compact);
 
+        HttpStreamHandle *stream = http->openStream(req, QByteArrayView("POST"), body);
+        if (!stream) {
+            failUnsent(message, QStringLiteral("HTTP transport opened no stream"));
+            return;
+        }
+
         auto exchange = std::make_shared<Exchange>();
         exchange->message = message;
-        exchange->stream = http->openStream(req, QByteArrayView("POST"), body);
+        exchange->stream = stream;
         exchanges.append(exchange);
 
-        HttpStreamHandle *stream = exchange->stream;
         QObject::connect(
             stream, &HttpStreamHandle::headersReceived, q, [this, exchange]() {
                 onHeaders(*exchange);
@@ -256,6 +257,14 @@ struct McpStreamableHttpTransport::Impl
         emit q->messageReceived(error);
     }
 
+    void failUnsent(const QJsonObject &message, const QString &reason)
+    {
+        qCWarning(llmMcpLog).noquote() << reason;
+        emit q->errorOccurred(reason);
+        if (isJsonRpcRequest(message))
+            emit q->sendFailed(message, reason);
+    }
+
     void fail(const Exchange &exchange, const QString &reason)
     {
         qCWarning(llmMcpLog).noquote() << reason;
@@ -290,6 +299,12 @@ struct McpStreamableHttpTransport::Impl
         listenResumed = !lastEventId.isEmpty();
         listenHeard = false;
         listenStream = http->openStream(req, QByteArrayView("GET"));
+        if (!listenStream) {
+            qCDebug(llmMcpLog).noquote()
+                << QStringLiteral("Server message stream: the HTTP transport opened no stream");
+            scheduleListenRetry();
+            return;
+        }
 
         HttpStreamHandle *stream = listenStream;
         QObject::connect(

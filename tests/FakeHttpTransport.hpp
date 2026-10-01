@@ -111,6 +111,10 @@ public:
     LLMQore::HttpStreamHandle *openStream(
         const QNetworkRequest &request, QByteArrayView verb, const QByteArray &body = {}) override
     {
+        if (!m_refusedVerb.isEmpty() && verb.toByteArray() == m_refusedVerb) {
+            ++m_refusedStreams;
+            return nullptr;
+        }
         const SentRequest sent{request, verb.toByteArray(), body};
         auto *stream = new FakeHttpStream(sent, this);
         m_streams.append(stream);
@@ -119,6 +123,9 @@ public:
     }
 
     int streamCount() const { return m_streams.size(); }
+
+    void refuseStreams(const QByteArray &verb) { m_refusedVerb = verb; }
+    int refusedStreams() const { return m_refusedStreams; }
 
     FakeHttpStream *lastStream() const
     {
@@ -223,6 +230,8 @@ private:
     QList<QPointer<FakeHttpStream>> m_streams;
     QList<SentRequest> m_streamRequests;
     QList<BufferedCall> m_buffered;
+    QByteArray m_refusedVerb;
+    int m_refusedStreams = 0;
 };
 
 inline bool waitForStreams(const FakeHttpTransport &transport, int count, int timeoutMs = 3000)
