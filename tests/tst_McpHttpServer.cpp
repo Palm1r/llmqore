@@ -2696,7 +2696,8 @@ struct ServerUnderTest
         return QUrl(QString("http://127.0.0.1:%1/mcp").arg(transport.serverPort()));
     }
 
-    HttpResponse request(const QByteArray &verb, const QString &session, const QByteArray &body = {})
+    HttpResponse request(
+        const QByteArray &verb, const QString &session, const QByteArray &body = {})
     {
         QNetworkRequest req(endpoint());
         if (!session.isEmpty())
@@ -2777,6 +2778,117 @@ TEST_F(McpHttpServerTest, ClientStopEndsTheSessionOnAnLlmqoreServer)
     server.stop();
     delete clientTransport;
     delete serverTransport;
+}
+
+namespace {
+
+QByteArray legacyMessage(int id)
+{
+    return "event: message\ndata: " + compact(jsonRpcResult(id, "x")) + "\n\n";
+}
+
+} // namespace
+
+TEST_F(McpHttpServerTest, LegacySpecKeepsAStreamAHandlerRestartedAfterAnError)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    bool restarted = false;
+    QObject::connect(&transport, &Rpc::Transport::errorOccurred, &transport, [&]() {
+        if (std::exchange(restarted, true))
+            return;
+        transport.stop();
+        transport.start();
+    });
+    QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
+
+    transport.start();
+    http.lastStream()->sendError(QStringLiteral("connection reset"));
+    spin();
+
+    ASSERT_TRUE(restarted);
+    EXPECT_TRUE(transport.isOpen()) << "the handler reopened the transport; it must stay open";
+    ASSERT_EQ(http.streamCount(), 2);
+    http.streamAt(1)->sendChunk("event: endpoint\ndata: /messages\n\n" + legacyMessage(7));
+    spin();
+    EXPECT_EQ(messages.size(), 1) << "the stream the handler opened must still be listened to";
+}
+
+TEST_F(McpHttpServerTest, LegacySpecDeliversNothingAfterAHandlerStopsIt)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    QObject::connect(&transport, &Rpc::Transport::messageReceived, &transport, [&]() {
+        transport.stop();
+    });
+    QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
+
+    transport.start();
+    http.lastStream()->sendChunk(
+        legacyMessage(1) + legacyMessage(2) + "event: endpoint\ndata: /messages\n\n");
+    spin();
+
+    EXPECT_EQ(messages.size(), 1) << "a stopped transport delivers nothing more";
+
+    transport.start();
+    transport.send(jsonRpcRequest(3, "ping"));
+    spin();
+    EXPECT_EQ(http.bufferedCount(), 0)
+        << "an endpoint read after stop() must not be used by the next session";
+}
+
+TEST_F(McpHttpServerTest, LegacySpecSurvivesAHandlerThatDeletesIt)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+
+    {
+        auto *transport = new McpSseHttpTransport(cfg, &http);
+        QObject::connect(transport, &Rpc::Transport::messageReceived, transport, [transport]() {
+            delete transport;
+        });
+        transport->start();
+        http.lastStream()->sendChunk(legacyMessage(1) + legacyMessage(2));
+        spin();
+    }
+    {
+        auto *transport = new McpSseHttpTransport(cfg, &http);
+        QObject::connect(transport, &Rpc::Transport::errorOccurred, transport, [transport]() {
+            delete transport;
+        });
+        transport->start();
+        http.lastStream()->sendError(QStringLiteral("connection reset"));
+        spin();
+    }
+    {
+        auto *transport = new McpSseHttpTransport(cfg, &http);
+        QObject::connect(transport, &Rpc::Transport::errorOccurred, transport, [transport]() {
+            delete transport;
+        });
+        transport->start();
+        http.lastStream()->sendHeaders(401, {{"Content-Type", "application/json"}});
+        spin();
+    }
+    {
+        auto *transport = new McpSseHttpTransport(cfg, &http);
+        QObject::connect(transport, &Rpc::Transport::errorOccurred, transport, [transport]() {
+            delete transport;
+        });
+        transport->start();
+        http.lastStream()->sendChunk("event: endpoint\ndata: http://evil.example/messages\n\n");
+        spin();
+    }
+    SUCCEED() << "run under AddressSanitizer: a use after free shows up there";
 }
 
 #include "tst_McpHttpServer.moc"

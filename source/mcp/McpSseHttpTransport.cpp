@@ -81,11 +81,24 @@ struct McpSseHttpTransport::Impl
             sseStream, &HttpStreamHandle::errorOccurred, q, [this](const HttpTransportError &e) {
                 const QString reason = QString("SSE stream error: %1").arg(e.message());
                 qCWarning(llmMcpLog).noquote() << reason;
-                emit q->errorOccurred(reason);
-                onFinished();
+                if (reportError(reason))
+                    onFinished();
             });
 
         open = true;
+    }
+
+    bool stillCurrent(const QPointer<McpSseHttpTransport> &guard, HttpStreamHandle *stream) const
+    {
+        return guard && sseStream == stream;
+    }
+
+    bool reportError(const QString &reason)
+    {
+        const QPointer<McpSseHttpTransport> guard(q);
+        HttpStreamHandle *stream = sseStream;
+        emit q->errorOccurred(reason);
+        return stillCurrent(guard, stream);
     }
 
     void onHeaders()
@@ -101,12 +114,14 @@ struct McpSseHttpTransport::Impl
             return;
 
         qCWarning(llmMcpLog).noquote() << reason;
-        emit q->errorOccurred(reason);
-        q->stop();
+        if (reportError(reason))
+            q->stop();
     }
 
     void onChunk(const QByteArray &chunk)
     {
+        const QPointer<McpSseHttpTransport> guard(q);
+        HttpStreamHandle *stream = sseStream;
         const QList<SSEEvent> events = sseParser.append(chunk);
         for (const SSEEvent &ev : events) {
             if (ev.type == QLatin1String("endpoint")) {
@@ -117,8 +132,8 @@ struct McpSseHttpTransport::Impl
                     const QString reason = QString("SSE endpoint outside the connection origin: %1")
                                                .arg(ep.toString());
                     qCWarning(llmMcpLog).noquote() << reason;
-                    emit q->errorOccurred(reason);
-                    q->stop();
+                    if (reportError(reason))
+                        q->stop();
                     return;
                 }
                 postEndpoint = ep;
@@ -127,12 +142,18 @@ struct McpSseHttpTransport::Impl
 
                 const QList<QJsonObject> queued = std::move(pendingSends);
                 pendingSends.clear();
-                for (const QJsonObject &msg : queued)
+                for (const QJsonObject &msg : queued) {
                     post(msg);
+                    if (!stillCurrent(guard, stream))
+                        return;
+                }
             } else if (ev.type == QLatin1String("message")) {
                 const QJsonObject message = jsonRpcMessageIn(ev);
-                if (!message.isEmpty())
-                    emit q->messageReceived(message);
+                if (message.isEmpty())
+                    continue;
+                emit q->messageReceived(message);
+                if (!stillCurrent(guard, stream))
+                    return;
             }
         }
     }
@@ -165,11 +186,7 @@ struct McpSseHttpTransport::Impl
             return;
         }
         if (!http) {
-            const QString reason = QStringLiteral("HTTP transport destroyed");
-            qCWarning(llmMcpLog).noquote() << reason;
-            emit q->errorOccurred(reason);
-            if (isJsonRpcRequest(message))
-                emit q->sendFailed(message, reason);
+            failPost(message, QStringLiteral("HTTP transport destroyed"));
             return;
         }
 
@@ -185,21 +202,22 @@ struct McpSseHttpTransport::Impl
                 q,
                 [this, message](const HttpResponse &response) {
                     if (!response.isSuccess()) {
-                        const QString reason
-                            = QString("POST failed (HTTP %1)").arg(response.statusCode);
-                        qCWarning(llmMcpLog).noquote() << reason;
-                        emit q->errorOccurred(reason);
-                        if (isJsonRpcRequest(message))
-                            emit q->sendFailed(message, reason);
+                        failPost(
+                            message, QString("POST failed (HTTP %1)").arg(response.statusCode));
                     }
                 })
             .onFailed(q, [this, message](const HttpTransportError &e) {
-                const QString reason = QString("POST failed: %1").arg(e.message());
-                qCWarning(llmMcpLog).noquote() << reason;
-                emit q->errorOccurred(reason);
-                if (isJsonRpcRequest(message))
-                    emit q->sendFailed(message, reason);
+                failPost(message, QString("POST failed: %1").arg(e.message()));
             });
+    }
+
+    void failPost(const QJsonObject &message, const QString &reason)
+    {
+        qCWarning(llmMcpLog).noquote() << reason;
+        const QPointer<McpSseHttpTransport> guard(q);
+        emit q->errorOccurred(reason);
+        if (guard && isJsonRpcRequest(message))
+            emit q->sendFailed(message, reason);
     }
 };
 
