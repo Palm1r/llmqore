@@ -9,4 +9,9 @@ Transport::Transport(QObject *parent)
     : QObject(parent)
 {}
 
+void Transport::abandon(const QString &requestId)
+{
+    Q_UNUSED(requestId)
+}
+
 } // namespace LLMQore::Rpc

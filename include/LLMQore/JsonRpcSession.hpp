@@ -108,6 +108,8 @@ private:
         std::chrono::milliseconds timeout,
         bool trackProgressToken);
 
+    void abandonRequest(const QString &id, const QString &method, const QString &reason);
+
     void dispatchRequest(const QJsonObject &message);
     void dispatchResponse(const QJsonObject &message);
     void dispatchNotification(const QJsonObject &message);
@@ -120,6 +122,7 @@ private:
         std::shared_ptr<QPromise<QJsonValue>> promise;
         QTimer *timer = nullptr;
         QString progressToken;
+        QString method;
     };
 
     QPointer<Transport> m_transport;

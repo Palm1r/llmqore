@@ -29,8 +29,9 @@ namespace LLMQore::Mcp {
 
 namespace {
 
-constexpr int kInitialListenBackoffMs = 1000;
-constexpr int kMaxListenBackoffMs = 30000;
+constexpr int kInitialBackoffMs = 1000;
+constexpr int kMaxBackoffMs = 30000;
+constexpr int kSessionDeleteTimeoutMs = 5000;
 
 bool answers(const QJsonObject &reply, const QJsonObject &request)
 {
@@ -63,6 +64,11 @@ struct McpStreamableHttpTransport::Impl
         SSEParser events;
         bool answered = false;
         bool done = false;
+        bool resuming = false;
+        QByteArray cursor;
+        std::optional<int> retryMs;
+        int backoffMs = kInitialBackoffMs;
+        QTimer *resumeTimer = nullptr;
     };
 
     McpStreamableHttpTransport *q = nullptr;
@@ -83,7 +89,7 @@ struct McpStreamableHttpTransport::Impl
     bool listenHeard = false;
     bool listenOutageReported = false;
     QList<SSEEvent> listenBacklog;
-    int listenBackoffMs = kInitialListenBackoffMs;
+    int listenBackoffMs = kInitialBackoffMs;
     std::optional<int> serverRetryMs;
     QElapsedTimer listenUptime;
     QTimer *listenRetryTimer = nullptr;
@@ -120,16 +126,20 @@ struct McpStreamableHttpTransport::Impl
 
         auto exchange = std::make_shared<Exchange>();
         exchange->message = message;
-        exchange->stream = stream;
         exchanges.append(exchange);
+        attach(exchange, stream);
+    }
 
+    void attach(const std::shared_ptr<Exchange> &exchange, HttpStreamHandle *stream)
+    {
+        exchange->stream = stream;
         QObject::connect(
             stream, &HttpStreamHandle::headersReceived, q, [this, exchange]() {
                 onHeaders(*exchange);
             });
         QObject::connect(
             stream, &HttpStreamHandle::chunkReceived, q, [this, exchange](const QByteArray &chunk) {
-                onChunk(*exchange, chunk);
+                onChunk(exchange, chunk);
             });
         QObject::connect(
             stream, &HttpStreamHandle::finished, q, [this, exchange]() { onFinished(exchange); });
@@ -138,6 +148,12 @@ struct McpStreamableHttpTransport::Impl
             &HttpStreamHandle::errorOccurred,
             q,
             [this, exchange](const HttpTransportError &e) {
+                if (canResume(*exchange)) {
+                    qCDebug(llmMcpLog).noquote()
+                        << QString("Response stream dropped, resuming: %1").arg(e.message());
+                    scheduleResume(exchange);
+                    return;
+                }
                 release(exchange);
                 fail(*exchange, QString("HTTP error: %1").arg(e.message()));
             });
@@ -163,13 +179,20 @@ struct McpStreamableHttpTransport::Impl
             sessionId = QString::fromUtf8(session);
     }
 
-    void onChunk(Exchange &exchange, const QByteArray &chunk)
+    void onChunk(const std::shared_ptr<Exchange> &held, const QByteArray &chunk)
     {
+        Exchange &exchange = *held;
         if (!isEventStream(exchange.response)) {
             exchange.response.body.append(chunk);
             return;
         }
-        for (const SSEEvent &event : exchange.events.append(chunk)) {
+        const QList<SSEEvent> events = exchange.events.append(chunk);
+        if (const std::optional<int> retry = exchange.events.retryMs())
+            exchange.retryMs = retry;
+        if (!events.isEmpty() || exchange.events.lastEventId() != exchange.cursor)
+            exchange.backoffMs = kInitialBackoffMs;
+        exchange.cursor = exchange.events.lastEventId();
+        for (const SSEEvent &event : events) {
             if (exchange.done)
                 return;
             if (event.type != QLatin1String("message"))
@@ -178,12 +201,22 @@ struct McpStreamableHttpTransport::Impl
             if (!reply.isEmpty())
                 receive(exchange, reply);
         }
+        if (exchange.resuming && exchange.answered && !exchange.done) {
+            exchanges.removeOne(held);
+            drop(exchange);
+        }
     }
 
     void onFinished(const std::shared_ptr<Exchange> &exchange)
     {
-        release(exchange);
         const HttpResponse &response = exchange->response;
+        const bool resumable = isEventStream(response)
+                               || (exchange->resuming && isTransientRefusal(response.statusCode));
+        if (resumable && canResume(*exchange)) {
+            scheduleResume(exchange);
+            return;
+        }
+        release(exchange);
 
         if (!response.isSuccess()) {
             const QString reason = QString("HTTP error %1").arg(response.statusCode);
@@ -191,8 +224,10 @@ struct McpStreamableHttpTransport::Impl
             emit q->errorOccurred(reason);
             if (isJsonRpcRequest(exchange->message))
                 failRequest(exchange->message, reason, response.body);
-            if (response.statusCode == 404 && !sessionId.isEmpty())
+            if (response.statusCode == 404 && !sessionId.isEmpty()) {
+                sessionId.clear();
                 q->stop();
+            }
             return;
         }
 
@@ -203,6 +238,71 @@ struct McpStreamableHttpTransport::Impl
                 exchange->message,
                 QString("HTTP %1 reply carried no response to the request")
                     .arg(response.statusCode));
+        }
+    }
+
+    static bool canResume(const Exchange &exchange)
+    {
+        return !exchange.done && !exchange.answered && !exchange.cursor.isEmpty()
+               && isJsonRpcRequest(exchange.message);
+    }
+
+    void scheduleResume(const std::shared_ptr<Exchange> &exchange)
+    {
+        if (exchange->stream) {
+            exchange->stream->disconnect(q);
+            exchange->stream->deleteLater();
+            exchange->stream = nullptr;
+        }
+        if (!exchange->resumeTimer) {
+            exchange->resumeTimer = new QTimer(q);
+            exchange->resumeTimer->setObjectName(QStringLiteral("resumeTimer"));
+            exchange->resumeTimer->setSingleShot(true);
+            const std::weak_ptr<Exchange> weak = exchange;
+            QObject::connect(exchange->resumeTimer, &QTimer::timeout, q, [this, weak]() {
+                if (const std::shared_ptr<Exchange> pending = weak.lock())
+                    resume(pending);
+            });
+        }
+        const int delayMs = (std::max)(exchange->retryMs.value_or(0), exchange->backoffMs);
+        exchange->backoffMs = (std::min)(exchange->backoffMs * 2, kMaxBackoffMs);
+        exchange->resumeTimer->start(delayMs);
+    }
+
+    void resume(const std::shared_ptr<Exchange> &exchange)
+    {
+        if (exchange->done)
+            return;
+        if (!http) {
+            release(exchange);
+            fail(*exchange, QStringLiteral("HTTP transport destroyed"));
+            return;
+        }
+
+        QNetworkRequest req = eventStreamRequest(config);
+        req.setTransferTimeout(config.requestTimeoutMs);
+        applySessionHeaders(req);
+        req.setRawHeader("Last-Event-ID", exchange->cursor);
+        applyCustomHeaders(req, config.headers);
+
+        HttpStreamHandle *stream = http->openStream(req, QByteArrayView("GET"));
+        if (!stream) {
+            release(exchange);
+            fail(*exchange, QStringLiteral("HTTP transport opened no stream to resume the reply"));
+            return;
+        }
+        exchange->resuming = true;
+        exchange->response = {};
+        exchange->events.clear();
+        exchange->events.setLastEventId(exchange->cursor);
+        attach(exchange, stream);
+    }
+
+    static void discardResumeTimer(Exchange &exchange)
+    {
+        if (QTimer *timer = std::exchange(exchange.resumeTimer, nullptr)) {
+            timer->stop();
+            timer->deleteLater();
         }
     }
 
@@ -277,6 +377,7 @@ struct McpStreamableHttpTransport::Impl
     void release(const std::shared_ptr<Exchange> &exchange)
     {
         exchange->done = true;
+        discardResumeTimer(*exchange);
         exchanges.removeOne(exchange);
         if (exchange->stream) {
             exchange->stream->disconnect(q);
@@ -340,6 +441,7 @@ struct McpStreamableHttpTransport::Impl
                 = QString("Server message stream: session not found (HTTP %1)").arg(status);
             qCWarning(llmMcpLog).noquote() << reason;
             emit q->errorOccurred(reason);
+            sessionId.clear();
             q->stop();
             return;
         }
@@ -387,7 +489,7 @@ struct McpStreamableHttpTransport::Impl
     void onListenEnded()
     {
         if (listenUptime.isValid()) {
-            if (listenUptime.elapsed() >= kInitialListenBackoffMs)
+            if (listenUptime.elapsed() >= kInitialBackoffMs)
                 restartListenBackoff();
             else if (listenResumed && !listenHeard)
                 lastEventId.clear();
@@ -402,7 +504,7 @@ struct McpStreamableHttpTransport::Impl
         if (!open || !http || listenRefused)
             return;
         const int delayMs = (std::max)(serverRetryMs.value_or(0), listenBackoffMs);
-        if (listenBackoffMs >= kMaxListenBackoffMs && !listenOutageReported) {
+        if (listenBackoffMs >= kMaxBackoffMs && !listenOutageReported) {
             listenOutageReported = true;
             const QString reason
                 = QString("Server message stream keeps failing; retrying every %1 s")
@@ -411,12 +513,12 @@ struct McpStreamableHttpTransport::Impl
             emit q->errorOccurred(reason);
         }
         listenRetryTimer->start(delayMs);
-        listenBackoffMs = (std::min)(listenBackoffMs * 2, kMaxListenBackoffMs);
+        listenBackoffMs = (std::min)(listenBackoffMs * 2, kMaxBackoffMs);
     }
 
     void restartListenBackoff()
     {
-        listenBackoffMs = kInitialListenBackoffMs;
+        listenBackoffMs = kInitialBackoffMs;
         if (std::exchange(listenOutageReported, false))
             qCInfo(llmMcpLog).noquote() << QStringLiteral("Server message stream is back");
     }
@@ -454,23 +556,52 @@ struct McpStreamableHttpTransport::Impl
         listenHeard = false;
         listenBacklog.clear();
         listenOutageReported = false;
-        listenBackoffMs = kInitialListenBackoffMs;
+        listenBackoffMs = kInitialBackoffMs;
         serverRetryMs.reset();
         listenUptime.invalidate();
+    }
+
+    void drop(Exchange &exchange)
+    {
+        exchange.done = true;
+        discardResumeTimer(exchange);
+        if (exchange.stream) {
+            exchange.stream->disconnect(q);
+            exchange.stream->abort();
+            exchange.stream->deleteLater();
+        }
     }
 
     QList<std::shared_ptr<Exchange>> abandonExchanges()
     {
         const QList<std::shared_ptr<Exchange>> pending = std::exchange(exchanges, {});
-        for (const std::shared_ptr<Exchange> &exchange : pending) {
-            exchange->done = true;
-            if (exchange->stream) {
-                exchange->stream->disconnect(q);
-                exchange->stream->abort();
-                exchange->stream->deleteLater();
+        for (const std::shared_ptr<Exchange> &exchange : pending)
+            drop(*exchange);
+        return pending;
+    }
+
+    void abandonExchange(const QString &requestId)
+    {
+        for (const std::shared_ptr<Exchange> &exchange : std::as_const(exchanges)) {
+            if (isJsonRpcRequest(exchange->message)
+                && exchange->message.value("id").toVariant().toString() == requestId) {
+                const std::shared_ptr<Exchange> abandoned = exchange;
+                exchanges.removeOne(abandoned);
+                drop(*abandoned);
+                return;
             }
         }
-        return pending;
+    }
+
+    void deleteSession()
+    {
+        if (!http || sessionId.isEmpty())
+            return;
+        QNetworkRequest req(config.endpoint);
+        req.setTransferTimeout((std::min)(kSessionDeleteTimeoutMs, config.requestTimeoutMs));
+        applySessionHeaders(req);
+        applyCustomHeaders(req, config.headers);
+        (void) http->send(req, QByteArrayView("DELETE"));
     }
 
     void startNewSession()
@@ -481,6 +612,7 @@ struct McpStreamableHttpTransport::Impl
                     exchange->message, QStringLiteral("Superseded by a new session"));
             }
         }
+        deleteSession();
         sessionId.clear();
         protocolVersion.clear();
         stopListening();
@@ -495,6 +627,7 @@ McpStreamableHttpTransport::McpStreamableHttpTransport(
     m_impl->q = this;
     m_impl->config = std::move(config);
     m_impl->config.spec = McpHttpSpec::V2025_03_26;
+    warnAboutProtocolHeaders(m_impl->config.headers);
     m_impl->http = resolveHttpTransport(transport, this, m_impl->config.requestTimeoutMs);
     m_impl->listenRetryTimer = new QTimer(this);
     m_impl->listenRetryTimer->setObjectName(QStringLiteral("listenRetryTimer"));
@@ -529,6 +662,7 @@ void McpStreamableHttpTransport::stop()
         return;
 
     m_impl->open = false;
+    m_impl->deleteSession();
     m_impl->sessionId.clear();
     m_impl->protocolVersion.clear();
     m_impl->abandonExchanges();
@@ -548,6 +682,11 @@ void McpStreamableHttpTransport::send(const QJsonObject &message)
         return;
     }
     m_impl->post(message);
+}
+
+void McpStreamableHttpTransport::abandon(const QString &requestId)
+{
+    m_impl->abandonExchange(requestId);
 }
 
 const HttpTransportConfig &McpStreamableHttpTransport::config() const

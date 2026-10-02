@@ -22,6 +22,7 @@ public:
     virtual void stop() = 0;
     virtual bool isOpen() const = 0;
     virtual void send(const QJsonObject &message) = 0;
+    virtual void abandon(const QString &requestId);
 
 signals:
     void messageReceived(const QJsonObject &message);

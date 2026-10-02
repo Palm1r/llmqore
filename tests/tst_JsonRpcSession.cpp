@@ -93,7 +93,86 @@ private:
     QList<std::shared_ptr<QPromise<QJsonValue>>> m_promises;
 };
 
+class RecordingTransport : public Rpc::Transport
+{
+public:
+    void start() override { m_open = true; }
+    void stop() override { m_open = false; }
+    bool isOpen() const override { return m_open; }
+    void send(const QJsonObject &message) override { sent.append(message); }
+    void abandon(const QString &requestId) override { abandoned.append(requestId); }
+
+    QList<QJsonObject> notificationsOf(const QString &method) const
+    {
+        QList<QJsonObject> found;
+        for (const QJsonObject &message : sent) {
+            if (!message.contains("id") && message.value("method").toString() == method)
+                found.append(message);
+        }
+        return found;
+    }
+
+    QList<QJsonObject> sent;
+    QStringList abandoned;
+
+private:
+    bool m_open = false;
+};
+
 } // namespace
+
+TEST_F(JsonRpcSessionTest, ATimedOutRequestIsCancelledAndAbandoned)
+{
+    RecordingTransport transport;
+    transport.start();
+    Rpc::JsonRpcSession session(&transport);
+
+    const QString error = failureOf(
+        session.sendRequest(QStringLiteral("slow"), {}, std::chrono::milliseconds(50)));
+    ASSERT_TRUE(error.contains(QStringLiteral("timed out"), Qt::CaseInsensitive))
+        << qPrintable(error);
+
+    ASSERT_FALSE(transport.sent.isEmpty());
+    const QString id = transport.sent.first().value("id").toString();
+    const QList<QJsonObject> cancelled
+        = transport.notificationsOf(QLatin1String(Rpc::Method::Cancelled));
+    ASSERT_EQ(cancelled.size(), 1)
+        << "the peer must be told to stop working on a timed-out request";
+    const QJsonObject params = cancelled.first().value("params").toObject();
+    EXPECT_EQ(params.value("requestId").toString().toStdString(), id.toStdString());
+    EXPECT_EQ(params.value("reason").toString().toStdString(), "Request timed out");
+    EXPECT_EQ(transport.abandoned, QStringList{id}) << "the transport must stop waiting too";
+}
+
+TEST_F(JsonRpcSessionTest, ATimedOutInitializeIsAbandonedButNeverCancelled)
+{
+    RecordingTransport transport;
+    transport.start();
+    Rpc::JsonRpcSession session(&transport);
+
+    const QString error = failureOf(
+        session.sendRequest(QStringLiteral("initialize"), {}, std::chrono::milliseconds(50)));
+    ASSERT_TRUE(error.contains(QStringLiteral("timed out"), Qt::CaseInsensitive))
+        << qPrintable(error);
+
+    EXPECT_TRUE(transport.notificationsOf(QLatin1String(Rpc::Method::Cancelled)).isEmpty())
+        << "initialize must not be cancelled by clients";
+    ASSERT_FALSE(transport.sent.isEmpty());
+    EXPECT_EQ(transport.abandoned, QStringList{transport.sent.first().value("id").toString()});
+}
+
+TEST_F(JsonRpcSessionTest, CancellingAnOutgoingRequestAbandonsIt)
+{
+    RecordingTransport transport;
+    transport.start();
+    Rpc::JsonRpcSession session(&transport);
+
+    const auto call = session.sendCancellableRequest(QStringLiteral("slow"));
+    session.cancelRequest(call.requestId, QStringLiteral("user pressed stop"));
+
+    EXPECT_FALSE(failureOf(call.future).isEmpty());
+    EXPECT_EQ(transport.abandoned, QStringList{call.requestId});
+}
 
 TEST_F(JsonRpcSessionTest, ARequestThatIsNeverAnsweredFailsWithATimeout)
 {

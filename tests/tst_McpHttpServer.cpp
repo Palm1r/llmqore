@@ -20,6 +20,7 @@
 #include <QSignalSpy>
 
 #include <LLMQore/BaseTool.hpp>
+#include <LLMQore/HttpClient.hpp>
 #include <LLMQore/McpClient.hpp>
 #include <LLMQore/McpHttpServerTransport.hpp>
 #include <LLMQore/McpHttpTransport.hpp>
@@ -1990,6 +1991,904 @@ TEST_F(McpHttpServerTest, HttpErrorStatusIsReportedAsTransportError)
 
     ASSERT_EQ(errors.size(), 1);
     EXPECT_TRUE(errors.first().first().toString().contains("503"));
+}
+
+namespace {
+
+QHash<QString, QString> headersImpersonatingTheProtocol()
+{
+    return {
+        {"accept", "application/json"},
+        {"Content-Type", "text/plain"},
+        {"MCP-SESSION-ID", "forged"},
+        {"mcp-protocol-version", "1999-01-01"},
+        {"Last-Event-Id", "forged-cursor"},
+        {"Cache-Control", "max-age=60"},
+        {"Authorization", "Bearer secret"},
+    };
+}
+
+} // namespace
+
+TEST_F(McpHttpServerTest, LatestSpecKeepsProtocolHeadersOutOfTheConfiguredHeaders)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    cfg.headers = headersImpersonatingTheProtocol();
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    ASSERT_TRUE(openSession(transport, http));
+
+    const auto initialize = http.streamRequest(0);
+    EXPECT_EQ(initialize.header("Accept"), QByteArray("application/json, text/event-stream"));
+    EXPECT_EQ(initialize.header("Content-Type"), QByteArray("application/json"));
+    EXPECT_TRUE(initialize.header("Mcp-Session-Id").isEmpty());
+    EXPECT_TRUE(initialize.header("MCP-Protocol-Version").isEmpty());
+    EXPECT_TRUE(initialize.header("Last-Event-ID").isEmpty());
+    EXPECT_TRUE(initialize.header("Cache-Control").isEmpty());
+    EXPECT_EQ(initialize.header("Authorization"), QByteArray("Bearer secret"));
+
+    const auto listen = http.streamRequest(1);
+    EXPECT_EQ(listen.header("Accept"), QByteArray("text/event-stream"));
+    EXPECT_EQ(listen.header("Cache-Control"), QByteArray("no-cache"));
+    EXPECT_EQ(listen.header("Mcp-Session-Id"), QByteArray("sess-42"));
+    EXPECT_EQ(listen.header("MCP-Protocol-Version"), QByteArray("2025-06-18"));
+    EXPECT_TRUE(listen.header("Last-Event-ID").isEmpty());
+    EXPECT_EQ(listen.header("Authorization"), QByteArray("Bearer secret"));
+
+    transport.send(jsonRpcRequest(2, "tools/list"));
+    const auto later = http.lastStreamRequest("POST");
+    EXPECT_EQ(later.header("Accept"), QByteArray("application/json, text/event-stream"));
+    EXPECT_EQ(later.header("Content-Type"), QByteArray("application/json"));
+    EXPECT_EQ(later.header("Mcp-Session-Id"), QByteArray("sess-42"));
+    EXPECT_EQ(later.header("MCP-Protocol-Version"), QByteArray("2025-06-18"));
+    EXPECT_TRUE(later.header("Cache-Control").isEmpty());
+    EXPECT_EQ(later.header("Authorization"), QByteArray("Bearer secret"));
+}
+
+TEST_F(McpHttpServerTest, LegacySpecKeepsProtocolHeadersOutOfTheConfiguredHeaders)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    cfg.headers = headersImpersonatingTheProtocol();
+    McpSseHttpTransport transport(cfg, &http);
+
+    transport.start();
+    ASSERT_EQ(http.streamCount(), 1);
+    const auto stream = http.streamRequest(0);
+    EXPECT_EQ(stream.header("Accept"), QByteArray("text/event-stream"));
+    EXPECT_EQ(stream.header("Cache-Control"), QByteArray("no-cache"));
+    EXPECT_TRUE(stream.header("Content-Type").isEmpty());
+    EXPECT_TRUE(stream.header("Mcp-Session-Id").isEmpty());
+    EXPECT_TRUE(stream.header("MCP-Protocol-Version").isEmpty());
+    EXPECT_TRUE(stream.header("Last-Event-ID").isEmpty());
+    EXPECT_EQ(stream.header("Authorization"), QByteArray("Bearer secret"));
+
+    http.lastStream()->sendChunk("event: endpoint\ndata: /messages?sessionId=abc\n\n");
+    transport.send(jsonRpcRequest(1, "ping"));
+    spin();
+
+    ASSERT_EQ(http.bufferedCount(), 1);
+    const auto posted = http.bufferedRequest(0);
+    EXPECT_EQ(posted.header("Content-Type"), QByteArray("application/json"));
+    EXPECT_TRUE(posted.header("Accept").isEmpty());
+    EXPECT_TRUE(posted.header("Cache-Control").isEmpty());
+    EXPECT_TRUE(posted.header("Mcp-Session-Id").isEmpty());
+    EXPECT_TRUE(posted.header("MCP-Protocol-Version").isEmpty());
+    EXPECT_TRUE(posted.header("Last-Event-ID").isEmpty());
+    EXPECT_EQ(posted.header("Authorization"), QByteArray("Bearer secret"));
+}
+
+TEST_F(McpHttpServerTest, EachHttpTransportWarnsOnceAboutTheProtocolHeadersItIgnores)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    cfg.headers = headersImpersonatingTheProtocol();
+
+    {
+        QtWarningCapture capture;
+        McpStreamableHttpTransport transport(cfg, &http);
+        ASSERT_TRUE(openSession(transport, http));
+        transport.send(jsonRpcRequest(2, "tools/list"));
+        spin();
+        ASSERT_EQ(capture.warnings().size(), 1) << capture.warnings().join('\n').toStdString();
+        const QString warning = capture.warnings().first();
+        for (const char *name : {"accept", "Content-Type", "MCP-SESSION-ID",
+                                 "mcp-protocol-version", "Last-Event-Id", "Cache-Control"})
+            EXPECT_TRUE(warning.contains(QLatin1String(name))) << name;
+        EXPECT_FALSE(warning.contains(QLatin1String("Authorization")));
+    }
+    {
+        QtWarningCapture capture;
+        McpSseHttpTransport transport(cfg, &http);
+        transport.start();
+        http.lastStream()->sendChunk("event: endpoint\ndata: /messages\n\n");
+        transport.send(jsonRpcRequest(1, "ping"));
+        spin();
+        EXPECT_EQ(capture.warnings().size(), 1) << capture.warnings().join('\n').toStdString();
+    }
+    {
+        cfg.headers = {{"Authorization", "Bearer secret"}, {"X-Tenant", "acme"}};
+        QtWarningCapture capture;
+        McpStreamableHttpTransport streamable(cfg, &http);
+        McpSseHttpTransport sse(cfg, &http);
+        EXPECT_TRUE(capture.warnings().isEmpty()) << capture.warnings().join('\n').toStdString();
+    }
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDropsTheStreamOfAnAbandonedRequest)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    transport.send(jsonRpcRequest(2, "tools/call"));
+    FakeHttpStream *abandoned = http.lastStream();
+    transport.send(jsonRpcRequest(3, "tools/call"));
+    FakeHttpStream *kept = http.lastStream();
+    ASSERT_NE(abandoned, kept);
+    abandoned->sendHeaders(200, eventStreamHeaders());
+    kept->sendHeaders(200, eventStreamHeaders());
+
+    QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+    QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+    QtWarningCapture capture;
+
+    transport.abandon(QStringLiteral("2"));
+    spin();
+
+    EXPECT_TRUE(abandoned->isAborted()) << "an abandoned request must give its connection back";
+    EXPECT_FALSE(kept->isAborted());
+
+    abandoned->sendChunk("data: " + compact(jsonRpcResult(2, "late")) + "\n\n");
+    abandoned->sendFinished();
+    kept->sendChunk("data: " + compact(jsonRpcResult(3, "on time")) + "\n\n");
+    kept->sendFinished();
+    spin();
+
+    ASSERT_EQ(messages.size(), 1) << "a late answer to an abandoned request must be ignored";
+    EXPECT_EQ(messages.first().first().toJsonObject().value("id").toInt(), 3);
+    EXPECT_EQ(failed.size(), 0) << "the caller already knows how an abandoned request ended";
+    EXPECT_EQ(errors.size(), 0);
+    EXPECT_TRUE(capture.warnings().isEmpty()) << capture.warnings().join('\n').toStdString();
+}
+
+TEST_F(McpHttpServerTest, LatestSpecIgnoresAbandoningARequestItDoesNotKnow)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    transport.send(jsonRpcRequest(2, "tools/call"));
+    FakeHttpStream *pending = http.lastStream();
+    transport.send(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/progress"}});
+    FakeHttpStream *notification = http.lastStream();
+
+    transport.abandon(QStringLiteral("7"));
+    transport.abandon(QString());
+    spin();
+
+    EXPECT_FALSE(pending->isAborted());
+    EXPECT_FALSE(notification->isAborted());
+}
+
+TEST_F(McpHttpServerTest, CancellingAToolCallFreesItsHttpConnection)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    auto *transport = new McpStreamableHttpTransport(cfg, &http);
+    McpClient client(transport, Implementation{"cancel-client", "0.0.1"});
+
+    const auto init = client.connectAndInitialize(std::chrono::seconds(5));
+    spin();
+    ASSERT_EQ(http.streamCount(), 1);
+    http.respondToLastStream(200, compact(QJsonObject{
+        {"jsonrpc", "2.0"},
+        {"id", http.streamRequest(0).payload().value("id")},
+        {"result", QJsonObject{
+            {"protocolVersion", "2025-06-18"},
+            {"capabilities", QJsonObject{{"tools", QJsonObject{}}}},
+            {"serverInfo", QJsonObject{{"name", "s"}, {"version", "1"}}},
+        }},
+    }), sessionHeaders("sess-42"));
+    spin();
+    ASSERT_TRUE(init.isFinished());
+
+    const auto call = client.callToolWithProgress("slow", {}, {});
+    spin();
+    FakeHttpStream *callStream = nullptr;
+    for (int i = 0; i < http.streamCount(); ++i) {
+        if (http.streamRequest(i).payload().value("method").toString() == "tools/call")
+            callStream = http.streamAt(i);
+    }
+    ASSERT_NE(callStream, nullptr);
+    callStream->sendHeaders(200, eventStreamHeaders());
+
+    client.cancel(call.requestId);
+    spin();
+
+    EXPECT_TRUE(callStream->isAborted());
+    EXPECT_EQ(http.lastStreamRequest("POST").payload().value("method").toString().toStdString(),
+              "notifications/cancelled");
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDeletesTheSessionOnStop)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    cfg.headers.insert("Authorization", "Bearer secret");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+    ASSERT_EQ(http.bufferedCount(), 0);
+
+    transport.stop();
+
+    ASSERT_EQ(http.bufferedCount(), 1) << "a client done with a session should tell the server";
+    const auto sent = http.bufferedRequest(0);
+    EXPECT_EQ(sent.verb, QByteArray("DELETE"));
+    EXPECT_EQ(sent.url(), cfg.endpoint);
+    EXPECT_EQ(sent.header("Mcp-Session-Id"), QByteArray("sess-42"));
+    EXPECT_EQ(sent.header("MCP-Protocol-Version"), QByteArray("2025-06-18"));
+    EXPECT_EQ(sent.header("Authorization"), QByteArray("Bearer secret"));
+    EXPECT_GT(sent.request.transferTimeout(), 0);
+    EXPECT_LT(sent.request.transferTimeout(), cfg.requestTimeoutMs)
+        << "a goodbye must not hold a connection as long as a request may";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDeletesTheOldSessionOnReinitialize)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    transport.send(jsonRpcRequest(3, "initialize"));
+
+    ASSERT_EQ(http.bufferedCount(), 1);
+    EXPECT_EQ(http.bufferedRequest(0).verb, QByteArray("DELETE"));
+    EXPECT_EQ(http.bufferedRequest(0).header("Mcp-Session-Id"), QByteArray("sess-42"));
+    EXPECT_FALSE(http.lastStreamRequest("POST").request.hasRawHeader("Mcp-Session-Id"));
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDeletesTheSessionWhenItIsDestroyed)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    {
+        McpStreamableHttpTransport transport(cfg, &http);
+        ASSERT_TRUE(openSession(transport, http));
+    }
+
+    ASSERT_EQ(http.bufferedCount(), 1) << "an injected HttpTransport outlives the session";
+    EXPECT_EQ(http.bufferedRequest(0).verb, QByteArray("DELETE"));
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDoesNotDeleteASessionTheServerEnded)
+{
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+
+    {
+        FakeHttpTransport http;
+        McpStreamableHttpTransport transport(cfg, &http);
+        ASSERT_TRUE(openSession(transport, http));
+        transport.send(jsonRpcRequest(2, "tools/list"));
+        http.respondToLastStream(404, {});
+        spin();
+        ASSERT_FALSE(transport.isOpen());
+        EXPECT_EQ(http.bufferedCount(), 0) << "a 404 to a POST: the server already ended it";
+    }
+    {
+        FakeHttpTransport http;
+        McpStreamableHttpTransport transport(cfg, &http);
+        ASSERT_TRUE(openSession(transport, http));
+        http.lastStream()->sendHeaders(200, eventStreamHeaders());
+        http.lastStream()->sendFinished();
+        fireListenRetry(transport);
+        http.respondToLastStream(404, {});
+        spin();
+        ASSERT_FALSE(transport.isOpen());
+        EXPECT_EQ(http.bufferedCount(), 0) << "a 404 to the listen stream: the server ended it";
+    }
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDoesNotDeleteWithoutASession)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "initialize"));
+    transport.stop();
+
+    EXPECT_EQ(http.bufferedCount(), 0);
+}
+
+TEST_F(McpHttpServerTest, LatestSpecIgnoresARefusedDelete)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+    QtWarningCapture capture;
+
+    transport.stop();
+    ASSERT_EQ(http.bufferedCount(), 1);
+    http.respondToLast(405, {});
+    spin();
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "initialize"));
+    http.respondToLastStream(200, compact(initializeReply(1)), sessionHeaders("sess-43"));
+    spin();
+    transport.stop();
+    ASSERT_EQ(http.bufferedCount(), 2);
+    http.failLast(QStringLiteral("connection refused"));
+    spin();
+
+    EXPECT_EQ(errors.size(), 0) << "the server MAY refuse to end a session; that is not an error";
+    EXPECT_TRUE(capture.warnings().isEmpty()) << capture.warnings().join('\n').toStdString();
+}
+
+namespace {
+
+QList<QTimer *> activeResumeTimers(const QObject &transport)
+{
+    QList<QTimer *> active;
+    for (QTimer *timer : transport.findChildren<QTimer *>(
+             QStringLiteral("resumeTimer"), Qt::FindDirectChildrenOnly)) {
+        if (timer->isActive())
+            active.append(timer);
+    }
+    return active;
+}
+
+void fireResume(const QObject &transport)
+{
+    for (QTimer *timer : activeResumeTimers(transport))
+        timer->start(0);
+    spin();
+}
+
+QByteArray resultEvent(int id, const QString &value, const QByteArray &eventId)
+{
+    return "id: " + eventId + "\ndata: " + compact(jsonRpcResult(id, value)) + "\n\n";
+}
+
+FakeHttpStream *callWithPrimedStream(
+    McpStreamableHttpTransport &transport, FakeHttpTransport &http, const QByteArray &priming)
+{
+    transport.send(jsonRpcRequest(2, "tools/call"));
+    FakeHttpStream *post = http.lastStream();
+    post->sendHeaders(200, eventStreamHeaders());
+    post->sendChunk(priming);
+    return post;
+}
+
+} // namespace
+
+TEST_F(McpHttpServerTest, LatestSpecResumesARequestWhoseStreamClosedBeforeTheAnswer)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    cfg.headers.insert("Authorization", "Bearer secret");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+    QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+
+    callWithPrimedStream(transport, http, "id: s1\ndata: \n\n")->sendFinished();
+    spin();
+
+    EXPECT_EQ(failed.size(), 0) << "a disconnection is not a cancellation of the request";
+    ASSERT_EQ(activeResumeTimers(transport).size(), 1);
+    const int streamsBefore = http.streamCount();
+    fireResume(transport);
+    ASSERT_EQ(http.streamCount(), streamsBefore + 1);
+
+    const auto resumed = http.lastStreamRequest("GET");
+    EXPECT_EQ(resumed.url(), cfg.endpoint);
+    EXPECT_EQ(resumed.header("Last-Event-ID"), QByteArray("s1"));
+    EXPECT_EQ(resumed.header("Accept"), QByteArray("text/event-stream"));
+    EXPECT_EQ(resumed.header("Mcp-Session-Id"), QByteArray("sess-42"));
+    EXPECT_EQ(resumed.header("MCP-Protocol-Version"), QByteArray("2025-06-18"));
+    EXPECT_EQ(resumed.header("Authorization"), QByteArray("Bearer secret"));
+
+    FakeHttpStream *stream = http.lastStream();
+    stream->sendHeaders(200, eventStreamHeaders());
+    stream->sendChunk(resultEvent(2, "late but delivered", "s2"));
+    stream->sendFinished();
+    spin();
+
+    ASSERT_EQ(messages.size(), 1);
+    EXPECT_EQ(messages.first().first().toJsonObject().value("id").toInt(), 2);
+    EXPECT_EQ(failed.size(), 0);
+    EXPECT_EQ(errors.size(), 0);
+    EXPECT_TRUE(activeResumeTimers(transport).isEmpty());
+}
+
+TEST_F(McpHttpServerTest, LatestSpecResumesARequestWhoseStreamBrokeWithANetworkError)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+
+    callWithPrimedStream(transport, http, "id: s1\ndata: \n\n")
+        ->sendError(QStringLiteral("connection reset"), QNetworkReply::RemoteHostClosedError);
+    spin();
+
+    EXPECT_EQ(failed.size(), 0);
+    fireResume(transport);
+    EXPECT_EQ(http.lastStreamRequest("GET").header("Last-Event-ID"), QByteArray("s1"));
+}
+
+TEST_F(McpHttpServerTest, LatestSpecWaitsAsLongAsTheServerAsksBeforeResuming)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    callWithPrimedStream(transport, http, "retry: 5000\nid: s1\ndata: \n\n")->sendFinished();
+    spin();
+
+    const QList<QTimer *> timers = activeResumeTimers(transport);
+    ASSERT_EQ(timers.size(), 1);
+    EXPECT_GE(timers.first()->interval(), 5000) << "the client MUST respect the retry field";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecBacksOffBetweenResumptionsThatBringNothing)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    callWithPrimedStream(transport, http, "id: s1\ndata: \n\n")->sendFinished();
+    spin();
+    ASSERT_EQ(activeResumeTimers(transport).size(), 1);
+    const int first = activeResumeTimers(transport).first()->interval();
+
+    fireResume(transport);
+    http.lastStream()->sendHeaders(200, eventStreamHeaders());
+    http.lastStream()->sendFinished();
+    spin();
+
+    ASSERT_EQ(activeResumeTimers(transport).size(), 1) << "a server may close every poll";
+    EXPECT_GT(activeResumeTimers(transport).first()->interval(), first);
+    fireResume(transport);
+    EXPECT_EQ(http.lastStreamRequest("GET").header("Last-Event-ID"), QByteArray("s1"));
+}
+
+TEST_F(McpHttpServerTest, LatestSpecResumesFromTheLastEventOfTheResumedStream)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
+
+    callWithPrimedStream(transport, http, "id: s1\ndata: \n\n")->sendFinished();
+    fireResume(transport);
+    FakeHttpStream *resumed = http.lastStream();
+    resumed->sendHeaders(200, eventStreamHeaders());
+    resumed->sendChunk(
+        "id: s2\ndata: "
+        + compact(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/progress"}})
+        + "\n\n");
+    resumed->sendFinished();
+    spin();
+
+    EXPECT_EQ(messages.size(), 1);
+    fireResume(transport);
+    EXPECT_EQ(http.lastStreamRequest("GET").header("Last-Event-ID"), QByteArray("s2"));
+}
+
+TEST_F(McpHttpServerTest, LatestSpecFailsARequestWhoseResumptionTheServerRejects)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+
+    callWithPrimedStream(transport, http, "id: s1\ndata: \n\n")->sendFinished();
+    fireResume(transport);
+    http.respondToLastStream(400, "Invalid event ID format", {{"Content-Type", "text/plain"}});
+    spin();
+
+    ASSERT_EQ(failed.size(), 1);
+    EXPECT_EQ(failed.first().at(0).toJsonObject().value("id").toInt(), 2);
+    EXPECT_TRUE(transport.isOpen()) << "one lost request does not end the session";
+    EXPECT_TRUE(activeResumeTimers(transport).isEmpty());
+}
+
+TEST_F(McpHttpServerTest, LatestSpecRetriesAResumptionTheServerRefusesForNow)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+
+    callWithPrimedStream(transport, http, "id: s1\ndata: \n\n")->sendFinished();
+    fireResume(transport);
+    http.respondToLastStream(409, "Stream already has an active connection");
+    spin();
+
+    EXPECT_EQ(failed.size(), 0);
+    ASSERT_EQ(activeResumeTimers(transport).size(), 1);
+    fireResume(transport);
+    EXPECT_EQ(http.lastStreamRequest("GET").header("Last-Event-ID"), QByteArray("s1"));
+}
+
+TEST_F(McpHttpServerTest, LatestSpecEndsTheSessionWhenAResumptionFindsItGone)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+    QSignalSpy closed(&transport, &Rpc::Transport::closed);
+
+    callWithPrimedStream(transport, http, "id: s1\ndata: \n\n")->sendFinished();
+    fireResume(transport);
+    http.respondToLastStream(404, {});
+    spin();
+
+    EXPECT_EQ(failed.size(), 1);
+    EXPECT_EQ(closed.size(), 1);
+    EXPECT_FALSE(transport.isOpen());
+    EXPECT_EQ(http.bufferedCount(), 0) << "the server ended the session; nothing to delete";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecForgetsAPendingResumptionOnStopOrAbandon)
+{
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+
+    {
+        FakeHttpTransport http;
+        McpStreamableHttpTransport transport(cfg, &http);
+        ASSERT_TRUE(openSession(transport, http));
+        callWithPrimedStream(transport, http, "id: s1\ndata: \n\n")->sendFinished();
+        spin();
+        ASSERT_EQ(activeResumeTimers(transport).size(), 1);
+        const int streams = http.streamCount();
+
+        transport.stop();
+        fireResume(transport);
+        EXPECT_EQ(http.streamCount(), streams);
+        EXPECT_TRUE(activeResumeTimers(transport).isEmpty());
+    }
+    {
+        FakeHttpTransport http;
+        McpStreamableHttpTransport transport(cfg, &http);
+        ASSERT_TRUE(openSession(transport, http));
+        QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+        callWithPrimedStream(transport, http, "id: s1\ndata: \n\n")->sendFinished();
+        spin();
+        const int streams = http.streamCount();
+
+        transport.abandon(QStringLiteral("2"));
+        fireResume(transport);
+        EXPECT_EQ(http.streamCount(), streams) << "a timed-out request must not be resumed";
+        EXPECT_EQ(failed.size(), 0);
+    }
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDoesNotResumeAnAnsweredRequestOrANotification)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    FakeHttpStream *answered = callWithPrimedStream(transport, http, "id: s1\ndata: \n\n");
+    answered->sendChunk(resultEvent(2, "done", "s2"));
+    answered->sendFinished();
+
+    transport.send(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/initialized"}});
+    FakeHttpStream *notification = http.lastStream();
+    notification->sendHeaders(200, eventStreamHeaders());
+    notification->sendChunk("id: n1\ndata: \n\n");
+    notification->sendFinished();
+    spin();
+
+    EXPECT_TRUE(activeResumeTimers(transport).isEmpty());
+}
+
+TEST_F(McpHttpServerTest, LatestSpecClosesAResumptionStreamOnceItCarriedTheAnswer)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+
+    callWithPrimedStream(transport, http, "id: s1\ndata: \n\n")->sendFinished();
+    fireResume(transport);
+    FakeHttpStream *resumed = http.lastStream();
+    resumed->sendHeaders(200, eventStreamHeaders());
+    resumed->sendChunk(resultEvent(2, "done", "s2"));
+    spin();
+
+    ASSERT_EQ(messages.size(), 1);
+    EXPECT_TRUE(resumed->isAborted())
+        << "a server may keep a resumed GET open after the answer; it must not hold a connection";
+    EXPECT_EQ(failed.size(), 0);
+}
+
+namespace {
+
+struct ServerUnderTest
+{
+    McpHttpServerTransport transport{[] {
+        HttpServerConfig cfg;
+        cfg.address = QHostAddress::LocalHost;
+        cfg.port = 0;
+        cfg.path = "/mcp";
+        return cfg;
+    }()};
+    HttpClient http;
+
+    QUrl endpoint() const
+    {
+        return QUrl(QString("http://127.0.0.1:%1/mcp").arg(transport.serverPort()));
+    }
+
+    HttpResponse request(
+        const QByteArray &verb, const QString &session, const QByteArray &body = {})
+    {
+        QNetworkRequest req(endpoint());
+        if (!session.isEmpty())
+            req.setRawHeader("Mcp-Session-Id", session.toUtf8());
+        if (!body.isEmpty())
+            req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+        return waitForFuture(http.send(req, QByteArrayView(verb), body));
+    }
+};
+
+} // namespace
+
+TEST_F(McpHttpServerTest, ServerEndsTheSessionAClientDeletes)
+{
+    ServerUnderTest server;
+    server.transport.start();
+    ASSERT_TRUE(server.transport.isOpen());
+    const QString session = server.transport.sessionId();
+
+    EXPECT_EQ(server.request("DELETE", session).statusCode, 200);
+
+    const QByteArray ping = compact(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/x"}});
+    EXPECT_EQ(server.request("POST", session, ping).statusCode, 404)
+        << "after termination the server MUST answer 404 to the ended session's id";
+    EXPECT_EQ(server.request("DELETE", session).statusCode, 404);
+    EXPECT_TRUE(server.transport.isOpen()) << "the server keeps listening for the next session";
+
+    const HttpResponse fresh = server.request("POST", {}, ping);
+    EXPECT_EQ(fresh.statusCode, 202);
+    const QByteArray next = fresh.rawHeader(QByteArrayView("Mcp-Session-Id"));
+    EXPECT_FALSE(next.isEmpty());
+    EXPECT_NE(QString::fromUtf8(next), session) << "a new session must not reuse the ended id";
+    EXPECT_EQ(server.request("POST", QString::fromUtf8(next), ping).statusCode, 202);
+}
+
+TEST_F(McpHttpServerTest, ServerRefusesToDeleteASessionItDoesNotKnow)
+{
+    ServerUnderTest server;
+    server.transport.start();
+    const QString session = server.transport.sessionId();
+
+    EXPECT_EQ(server.request("DELETE", "someone-else").statusCode, 400);
+    EXPECT_EQ(server.request("DELETE", {}).statusCode, 400);
+    EXPECT_EQ(server.transport.sessionId(), session);
+
+    const HttpResponse other = server.request("PUT", session);
+    EXPECT_EQ(other.statusCode, 405);
+    EXPECT_EQ(other.rawHeader(QByteArrayView("Allow")), QByteArray("POST, DELETE"));
+}
+
+TEST_F(McpHttpServerTest, ClientStopEndsTheSessionOnAnLlmqoreServer)
+{
+    HttpServerConfig serverCfg;
+    serverCfg.address = QHostAddress::LocalHost;
+    serverCfg.port = 0;
+    serverCfg.path = "/mcp";
+    auto *serverTransport = new McpHttpServerTransport(serverCfg);
+    McpServer server(serverTransport, McpServerConfig{{"http-delete-server", "0.0.1"}});
+    server.start();
+    const QString session = serverTransport->sessionId();
+
+    HttpTransportConfig clientCfg;
+    clientCfg.endpoint
+        = QUrl(QString("http://127.0.0.1:%1/mcp").arg(serverTransport->serverPort()));
+    auto *clientTransport = new McpStreamableHttpTransport(clientCfg);
+    McpClient client(clientTransport, Implementation{"http-delete-client", "0.0.1"});
+    waitForFuture(client.connectAndInitialize(std::chrono::seconds(5)));
+    ASSERT_EQ(clientTransport->sessionId(), session);
+
+    QtWarningCapture capture;
+    clientTransport->stop();
+    for (int i = 0; i < 100 && serverTransport->sessionId() == session; ++i)
+        pumpEventLoop(std::chrono::milliseconds(20));
+
+    EXPECT_NE(serverTransport->sessionId(), session) << "the DELETE must reach the server";
+    EXPECT_TRUE(capture.warnings().isEmpty()) << capture.warnings().join('\n').toStdString();
+
+    server.stop();
+    delete clientTransport;
+    delete serverTransport;
+}
+
+namespace {
+
+QByteArray legacyMessage(int id)
+{
+    return "event: message\ndata: " + compact(jsonRpcResult(id, "x")) + "\n\n";
+}
+
+} // namespace
+
+TEST_F(McpHttpServerTest, LegacySpecKeepsAStreamAHandlerRestartedAfterAnError)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    bool restarted = false;
+    QObject::connect(&transport, &Rpc::Transport::errorOccurred, &transport, [&]() {
+        if (std::exchange(restarted, true))
+            return;
+        transport.stop();
+        transport.start();
+    });
+    QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
+
+    transport.start();
+    http.lastStream()->sendError(QStringLiteral("connection reset"));
+    spin();
+
+    ASSERT_TRUE(restarted);
+    EXPECT_TRUE(transport.isOpen()) << "the handler reopened the transport; it must stay open";
+    ASSERT_EQ(http.streamCount(), 2);
+    http.streamAt(1)->sendChunk("event: endpoint\ndata: /messages\n\n" + legacyMessage(7));
+    spin();
+    EXPECT_EQ(messages.size(), 1) << "the stream the handler opened must still be listened to";
+}
+
+TEST_F(McpHttpServerTest, LegacySpecDeliversNothingAfterAHandlerStopsIt)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    McpSseHttpTransport transport(cfg, &http);
+
+    QObject::connect(&transport, &Rpc::Transport::messageReceived, &transport, [&]() {
+        transport.stop();
+    });
+    QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
+
+    transport.start();
+    http.lastStream()->sendChunk(
+        legacyMessage(1) + legacyMessage(2) + "event: endpoint\ndata: /messages\n\n");
+    spin();
+
+    EXPECT_EQ(messages.size(), 1) << "a stopped transport delivers nothing more";
+
+    transport.start();
+    transport.send(jsonRpcRequest(3, "ping"));
+    spin();
+    EXPECT_EQ(http.bufferedCount(), 0)
+        << "an endpoint read after stop() must not be used by the next session";
+}
+
+TEST_F(McpHttpServerTest, LegacySpecSurvivesAHandlerThatDeletesIt)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+
+    {
+        auto *transport = new McpSseHttpTransport(cfg, &http);
+        QObject::connect(transport, &Rpc::Transport::messageReceived, transport, [transport]() {
+            delete transport;
+        });
+        transport->start();
+        http.lastStream()->sendChunk(legacyMessage(1) + legacyMessage(2));
+        spin();
+    }
+    {
+        auto *transport = new McpSseHttpTransport(cfg, &http);
+        QObject::connect(transport, &Rpc::Transport::errorOccurred, transport, [transport]() {
+            delete transport;
+        });
+        transport->start();
+        http.lastStream()->sendError(QStringLiteral("connection reset"));
+        spin();
+    }
+    {
+        auto *transport = new McpSseHttpTransport(cfg, &http);
+        QObject::connect(transport, &Rpc::Transport::errorOccurred, transport, [transport]() {
+            delete transport;
+        });
+        transport->start();
+        http.lastStream()->sendHeaders(401, {{"Content-Type", "application/json"}});
+        spin();
+    }
+    {
+        auto *transport = new McpSseHttpTransport(cfg, &http);
+        QObject::connect(transport, &Rpc::Transport::errorOccurred, transport, [transport]() {
+            delete transport;
+        });
+        transport->start();
+        http.lastStream()->sendChunk("event: endpoint\ndata: http://evil.example/messages\n\n");
+        spin();
+    }
+    SUCCEED() << "run under AddressSanitizer: a use after free shows up there";
 }
 
 #include "tst_McpHttpServer.moc"
