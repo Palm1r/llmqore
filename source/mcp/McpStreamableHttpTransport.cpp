@@ -459,18 +459,35 @@ struct McpStreamableHttpTransport::Impl
         listenUptime.invalidate();
     }
 
+    void drop(Exchange &exchange)
+    {
+        exchange.done = true;
+        if (exchange.stream) {
+            exchange.stream->disconnect(q);
+            exchange.stream->abort();
+            exchange.stream->deleteLater();
+        }
+    }
+
     QList<std::shared_ptr<Exchange>> abandonExchanges()
     {
         const QList<std::shared_ptr<Exchange>> pending = std::exchange(exchanges, {});
-        for (const std::shared_ptr<Exchange> &exchange : pending) {
-            exchange->done = true;
-            if (exchange->stream) {
-                exchange->stream->disconnect(q);
-                exchange->stream->abort();
-                exchange->stream->deleteLater();
+        for (const std::shared_ptr<Exchange> &exchange : pending)
+            drop(*exchange);
+        return pending;
+    }
+
+    void abandonExchange(const QString &requestId)
+    {
+        for (const std::shared_ptr<Exchange> &exchange : std::as_const(exchanges)) {
+            if (isJsonRpcRequest(exchange->message)
+                && exchange->message.value("id").toVariant().toString() == requestId) {
+                const std::shared_ptr<Exchange> abandoned = exchange;
+                exchanges.removeOne(abandoned);
+                drop(*abandoned);
+                return;
             }
         }
-        return pending;
     }
 
     void startNewSession()
@@ -549,6 +566,11 @@ void McpStreamableHttpTransport::send(const QJsonObject &message)
         return;
     }
     m_impl->post(message);
+}
+
+void McpStreamableHttpTransport::abandon(const QString &requestId)
+{
+    m_impl->abandonExchange(requestId);
 }
 
 const HttpTransportConfig &McpStreamableHttpTransport::config() const

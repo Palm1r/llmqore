@@ -2121,5 +2121,110 @@ TEST_F(McpHttpServerTest, EachHttpTransportWarnsOnceAboutTheProtocolHeadersItIgn
     }
 }
 
+TEST_F(McpHttpServerTest, LatestSpecDropsTheStreamOfAnAbandonedRequest)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    transport.send(jsonRpcRequest(2, "tools/call"));
+    FakeHttpStream *abandoned = http.lastStream();
+    transport.send(jsonRpcRequest(3, "tools/call"));
+    FakeHttpStream *kept = http.lastStream();
+    ASSERT_NE(abandoned, kept);
+    abandoned->sendHeaders(200, eventStreamHeaders());
+    kept->sendHeaders(200, eventStreamHeaders());
+
+    QSignalSpy messages(&transport, &Rpc::Transport::messageReceived);
+    QSignalSpy failed(&transport, &Rpc::Transport::sendFailed);
+    QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+    QtWarningCapture capture;
+
+    transport.abandon(QStringLiteral("2"));
+    spin();
+
+    EXPECT_TRUE(abandoned->isAborted()) << "an abandoned request must give its connection back";
+    EXPECT_FALSE(kept->isAborted());
+
+    abandoned->sendChunk("data: " + compact(jsonRpcResult(2, "late")) + "\n\n");
+    abandoned->sendFinished();
+    kept->sendChunk("data: " + compact(jsonRpcResult(3, "on time")) + "\n\n");
+    kept->sendFinished();
+    spin();
+
+    ASSERT_EQ(messages.size(), 1) << "a late answer to an abandoned request must be ignored";
+    EXPECT_EQ(messages.first().first().toJsonObject().value("id").toInt(), 3);
+    EXPECT_EQ(failed.size(), 0) << "the caller already knows how an abandoned request ended";
+    EXPECT_EQ(errors.size(), 0);
+    EXPECT_TRUE(capture.warnings().isEmpty()) << capture.warnings().join('\n').toStdString();
+}
+
+TEST_F(McpHttpServerTest, LatestSpecIgnoresAbandoningARequestItDoesNotKnow)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    transport.send(jsonRpcRequest(2, "tools/call"));
+    FakeHttpStream *pending = http.lastStream();
+    transport.send(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/progress"}});
+    FakeHttpStream *notification = http.lastStream();
+
+    transport.abandon(QStringLiteral("7"));
+    transport.abandon(QString());
+    spin();
+
+    EXPECT_FALSE(pending->isAborted());
+    EXPECT_FALSE(notification->isAborted());
+}
+
+TEST_F(McpHttpServerTest, CancellingAToolCallFreesItsHttpConnection)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    auto *transport = new McpStreamableHttpTransport(cfg, &http);
+    McpClient client(transport, Implementation{"cancel-client", "0.0.1"});
+
+    const auto init = client.connectAndInitialize(std::chrono::seconds(5));
+    spin();
+    ASSERT_EQ(http.streamCount(), 1);
+    http.respondToLastStream(200, compact(QJsonObject{
+        {"jsonrpc", "2.0"},
+        {"id", http.streamRequest(0).payload().value("id")},
+        {"result", QJsonObject{
+            {"protocolVersion", "2025-06-18"},
+            {"capabilities", QJsonObject{{"tools", QJsonObject{}}}},
+            {"serverInfo", QJsonObject{{"name", "s"}, {"version", "1"}}},
+        }},
+    }), sessionHeaders("sess-42"));
+    spin();
+    ASSERT_TRUE(init.isFinished());
+
+    const auto call = client.callToolWithProgress("slow", {}, {});
+    spin();
+    FakeHttpStream *callStream = nullptr;
+    for (int i = 0; i < http.streamCount(); ++i) {
+        if (http.streamRequest(i).payload().value("method").toString() == "tools/call")
+            callStream = http.streamAt(i);
+    }
+    ASSERT_NE(callStream, nullptr);
+    callStream->sendHeaders(200, eventStreamHeaders());
+
+    client.cancel(call.requestId);
+    spin();
+
+    EXPECT_TRUE(callStream->isAborted());
+    EXPECT_EQ(http.lastStreamRequest("POST").payload().value("method").toString().toStdString(),
+              "notifications/cancelled");
+}
+
 #include "tst_McpHttpServer.moc"
 

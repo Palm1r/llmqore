@@ -114,6 +114,8 @@ Timeouts travel on each request, not on the `HttpTransport`. POSTs carry `HttpTr
 
 The 2025-03-26 listen stream holds one HTTP connection for as long as the session lives. Qt runs at most six HTTP/1.1 requests in parallel per host and port, so over plain `http://` -- where Qt does not negotiate HTTP/2 -- and on Qt 5.15, where HTTP/2 is off by default, five are left for POSTs. A sixth concurrent POST waits until one of them finishes. That only bites when five calls each hold their stream open waiting on the client, for instance on elicitation answers. Over `https://` with Qt 6 and a server that speaks HTTP/2, all requests share one connection and the limit does not apply.
 
+A request the session stops waiting for -- cancelled by the caller or timed out -- is abandoned: `JsonRpcSession` calls `Rpc::Transport::abandon(requestId)`, and `McpStreamableHttpTransport` aborts that request's POST stream so it stops holding a connection. An abandoned request never produces `sendFailed`, and an answer that arrives on another stream afterwards is dropped by the session as an unknown id. The base implementation does nothing, which is right for transports whose replies do not occupy a per-request resource: stdio, pipes and the 2024-11-05 transport, where answers come over the shared `GET` stream.
+
 ## What ships with each seam
 
 An abstract class with no implementation is a shape nobody has confirmed. Three of the four provider seams now ship one, so the seam is answered by code rather than by a promise:
