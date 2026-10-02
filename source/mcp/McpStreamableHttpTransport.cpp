@@ -495,6 +495,7 @@ McpStreamableHttpTransport::McpStreamableHttpTransport(
     m_impl->q = this;
     m_impl->config = std::move(config);
     m_impl->config.spec = McpHttpSpec::V2025_03_26;
+    warnAboutProtocolHeaders(m_impl->config.headers);
     m_impl->http = resolveHttpTransport(transport, this, m_impl->config.requestTimeoutMs);
     m_impl->listenRetryTimer = new QTimer(this);
     m_impl->listenRetryTimer->setObjectName(QStringLiteral("listenRetryTimer"));

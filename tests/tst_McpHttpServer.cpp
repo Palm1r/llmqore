@@ -1992,5 +1992,134 @@ TEST_F(McpHttpServerTest, HttpErrorStatusIsReportedAsTransportError)
     EXPECT_TRUE(errors.first().first().toString().contains("503"));
 }
 
+namespace {
+
+QHash<QString, QString> headersImpersonatingTheProtocol()
+{
+    return {
+        {"accept", "application/json"},
+        {"Content-Type", "text/plain"},
+        {"MCP-SESSION-ID", "forged"},
+        {"mcp-protocol-version", "1999-01-01"},
+        {"Last-Event-Id", "forged-cursor"},
+        {"Cache-Control", "max-age=60"},
+        {"Authorization", "Bearer secret"},
+    };
+}
+
+} // namespace
+
+TEST_F(McpHttpServerTest, LatestSpecKeepsProtocolHeadersOutOfTheConfiguredHeaders)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    cfg.headers = headersImpersonatingTheProtocol();
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    ASSERT_TRUE(openSession(transport, http));
+
+    const auto initialize = http.streamRequest(0);
+    EXPECT_EQ(initialize.header("Accept"), QByteArray("application/json, text/event-stream"));
+    EXPECT_EQ(initialize.header("Content-Type"), QByteArray("application/json"));
+    EXPECT_TRUE(initialize.header("Mcp-Session-Id").isEmpty());
+    EXPECT_TRUE(initialize.header("MCP-Protocol-Version").isEmpty());
+    EXPECT_TRUE(initialize.header("Last-Event-ID").isEmpty());
+    EXPECT_TRUE(initialize.header("Cache-Control").isEmpty());
+    EXPECT_EQ(initialize.header("Authorization"), QByteArray("Bearer secret"));
+
+    const auto listen = http.streamRequest(1);
+    EXPECT_EQ(listen.header("Accept"), QByteArray("text/event-stream"));
+    EXPECT_EQ(listen.header("Cache-Control"), QByteArray("no-cache"));
+    EXPECT_EQ(listen.header("Mcp-Session-Id"), QByteArray("sess-42"));
+    EXPECT_EQ(listen.header("MCP-Protocol-Version"), QByteArray("2025-06-18"));
+    EXPECT_TRUE(listen.header("Last-Event-ID").isEmpty());
+    EXPECT_EQ(listen.header("Authorization"), QByteArray("Bearer secret"));
+
+    transport.send(jsonRpcRequest(2, "tools/list"));
+    const auto later = http.lastStreamRequest("POST");
+    EXPECT_EQ(later.header("Accept"), QByteArray("application/json, text/event-stream"));
+    EXPECT_EQ(later.header("Content-Type"), QByteArray("application/json"));
+    EXPECT_EQ(later.header("Mcp-Session-Id"), QByteArray("sess-42"));
+    EXPECT_EQ(later.header("MCP-Protocol-Version"), QByteArray("2025-06-18"));
+    EXPECT_TRUE(later.header("Cache-Control").isEmpty());
+    EXPECT_EQ(later.header("Authorization"), QByteArray("Bearer secret"));
+}
+
+TEST_F(McpHttpServerTest, LegacySpecKeepsProtocolHeadersOutOfTheConfiguredHeaders)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/sse");
+    cfg.headers = headersImpersonatingTheProtocol();
+    McpSseHttpTransport transport(cfg, &http);
+
+    transport.start();
+    ASSERT_EQ(http.streamCount(), 1);
+    const auto stream = http.streamRequest(0);
+    EXPECT_EQ(stream.header("Accept"), QByteArray("text/event-stream"));
+    EXPECT_EQ(stream.header("Cache-Control"), QByteArray("no-cache"));
+    EXPECT_TRUE(stream.header("Content-Type").isEmpty());
+    EXPECT_TRUE(stream.header("Mcp-Session-Id").isEmpty());
+    EXPECT_TRUE(stream.header("MCP-Protocol-Version").isEmpty());
+    EXPECT_TRUE(stream.header("Last-Event-ID").isEmpty());
+    EXPECT_EQ(stream.header("Authorization"), QByteArray("Bearer secret"));
+
+    http.lastStream()->sendChunk("event: endpoint\ndata: /messages?sessionId=abc\n\n");
+    transport.send(jsonRpcRequest(1, "ping"));
+    spin();
+
+    ASSERT_EQ(http.bufferedCount(), 1);
+    const auto posted = http.bufferedRequest(0);
+    EXPECT_EQ(posted.header("Content-Type"), QByteArray("application/json"));
+    EXPECT_TRUE(posted.header("Accept").isEmpty());
+    EXPECT_TRUE(posted.header("Cache-Control").isEmpty());
+    EXPECT_TRUE(posted.header("Mcp-Session-Id").isEmpty());
+    EXPECT_TRUE(posted.header("MCP-Protocol-Version").isEmpty());
+    EXPECT_TRUE(posted.header("Last-Event-ID").isEmpty());
+    EXPECT_EQ(posted.header("Authorization"), QByteArray("Bearer secret"));
+}
+
+TEST_F(McpHttpServerTest, EachHttpTransportWarnsOnceAboutTheProtocolHeadersItIgnores)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    cfg.headers = headersImpersonatingTheProtocol();
+
+    {
+        QtWarningCapture capture;
+        McpStreamableHttpTransport transport(cfg, &http);
+        ASSERT_TRUE(openSession(transport, http));
+        transport.send(jsonRpcRequest(2, "tools/list"));
+        spin();
+        ASSERT_EQ(capture.warnings().size(), 1) << capture.warnings().join('\n').toStdString();
+        const QString warning = capture.warnings().first();
+        for (const char *name : {"accept", "Content-Type", "MCP-SESSION-ID",
+                                 "mcp-protocol-version", "Last-Event-Id", "Cache-Control"})
+            EXPECT_TRUE(warning.contains(QLatin1String(name))) << name;
+        EXPECT_FALSE(warning.contains(QLatin1String("Authorization")));
+    }
+    {
+        QtWarningCapture capture;
+        McpSseHttpTransport transport(cfg, &http);
+        transport.start();
+        http.lastStream()->sendChunk("event: endpoint\ndata: /messages\n\n");
+        transport.send(jsonRpcRequest(1, "ping"));
+        spin();
+        EXPECT_EQ(capture.warnings().size(), 1) << capture.warnings().join('\n').toStdString();
+    }
+    {
+        cfg.headers = {{"Authorization", "Bearer secret"}, {"X-Tenant", "acme"}};
+        QtWarningCapture capture;
+        McpStreamableHttpTransport streamable(cfg, &http);
+        McpSseHttpTransport sse(cfg, &http);
+        EXPECT_TRUE(capture.warnings().isEmpty()) << capture.warnings().join('\n').toStdString();
+    }
+}
+
 #include "tst_McpHttpServer.moc"
 

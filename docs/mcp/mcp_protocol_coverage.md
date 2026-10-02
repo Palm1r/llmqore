@@ -73,7 +73,7 @@ Accepted during negotiation: `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-
 
 | Feature | Status |
 |---|---|
-| OAuth 2.1 / OIDC Discovery / Dynamic Client Registration / OAuth Client ID Metadata Documents / `WWW-Authenticate` scoped consent | ❌ Not implemented. Static HTTP headers via `HttpTransportConfig::headers` only. |
+| OAuth 2.1 / OIDC Discovery / Dynamic Client Registration / OAuth Client ID Metadata Documents / `WWW-Authenticate` scoped consent | ❌ Not implemented. Static HTTP headers via `HttpTransportConfig::headers` only; protocol headers in that map are ignored with a warning. |
 | Stdio transport: retrieve credentials from environment | ✅ by convention — `StdioLaunchConfig::environment` is user-controlled. |
 
 ### JSON Schema dialect
