@@ -2226,5 +2226,136 @@ TEST_F(McpHttpServerTest, CancellingAToolCallFreesItsHttpConnection)
               "notifications/cancelled");
 }
 
+TEST_F(McpHttpServerTest, LatestSpecDeletesTheSessionOnStop)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    cfg.headers.insert("Authorization", "Bearer secret");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+    ASSERT_EQ(http.bufferedCount(), 0);
+
+    transport.stop();
+
+    ASSERT_EQ(http.bufferedCount(), 1) << "a client done with a session should tell the server";
+    const auto sent = http.bufferedRequest(0);
+    EXPECT_EQ(sent.verb, QByteArray("DELETE"));
+    EXPECT_EQ(sent.url(), cfg.endpoint);
+    EXPECT_EQ(sent.header("Mcp-Session-Id"), QByteArray("sess-42"));
+    EXPECT_EQ(sent.header("MCP-Protocol-Version"), QByteArray("2025-06-18"));
+    EXPECT_EQ(sent.header("Authorization"), QByteArray("Bearer secret"));
+    EXPECT_GT(sent.request.transferTimeout(), 0);
+    EXPECT_LT(sent.request.transferTimeout(), cfg.requestTimeoutMs)
+        << "a goodbye must not hold a connection as long as a request may";
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDeletesTheOldSessionOnReinitialize)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    transport.send(jsonRpcRequest(3, "initialize"));
+
+    ASSERT_EQ(http.bufferedCount(), 1);
+    EXPECT_EQ(http.bufferedRequest(0).verb, QByteArray("DELETE"));
+    EXPECT_EQ(http.bufferedRequest(0).header("Mcp-Session-Id"), QByteArray("sess-42"));
+    EXPECT_FALSE(http.lastStreamRequest("POST").request.hasRawHeader("Mcp-Session-Id"));
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDeletesTheSessionWhenItIsDestroyed)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    {
+        McpStreamableHttpTransport transport(cfg, &http);
+        ASSERT_TRUE(openSession(transport, http));
+    }
+
+    ASSERT_EQ(http.bufferedCount(), 1) << "an injected HttpTransport outlives the session";
+    EXPECT_EQ(http.bufferedRequest(0).verb, QByteArray("DELETE"));
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDoesNotDeleteASessionTheServerEnded)
+{
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+
+    {
+        FakeHttpTransport http;
+        McpStreamableHttpTransport transport(cfg, &http);
+        ASSERT_TRUE(openSession(transport, http));
+        transport.send(jsonRpcRequest(2, "tools/list"));
+        http.respondToLastStream(404, {});
+        spin();
+        ASSERT_FALSE(transport.isOpen());
+        EXPECT_EQ(http.bufferedCount(), 0) << "a 404 to a POST: the server already ended it";
+    }
+    {
+        FakeHttpTransport http;
+        McpStreamableHttpTransport transport(cfg, &http);
+        ASSERT_TRUE(openSession(transport, http));
+        http.lastStream()->sendHeaders(200, eventStreamHeaders());
+        http.lastStream()->sendFinished();
+        fireListenRetry(transport);
+        http.respondToLastStream(404, {});
+        spin();
+        ASSERT_FALSE(transport.isOpen());
+        EXPECT_EQ(http.bufferedCount(), 0) << "a 404 to the listen stream: the server ended it";
+    }
+}
+
+TEST_F(McpHttpServerTest, LatestSpecDoesNotDeleteWithoutASession)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "initialize"));
+    transport.stop();
+
+    EXPECT_EQ(http.bufferedCount(), 0);
+}
+
+TEST_F(McpHttpServerTest, LatestSpecIgnoresARefusedDelete)
+{
+    FakeHttpTransport http;
+
+    HttpTransportConfig cfg;
+    cfg.endpoint = QUrl("http://mcp.local/mcp");
+    McpStreamableHttpTransport transport(cfg, &http);
+    ASSERT_TRUE(openSession(transport, http));
+
+    QSignalSpy errors(&transport, &Rpc::Transport::errorOccurred);
+    QtWarningCapture capture;
+
+    transport.stop();
+    ASSERT_EQ(http.bufferedCount(), 1);
+    http.respondToLast(405, {});
+    spin();
+
+    transport.start();
+    transport.send(jsonRpcRequest(1, "initialize"));
+    http.respondToLastStream(200, compact(initializeReply(1)), sessionHeaders("sess-43"));
+    spin();
+    transport.stop();
+    ASSERT_EQ(http.bufferedCount(), 2);
+    http.failLast(QStringLiteral("connection refused"));
+    spin();
+
+    EXPECT_EQ(errors.size(), 0) << "the server MAY refuse to end a session; that is not an error";
+    EXPECT_TRUE(capture.warnings().isEmpty()) << capture.warnings().join('\n').toStdString();
+}
+
 #include "tst_McpHttpServer.moc"
 

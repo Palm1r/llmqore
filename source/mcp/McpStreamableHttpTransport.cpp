@@ -31,6 +31,7 @@ namespace {
 
 constexpr int kInitialListenBackoffMs = 1000;
 constexpr int kMaxListenBackoffMs = 30000;
+constexpr int kSessionDeleteTimeoutMs = 5000;
 
 bool answers(const QJsonObject &reply, const QJsonObject &request)
 {
@@ -191,8 +192,10 @@ struct McpStreamableHttpTransport::Impl
             emit q->errorOccurred(reason);
             if (isJsonRpcRequest(exchange->message))
                 failRequest(exchange->message, reason, response.body);
-            if (response.statusCode == 404 && !sessionId.isEmpty())
+            if (response.statusCode == 404 && !sessionId.isEmpty()) {
+                sessionId.clear();
                 q->stop();
+            }
             return;
         }
 
@@ -340,6 +343,7 @@ struct McpStreamableHttpTransport::Impl
                 = QString("Server message stream: session not found (HTTP %1)").arg(status);
             qCWarning(llmMcpLog).noquote() << reason;
             emit q->errorOccurred(reason);
+            sessionId.clear();
             q->stop();
             return;
         }
@@ -490,6 +494,17 @@ struct McpStreamableHttpTransport::Impl
         }
     }
 
+    void deleteSession()
+    {
+        if (!http || sessionId.isEmpty())
+            return;
+        QNetworkRequest req(config.endpoint);
+        req.setTransferTimeout((std::min)(kSessionDeleteTimeoutMs, config.requestTimeoutMs));
+        applySessionHeaders(req);
+        applyCustomHeaders(req, config.headers);
+        (void) http->send(req, QByteArrayView("DELETE"));
+    }
+
     void startNewSession()
     {
         for (const std::shared_ptr<Exchange> &exchange : abandonExchanges()) {
@@ -498,6 +513,7 @@ struct McpStreamableHttpTransport::Impl
                     exchange->message, QStringLiteral("Superseded by a new session"));
             }
         }
+        deleteSession();
         sessionId.clear();
         protocolVersion.clear();
         stopListening();
@@ -547,6 +563,7 @@ void McpStreamableHttpTransport::stop()
         return;
 
     m_impl->open = false;
+    m_impl->deleteSession();
     m_impl->sessionId.clear();
     m_impl->protocolVersion.clear();
     m_impl->abandonExchanges();
