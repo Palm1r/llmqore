@@ -136,7 +136,8 @@ TEST_F(JsonRpcSessionTest, ATimedOutRequestIsCancelledAndAbandoned)
     const QString id = transport.sent.first().value("id").toString();
     const QList<QJsonObject> cancelled
         = transport.notificationsOf(QLatin1String(Rpc::Method::Cancelled));
-    ASSERT_EQ(cancelled.size(), 1) << "the peer must be told to stop working on a timed-out request";
+    ASSERT_EQ(cancelled.size(), 1)
+        << "the peer must be told to stop working on a timed-out request";
     const QJsonObject params = cancelled.first().value("params").toObject();
     EXPECT_EQ(params.value("requestId").toString().toStdString(), id.toStdString());
     EXPECT_EQ(params.value("reason").toString().toStdString(), "Request timed out");

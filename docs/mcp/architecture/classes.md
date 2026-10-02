@@ -116,6 +116,8 @@ The 2025-03-26 listen stream holds one HTTP connection for as long as the sessio
 
 A session the client is done with is ended with an HTTP `DELETE`: on `stop()`, when a new `initialize` supersedes it, and from the destructor. The request is fire-and-forget with a short timeout, so it never delays shutdown. From the destructor it only reaches the server through an injected `HttpTransport`; the private `HttpClient` is a child of the transport and aborts the request as it is destroyed. Keeping that client alive just to say goodbye is not worth it -- the spec makes the `DELETE` a SHOULD and the server reaps idle sessions anyway. A session the server ended with a 404 is not deleted.
 
+A request whose POST stream ends before the answer is not lost when the server gave that stream an event id: the exchange stays open and continues on a `GET` with `Last-Event-ID`, the way the 2025-11-25 spec lets a server close a stream and have the client poll. Each exchange keeps its own cursor, `retry` and backoff, separate from the listen stream's.
+
 A request the session stops waiting for -- cancelled by the caller or timed out -- is abandoned: `JsonRpcSession` calls `Rpc::Transport::abandon(requestId)`, and `McpStreamableHttpTransport` aborts that request's POST stream so it stops holding a connection. An abandoned request never produces `sendFailed`, and an answer that arrives on another stream afterwards is dropped by the session as an unknown id. The base implementation does nothing, which is right for transports whose replies do not occupy a per-request resource: stdio, pipes and the 2024-11-05 transport, where answers come over the shared `GET` stream.
 
 ## What ships with each seam
