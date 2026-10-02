@@ -16,6 +16,8 @@
 #include <QJsonArray>
 #include <QPromise>
 
+#include "core/ThreadAffinity.hpp"
+
 namespace LLMQore::Mcp {
 
 McpClient::McpClient(Rpc::Transport *transport, Implementation clientInfo, QObject *parent)
@@ -369,17 +371,20 @@ QFuture<CompletionResult> McpClient::complete(
 void McpClient::setSamplingClient(
     LLMQore::BaseClient *client, SamplingPayloadBuilder builder)
 {
+    LLMQORE_ASSERT_SAME_THREAD(client);
     m_samplingClient = client;
     m_samplingBuilder = std::move(builder);
 }
 
 void McpClient::setElicitationProvider(BaseElicitationProvider *provider)
 {
+    LLMQORE_ASSERT_SAME_THREAD(provider);
     m_elicitationProvider = provider;
 }
 
 void McpClient::setRootsProvider(BaseRootsProvider *provider)
 {
+    LLMQORE_ASSERT_SAME_THREAD(provider);
     if (m_rootsProvider) {
         disconnect(m_rootsProvider, nullptr, this, nullptr);
     }
