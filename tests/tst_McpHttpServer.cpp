@@ -20,6 +20,7 @@
 #include <QSignalSpy>
 
 #include <LLMQore/BaseTool.hpp>
+#include <LLMQore/HttpClient.hpp>
 #include <LLMQore/McpClient.hpp>
 #include <LLMQore/McpHttpServerTransport.hpp>
 #include <LLMQore/McpHttpTransport.hpp>
@@ -2675,6 +2676,107 @@ TEST_F(McpHttpServerTest, LatestSpecClosesAResumptionStreamOnceItCarriedTheAnswe
     EXPECT_TRUE(resumed->isAborted())
         << "a server may keep a resumed GET open after the answer; it must not hold a connection";
     EXPECT_EQ(failed.size(), 0);
+}
+
+namespace {
+
+struct ServerUnderTest
+{
+    McpHttpServerTransport transport{[] {
+        HttpServerConfig cfg;
+        cfg.address = QHostAddress::LocalHost;
+        cfg.port = 0;
+        cfg.path = "/mcp";
+        return cfg;
+    }()};
+    HttpClient http;
+
+    QUrl endpoint() const
+    {
+        return QUrl(QString("http://127.0.0.1:%1/mcp").arg(transport.serverPort()));
+    }
+
+    HttpResponse request(const QByteArray &verb, const QString &session, const QByteArray &body = {})
+    {
+        QNetworkRequest req(endpoint());
+        if (!session.isEmpty())
+            req.setRawHeader("Mcp-Session-Id", session.toUtf8());
+        if (!body.isEmpty())
+            req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+        return waitForFuture(http.send(req, QByteArrayView(verb), body));
+    }
+};
+
+} // namespace
+
+TEST_F(McpHttpServerTest, ServerEndsTheSessionAClientDeletes)
+{
+    ServerUnderTest server;
+    server.transport.start();
+    ASSERT_TRUE(server.transport.isOpen());
+    const QString session = server.transport.sessionId();
+
+    EXPECT_EQ(server.request("DELETE", session).statusCode, 200);
+
+    const QByteArray ping = compact(QJsonObject{{"jsonrpc", "2.0"}, {"method", "notifications/x"}});
+    EXPECT_EQ(server.request("POST", session, ping).statusCode, 404)
+        << "after termination the server MUST answer 404 to the ended session's id";
+    EXPECT_EQ(server.request("DELETE", session).statusCode, 404);
+    EXPECT_TRUE(server.transport.isOpen()) << "the server keeps listening for the next session";
+
+    const HttpResponse fresh = server.request("POST", {}, ping);
+    EXPECT_EQ(fresh.statusCode, 202);
+    const QByteArray next = fresh.rawHeader(QByteArrayView("Mcp-Session-Id"));
+    EXPECT_FALSE(next.isEmpty());
+    EXPECT_NE(QString::fromUtf8(next), session) << "a new session must not reuse the ended id";
+    EXPECT_EQ(server.request("POST", QString::fromUtf8(next), ping).statusCode, 202);
+}
+
+TEST_F(McpHttpServerTest, ServerRefusesToDeleteASessionItDoesNotKnow)
+{
+    ServerUnderTest server;
+    server.transport.start();
+    const QString session = server.transport.sessionId();
+
+    EXPECT_EQ(server.request("DELETE", "someone-else").statusCode, 400);
+    EXPECT_EQ(server.request("DELETE", {}).statusCode, 400);
+    EXPECT_EQ(server.transport.sessionId(), session);
+
+    const HttpResponse other = server.request("PUT", session);
+    EXPECT_EQ(other.statusCode, 405);
+    EXPECT_EQ(other.rawHeader(QByteArrayView("Allow")), QByteArray("POST, DELETE"));
+}
+
+TEST_F(McpHttpServerTest, ClientStopEndsTheSessionOnAnLlmqoreServer)
+{
+    HttpServerConfig serverCfg;
+    serverCfg.address = QHostAddress::LocalHost;
+    serverCfg.port = 0;
+    serverCfg.path = "/mcp";
+    auto *serverTransport = new McpHttpServerTransport(serverCfg);
+    McpServer server(serverTransport, McpServerConfig{{"http-delete-server", "0.0.1"}});
+    server.start();
+    const QString session = serverTransport->sessionId();
+
+    HttpTransportConfig clientCfg;
+    clientCfg.endpoint
+        = QUrl(QString("http://127.0.0.1:%1/mcp").arg(serverTransport->serverPort()));
+    auto *clientTransport = new McpStreamableHttpTransport(clientCfg);
+    McpClient client(clientTransport, Implementation{"http-delete-client", "0.0.1"});
+    waitForFuture(client.connectAndInitialize(std::chrono::seconds(5)));
+    ASSERT_EQ(clientTransport->sessionId(), session);
+
+    QtWarningCapture capture;
+    clientTransport->stop();
+    for (int i = 0; i < 100 && serverTransport->sessionId() == session; ++i)
+        pumpEventLoop(std::chrono::milliseconds(20));
+
+    EXPECT_NE(serverTransport->sessionId(), session) << "the DELETE must reach the server";
+    EXPECT_TRUE(capture.warnings().isEmpty()) << capture.warnings().join('\n').toStdString();
+
+    server.stop();
+    delete clientTransport;
+    delete serverTransport;
 }
 
 #include "tst_McpHttpServer.moc"
