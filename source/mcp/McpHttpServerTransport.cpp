@@ -14,6 +14,7 @@
 #include <QList>
 #include <QPointer>
 #include <QRandomGenerator>
+#include <QSet>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
@@ -43,6 +44,7 @@ struct McpHttpServerTransport::Impl
     QTcpServer *server = nullptr;
     bool open = false;
     QString sessionId;
+    QSet<QString> endedSessions;
 
     QHash<QTcpSocket *, HttpRequestParser> connections;
 
@@ -162,12 +164,15 @@ struct McpHttpServerTransport::Impl
 
     void processRequest(QTcpSocket *client, const HttpRequest &req)
     {
-        if (req.method != "POST") {
+        if (req.method != "POST" && req.method != "DELETE") {
             writeStatus(
                 client,
                 405,
                 "Method Not Allowed",
-                HeaderList{h("Allow", "POST"), h("Content-Length", "0"), h("Connection", "close")});
+                HeaderList{
+                    h("Allow", "POST, DELETE"),
+                    h("Content-Length", "0"),
+                    h("Connection", "close")});
             client->disconnectFromHost();
             return;
         }
@@ -182,15 +187,30 @@ struct McpHttpServerTransport::Impl
             const QString origin = QString::fromUtf8(req.header(QByteArrayView("origin")));
             if (!config.allowedOrigins.contains(origin)) {
                 qCWarning(llmMcpLog).noquote()
-                    << QString("Rejecting POST from disallowed Origin: %1").arg(origin);
+                    << QString("Rejecting %1 from disallowed Origin: %2")
+                           .arg(QString::fromLatin1(req.method), origin);
                 respondWithStatus(client, 403, "Forbidden");
                 return;
             }
         }
 
-        const QByteArray incomingSession = req.header(QByteArrayView("mcp-session-id"));
-        if (!incomingSession.isEmpty() && QString::fromUtf8(incomingSession) != sessionId) {
+        const QString incomingSession
+            = QString::fromUtf8(req.header(QByteArrayView("mcp-session-id")));
+        if (endedSessions.contains(incomingSession)) {
+            respondWithStatus(client, 404, "Not Found");
+            return;
+        }
+        if (!incomingSession.isEmpty() && incomingSession != sessionId) {
             respondWithStatus(client, 400, "Bad Request");
+            return;
+        }
+        if (req.method == "DELETE") {
+            if (incomingSession.isEmpty()) {
+                respondWithStatus(client, 400, "Bad Request");
+                return;
+            }
+            endSession();
+            respondWithStatus(client, 200, "OK");
             return;
         }
 
@@ -254,6 +274,23 @@ struct McpHttpServerTransport::Impl
 
         emit q->messageReceived(msg);
         writeAckOrQueuedMessages(client);
+    }
+
+    void endSession()
+    {
+        qCDebug(llmMcpLog).noquote() << QString("Client ended MCP session %1").arg(sessionId);
+        for (auto &entry : pendingByRequestId) {
+            if (entry.timeoutTimer) {
+                entry.timeoutTimer->stop();
+                entry.timeoutTimer->deleteLater();
+            }
+            if (QTcpSocket *socket = entry.socket.data())
+                socket->disconnectFromHost();
+        }
+        pendingByRequestId.clear();
+        queuedServerMessages.clear();
+        endedSessions.insert(sessionId);
+        sessionId = QUuid::createUuid().toString(QUuid::WithoutBraces);
     }
 
     void writeAckOrQueuedMessages(QTcpSocket *client)

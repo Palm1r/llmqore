@@ -15,6 +15,13 @@ The one exception is `BaseClient::cancelRequest()`. It marshals itself onto the 
 thread, so it is safe to call from anywhere — cancelling from a UI thread while the client
 runs on a worker is a supported pattern.
 
+Providers follow the object they are handed to. The sampling client given to
+`McpClient::setSamplingClient()`, the elicitation and roots providers given to `McpClient`,
+and the resource and prompt providers given to `McpServer` must live on that client's or
+server's thread. Their methods are called from that thread, and their signals —
+`listChanged`, `resourceUpdated` — must be emitted there. Debug builds assert it when the
+provider is installed.
+
 The MCP HTTP transports follow the same rule together with the `HttpTransport` they send
 through: the two must share a thread. Build them there, or move both with `moveToThread()`
 before `start()`; moving them mid-session is not supported.

@@ -497,6 +497,7 @@ void McpServer::removeTool(const QString &name)
 void McpServer::addResourceProvider(BaseResourceProvider *provider)
 {
     LLMQORE_ASSERT_OWNING_THREAD();
+    LLMQORE_ASSERT_SAME_THREAD(provider);
     if (!provider)
         return;
     m_resourceProviders.append(provider);
@@ -522,6 +523,7 @@ void McpServer::removeResourceProvider(BaseResourceProvider *provider)
 void McpServer::addPromptProvider(BasePromptProvider *provider)
 {
     LLMQORE_ASSERT_OWNING_THREAD();
+    LLMQORE_ASSERT_SAME_THREAD(provider);
     if (!provider)
         return;
     m_promptProviders.append(provider);

@@ -9,6 +9,7 @@
 #include <QNetworkRequest>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 #include <LLMQore/HttpClient.hpp>
 #include <LLMQore/HttpResponse.hpp>
@@ -29,10 +30,40 @@ inline LLMQore::HttpTransport *resolveHttpTransport(
     return client;
 }
 
+inline bool isProtocolHeader(const QString &name)
+{
+    static const QStringList protocolHeaders{
+        QStringLiteral("Accept"),
+        QStringLiteral("Content-Type"),
+        QStringLiteral("Mcp-Session-Id"),
+        QStringLiteral("MCP-Protocol-Version"),
+        QStringLiteral("Last-Event-ID"),
+        QStringLiteral("Cache-Control"),
+    };
+    return protocolHeaders.contains(name.trimmed(), Qt::CaseInsensitive);
+}
+
+inline void warnAboutProtocolHeaders(const QHash<QString, QString> &headers)
+{
+    QStringList ignored;
+    for (auto it = headers.constBegin(); it != headers.constEnd(); ++it) {
+        if (isProtocolHeader(it.key()))
+            ignored.append(it.key());
+    }
+    if (ignored.isEmpty())
+        return;
+    ignored.sort(Qt::CaseInsensitive);
+    qCWarning(llmMcpLog).noquote()
+        << QString("Ignoring configured headers the MCP transport owns: %1")
+               .arg(ignored.join(QStringLiteral(", ")));
+}
+
 inline void applyCustomHeaders(QNetworkRequest &request, const QHash<QString, QString> &headers)
 {
-    for (auto it = headers.constBegin(); it != headers.constEnd(); ++it)
-        request.setRawHeader(it.key().toUtf8(), it.value().toUtf8());
+    for (auto it = headers.constBegin(); it != headers.constEnd(); ++it) {
+        if (!isProtocolHeader(it.key()))
+            request.setRawHeader(it.key().toUtf8(), it.value().toUtf8());
+    }
 }
 
 inline QNetworkRequest eventStreamRequest(const HttpTransportConfig &config)

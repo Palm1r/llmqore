@@ -186,7 +186,7 @@ JsonRpcSession::CancellableRequest JsonRpcSession::sendRequestImpl(
     timer->setSingleShot(true);
     timer->setInterval(static_cast<int>(timeout.count()));
 
-    Pending pending{promise, timer, trackProgressToken ? id : QString()};
+    Pending pending{promise, timer, trackProgressToken ? id : QString(), method};
     m_pending.insert(id, pending);
 
     connect(timer, &QTimer::timeout, this, [this, id]() {
@@ -194,12 +194,14 @@ JsonRpcSession::CancellableRequest JsonRpcSession::sendRequestImpl(
         if (it == m_pending.end())
             return;
         auto p = it->promise;
+        const QString method = it->method;
         if (it->timer)
             it->timer->deleteLater();
         if (!it->progressToken.isEmpty())
             clearProgressHandler(it->progressToken);
         m_pending.erase(it);
         qCWarning(llmRpcLog).noquote() << QString("Request %1 timed out").arg(id);
+        abandonRequest(id, method, QStringLiteral("Request timed out"));
         p->setException(
             std::make_exception_ptr(TimeoutError(QString("Request %1 timed out").arg(id))));
         p->finish();
@@ -246,12 +248,8 @@ void JsonRpcSession::cancelRequest(const QString &id, const QString &reason)
     if (it == m_pending.end())
         return;
 
-    QJsonObject params{{"requestId", id}};
-    if (!reason.isEmpty())
-        params.insert("reason", reason);
-    sendNotification(QLatin1String(Method::Cancelled), params);
-
     auto p = it->promise;
+    const QString method = it->method;
     if (it->timer) {
         it->timer->stop();
         it->timer->deleteLater();
@@ -259,9 +257,24 @@ void JsonRpcSession::cancelRequest(const QString &id, const QString &reason)
     if (!it->progressToken.isEmpty())
         clearProgressHandler(it->progressToken);
     m_pending.erase(it);
+    abandonRequest(id, method, reason);
     p->setException(std::make_exception_ptr(CancelledError(
         reason.isEmpty() ? QStringLiteral("Cancelled by caller") : reason)));
     p->finish();
+}
+
+void JsonRpcSession::abandonRequest(
+    const QString &id, const QString &method, const QString &reason)
+{
+    if (!m_transport || !m_transport->isOpen())
+        return;
+    if (method != QLatin1String("initialize")) {
+        QJsonObject params{{"requestId", id}};
+        if (!reason.isEmpty())
+            params.insert("reason", reason);
+        sendNotification(QLatin1String(Method::Cancelled), params);
+    }
+    m_transport->abandon(id);
 }
 
 void JsonRpcSession::sendNotification(const QString &method, const QJsonObject &params)

@@ -10,6 +10,8 @@ LLM-agnostic -- knows nothing about JSON, SSE events, MCP. Also backs the MCP HT
 
 Authentication and request headers are not part of this layer: a fully-formed `QNetworkRequest` arrives here. `BaseClient` builds it from its own `AuthScheme` and header map (see [BaseClient contract](clients/base-client.md)); the MCP HTTP transports carry their own header map. The transport just sends what it is handed.
 
+The MCP HTTP transports own the protocol headers -- `Accept`, `Content-Type`, `Mcp-Session-Id`, `MCP-Protocol-Version`, `Last-Event-ID` and `Cache-Control`. A configured header with one of these names (compared case-insensitively) is dropped from every request, and the transport logs one warning listing the dropped names when it is constructed. Every other configured header, such as `Authorization`, is applied last.
+
 ```mermaid
 flowchart TD
     subgraph User["Caller"]

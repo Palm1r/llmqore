@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(LLMQore
-    VERSION 0.8.0
+    VERSION 0.9.0
     LANGUAGES CXX
     DESCRIPTION "Qt/C++ library for LLM provider integration"
 )
@@ -28,7 +28,7 @@ set_target_properties(LLMQore PROPERTIES
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON
     VERSION ${PROJECT_VERSION}
-    SOVERSION ${PROJECT_VERSION_MAJOR}
+    SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
 )
 
 add_subdirectory(source)
@@ -107,7 +107,7 @@ if(LLMQORE_INSTALL)
     write_basic_package_version_file(
         ${CMAKE_CURRENT_BINARY_DIR}/LLMQoreConfigVersion.cmake
         VERSION ${PROJECT_VERSION}
-        COMPATIBILITY SameMajorVersion
+        COMPATIBILITY SameMinorVersion
     )
 
     install(FILES

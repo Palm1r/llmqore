@@ -7,12 +7,14 @@ include(FetchContent)
 FetchContent_Declare(
     LLMQore
     GIT_REPOSITORY https://github.com/palm1r/llmqore.git
-    GIT_TAG v0.8.0
+    GIT_TAG v0.9.0
 )
 FetchContent_MakeAvailable(LLMQore)
 
 target_link_libraries(YourApp PRIVATE LLMQore::LLMQore)
 ```
+
+Upgrading from 0.8? See [Migrating to 0.9](migration-0.9.md).
 
 ## Installed
 

@@ -47,6 +47,7 @@ public:
     void stop() override;
     bool isOpen() const override;
     void send(const QJsonObject &message) override;
+    void abandon(const QString &requestId) override;
 
     [[nodiscard]] const HttpTransportConfig &config() const;
     [[nodiscard]] QString sessionId() const;

@@ -93,9 +93,10 @@ jobs:
             qt_icu_workdir: "",
           }
         - {
-            name: "Ubuntu 22.04 GCC", os: ubuntu-22.04,
+            name: "Ubuntu 22.04 GCC Debug", os: ubuntu-22.04,
             cc: "gcc", cxx: "g++",
             environment_script: "",
+            build_type: "Debug",
             qt_version: "6.8.3",
             url_os: "linux_x64",
             qt_repo_path: "qt6_683/qt6_683",
@@ -325,7 +326,7 @@ jobs:
             -S .
             -B build
             -G Ninja
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type || 'Release' }}
             "-DCMAKE_PREFIX_PATH=${{ steps.qt.outputs.qt_dir }}"
             "-DCMAKE_EXE_LINKER_FLAGS=${linker_flags}"
             -DLLMQORE_BUILD_TESTS=ON
