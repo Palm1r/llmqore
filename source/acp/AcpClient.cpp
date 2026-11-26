@@ -285,8 +285,10 @@ void AcpClient::installHandlers()
                 return LLMQore::readyFuture<QJsonValue>(
                     RequestPermissionResult::cancelled().toJson());
             }
+            const ToolCall toolCall = mergeToolCall(
+                m_sessions.value(p.sessionId).tools.value(p.toolCall.toolCallId), p.toolCall);
             return LLMQore::compat(
-                       m_permissionProvider->requestPermission(p.sessionId, p.toolCall, p.options))
+                       m_permissionProvider->requestPermission(p.sessionId, toolCall, p.options))
                 .then(this, [](const RequestPermissionResult &r) { return QJsonValue(r.toJson()); });
         });
 

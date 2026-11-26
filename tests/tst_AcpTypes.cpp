@@ -460,6 +460,31 @@ TEST(AcpTypes, RequestPermissionRoundTrip)
     EXPECT_EQ(back.options.first().kind, "allow_once");
 }
 
+TEST(AcpTypes, RequestPermissionParsesAToolCallNamedByIdAlone)
+{
+    const QJsonObject wire{
+        {"sessionId", "sess_abc123def456"},
+        {"toolCall", QJsonObject{{"toolCallId", "call_001"}}},
+        {"options",
+         QJsonArray{
+             QJsonObject{{"optionId", "allow-once"}, {"name", "Allow once"}, {"kind", "allow_once"}},
+             QJsonObject{{"optionId", "reject-once"}, {"name", "Reject"}, {"kind", "reject_once"}}}}};
+
+    const RequestPermissionParams p = RequestPermissionParams::fromJson(wire);
+    EXPECT_EQ(p.sessionId, "sess_abc123def456");
+    EXPECT_EQ(p.toolCall.toolCallId, "call_001");
+    EXPECT_TRUE(p.toolCall.title.isEmpty());
+    EXPECT_TRUE(p.toolCall.kind.isEmpty());
+    EXPECT_TRUE(p.toolCall.status.isEmpty());
+    EXPECT_TRUE(p.toolCall.content.isEmpty());
+    EXPECT_TRUE(p.toolCall.locations.isEmpty());
+    EXPECT_TRUE(p.toolCall.rawInput.isEmpty());
+    EXPECT_TRUE(p.toolCall.rawOutput.isEmpty());
+    ASSERT_EQ(p.options.size(), 2);
+    EXPECT_EQ(p.options.last().optionId, "reject-once");
+    EXPECT_EQ(p.toJson(), wire);
+}
+
 TEST(AcpTypes, RequestPermissionResultSelectedAndCancelled)
 {
     const RequestPermissionResult sel = RequestPermissionResult::selected("a");

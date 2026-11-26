@@ -65,7 +65,7 @@ one name cannot stand for two protocols:
 Code that picked the revision through `HttpTransportConfig::spec` keeps doing so:
 `new McpHttpTransport(cfg, http, parent)` becomes `makeHttpTransport(cfg, http, parent)`.
 
-Two design choices to note:
+Three design choices to note:
 
 - **Progress / cancellation live in `Rpc::JsonRpcSession`.** They are generic JSON-RPC
   patterns (MCP standardised the `notifications/progress` / `notifications/cancelled`
@@ -73,6 +73,11 @@ Two design choices to note:
 - **Permission has no capability flag.** `session/request_permission` is always handled;
   with no `AcpPermissionProvider` the host answers `outcome: cancelled`. Only `fs.*` and
   `terminal` are gated by provider presence in `initialize`.
+- **The permission provider gets the merged call.** The request's `toolCall` is a
+  `ToolCallUpdate` and may carry only the `toolCallId`; codex-acp 2.11.0 sends
+  `toolCallId`, `kind` and `status` for an MCP call it has already reported. The provider
+  receives the stored call with the request's fields applied. The stored call is not
+  updated and no signal is emitted.
 
 ## Method coverage
 
@@ -215,8 +220,9 @@ See the ACP path in [`example/ChatController.cpp`](../../example/ChatController.
 ## Tests
 
 `tst_AcpTypes` (round-trip of every wire struct), `tst_AcpLoopback` (handshake,
-streaming, cancel, and a full prompt turn where the agent calls back into the host for
-`fs/read_text_file` + `session/request_permission`), `tst_AcpProviders`
+streaming, cancel, a full prompt turn where the agent calls back into the host for
+`fs/read_text_file` + `session/request_permission`, and permission requests completed
+from the stored tool call), `tst_AcpProviders`
 (`DefaultFileSystemProvider`, `TerminalManager`, `CallbackPermissionProvider`),
 `tst_AcpAgentConfig` (launch config + JSON round-trip), `tst_AcpAgentRegistry`
 (catalogue load/merge/lookup). All run under the standard

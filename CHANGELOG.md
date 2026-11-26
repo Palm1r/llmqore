@@ -39,3 +39,4 @@ Rebuild against 0.9 and follow [Migrating to 0.9](docs/migration-0.9.md). In sho
 - Protocol headers (`Accept`, `Content-Type`, `Mcp-Session-Id`, `MCP-Protocol-Version`, `Last-Event-ID`, `Cache-Control`) can no longer be overridden from `HttpTransportConfig::headers`; such entries are dropped with one warning.
 - The 2024-11-05 transport survives a handler that stops, restarts or deletes it from inside one of its signals.
 - Debug builds assert that a provider handed to `McpClient` or `McpServer` lives on its thread.
+- The `AcpPermissionProvider` receives the stored tool call with the fields of the permission request applied by `mergeToolCall()`.
