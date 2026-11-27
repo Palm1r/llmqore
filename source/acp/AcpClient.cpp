@@ -195,7 +195,7 @@ QFuture<QList<SessionConfigOption>> AcpClient::setConfigOption(
         {"sessionId", sessionId},
         {"configId", configId},
         {"value", enabled},
-        {"type", QStringLiteral("boolean")}};
+        {"type", QLatin1String(SessionConfigOptionType::Boolean)}};
     return LLMQore::compat(m_peer->request(QLatin1String(Method::SetConfigOption), params, timeout))
         .then(this, [](const QJsonValue &v) {
             return configOptionsFromJson(v.toObject().value("configOptions").toArray());

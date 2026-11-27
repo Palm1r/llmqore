@@ -33,6 +33,7 @@ Rebuild against 0.9 and follow [Migrating to 0.9](docs/migration-0.9.md). In sho
 - `Rpc::Transport::sendFailed`, so a request whose message never left fails at once.
 - `CallbackElicitationProvider`, `DirectoryRootsProvider`, `StaticResourceProvider`.
 - `ProviderProfile` and a `*Profile()` function for every bundled client.
+- `Acp::ContentBlockType`, `ToolCallStatus`, `ToolKind`, `ToolCallContentType`, `PlanEntryStatus`, `PlanEntryPriority`, `SessionConfigOptionType` and `ErrorCode` name ACP's values and its two error codes.
 
 ### Fixed
 

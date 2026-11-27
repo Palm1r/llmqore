@@ -641,4 +641,47 @@ TEST(AcpTypes, HandshakeStructuresCarryUnknownFieldsThrough)
     expectUnknownKeySurvives<PromptResult>("PromptResult");
 }
 
+TEST(AcpTypes, ValueNamesMatchTheSchema)
+{
+    EXPECT_STREQ(ContentBlockType::Text, "text");
+    EXPECT_STREQ(ContentBlockType::Image, "image");
+    EXPECT_STREQ(ContentBlockType::Audio, "audio");
+    EXPECT_STREQ(ContentBlockType::ResourceLink, "resource_link");
+    EXPECT_STREQ(ContentBlockType::Resource, "resource");
+
+    EXPECT_STREQ(ToolCallStatus::Pending, "pending");
+    EXPECT_STREQ(ToolCallStatus::InProgress, "in_progress");
+    EXPECT_STREQ(ToolCallStatus::Completed, "completed");
+    EXPECT_STREQ(ToolCallStatus::Failed, "failed");
+
+    EXPECT_STREQ(ToolKind::Read, "read");
+    EXPECT_STREQ(ToolKind::Edit, "edit");
+    EXPECT_STREQ(ToolKind::Delete, "delete");
+    EXPECT_STREQ(ToolKind::Move, "move");
+    EXPECT_STREQ(ToolKind::Search, "search");
+    EXPECT_STREQ(ToolKind::Execute, "execute");
+    EXPECT_STREQ(ToolKind::Think, "think");
+    EXPECT_STREQ(ToolKind::Fetch, "fetch");
+    EXPECT_STREQ(ToolKind::SwitchMode, "switch_mode");
+    EXPECT_STREQ(ToolKind::Other, "other");
+
+    EXPECT_STREQ(ToolCallContentType::Content, "content");
+    EXPECT_STREQ(ToolCallContentType::Diff, "diff");
+    EXPECT_STREQ(ToolCallContentType::Terminal, "terminal");
+
+    EXPECT_STREQ(PlanEntryStatus::Pending, "pending");
+    EXPECT_STREQ(PlanEntryStatus::InProgress, "in_progress");
+    EXPECT_STREQ(PlanEntryStatus::Completed, "completed");
+
+    EXPECT_STREQ(PlanEntryPriority::High, "high");
+    EXPECT_STREQ(PlanEntryPriority::Medium, "medium");
+    EXPECT_STREQ(PlanEntryPriority::Low, "low");
+
+    EXPECT_STREQ(SessionConfigOptionType::Select, "select");
+    EXPECT_STREQ(SessionConfigOptionType::Boolean, "boolean");
+
+    EXPECT_EQ(ErrorCode::AuthRequired, -32000);
+    EXPECT_EQ(ErrorCode::ResourceNotFound, -32002);
+}
+
 } // namespace

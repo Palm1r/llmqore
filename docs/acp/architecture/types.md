@@ -64,6 +64,14 @@ struct LLMQORE_EXPORT ContentBlock
 `user_message_chunk`, `agent_message_chunk`, `agent_thought_chunk`, `tool_call`,
 `tool_call_update`, `plan`, `available_commands_update`, `current_mode_update`.
 
+## Value names
+
+Some `QString` fields hold one of a fixed list of values, for example `ToolCall::status`.
+`AcpTypes.hpp` has a namespace of constants for each list: `StopReason`,
+`PermissionOptionKind`, `SessionUpdateKind`, `ContentBlockType`, `ToolCallStatus`,
+`ToolKind`, `ToolCallContentType`, `PlanEntryStatus`, `PlanEntryPriority`,
+`SessionConfigOptionType`.
+
 ## ContentBlock ↔ existing `ContentBlocks`
 
 The repo already has [`ContentBlocks`](../../../include/LLMQore/ContentBlocks.hpp) for
@@ -87,6 +95,9 @@ Reuse the JSON-RPC error constants already defined in `McpTypes`
 (`ErrorCode::{ParseError, InvalidRequest, MethodNotFound, InvalidParams,
 InternalError, RequestCancelled}`) — they are standard JSON-RPC 2.0 codes, not
 MCP-specific, so they belong in the shared `Rpc` layer alongside `JsonRpcSession`.
+
+ACP's own codes are `Acp::ErrorCode::AuthRequired` (-32000) and
+`Acp::ErrorCode::ResourceNotFound` (-32002).
 
 ## The `protocolVersion` gotcha
 

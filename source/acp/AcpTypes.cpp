@@ -307,7 +307,7 @@ QJsonObject SessionConfigOption::toJson() const
         o.insert("description", description);
     if (!category.isEmpty())
         o.insert("category", category);
-    if (type == QLatin1String("boolean"))
+    if (type == QLatin1String(SessionConfigOptionType::Boolean))
         o.insert("currentValue", enabled);
     else
         o.insert("currentValue", value);
@@ -333,7 +333,7 @@ SessionConfigOption SessionConfigOption::fromJson(const QJsonObject &obj)
     o.description = obj.value("description").toString();
     o.category = obj.value("category").toString();
     o.type = obj.value("type").toString();
-    if (o.type == QLatin1String("boolean"))
+    if (o.type == QLatin1String(SessionConfigOptionType::Boolean))
         o.enabled = obj.value("currentValue").toBool();
     else
         o.value = obj.value("currentValue").toString();
@@ -418,17 +418,17 @@ EmbeddedResource EmbeddedResource::fromJson(const QJsonObject &obj)
 QJsonObject ContentBlock::toJson() const
 {
     QJsonObject o{{"type", type}};
-    if (type == QLatin1String("text")) {
+    if (type == QLatin1String(ContentBlockType::Text)) {
         o.insert("text", text);
-    } else if (type == QLatin1String("image")) {
+    } else if (type == QLatin1String(ContentBlockType::Image)) {
         o.insert("data", data);
         o.insert("mimeType", mimeType);
         if (!uri.isEmpty())
             o.insert("uri", uri);
-    } else if (type == QLatin1String("audio")) {
+    } else if (type == QLatin1String(ContentBlockType::Audio)) {
         o.insert("data", data);
         o.insert("mimeType", mimeType);
-    } else if (type == QLatin1String("resource_link")) {
+    } else if (type == QLatin1String(ContentBlockType::ResourceLink)) {
         o.insert("uri", uri);
         o.insert("name", name);
         if (!description.isEmpty())
@@ -439,7 +439,7 @@ QJsonObject ContentBlock::toJson() const
             o.insert("title", title);
         if (size)
             o.insert("size", *size);
-    } else if (type == QLatin1String("resource")) {
+    } else if (type == QLatin1String(ContentBlockType::Resource)) {
         if (resource)
             o.insert("resource", resource->toJson());
     }
@@ -456,7 +456,7 @@ ContentBlock ContentBlock::fromJson(const QJsonObject &obj)
 ContentBlock ContentBlock::makeText(const QString &text)
 {
     ContentBlock b;
-    b.type = QStringLiteral("text");
+    b.type = QString::fromLatin1(ContentBlockType::Text);
     b.text = text;
     return b;
 }
@@ -511,15 +511,15 @@ ToolCallLocation ToolCallLocation::fromJson(const QJsonObject &obj)
 QJsonObject ToolCallContent::toJson() const
 {
     QJsonObject o{{"type", type}};
-    if (type == QLatin1String("content")) {
+    if (type == QLatin1String(ToolCallContentType::Content)) {
         if (content)
             o.insert("content", content->toJson());
-    } else if (type == QLatin1String("diff")) {
+    } else if (type == QLatin1String(ToolCallContentType::Diff)) {
         o.insert("path", path);
         if (!oldText.isNull())
             o.insert("oldText", oldText);
         o.insert("newText", newText);
-    } else if (type == QLatin1String("terminal")) {
+    } else if (type == QLatin1String(ToolCallContentType::Terminal)) {
         o.insert("terminalId", terminalId);
     }
     return o;
