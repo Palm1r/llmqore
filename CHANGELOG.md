@@ -22,6 +22,7 @@ Rebuild against 0.9 and follow [Migrating to 0.9](docs/migration-0.9.md). In sho
 - `SSEEvent::id` carries over between events, as WHATWG specifies.
 - `McpToolBinder` does not ask `tools/list` of a server without the tools capability.
 - A request that times out sends `notifications/cancelled` (never for `initialize`).
+- A `session/request_permission` updates the stored tool call as a `tool_call_update` does: `toolCallUpdated` is emitted, and the `AcpPermissionProvider` receives the merged call.
 
 ### Added
 

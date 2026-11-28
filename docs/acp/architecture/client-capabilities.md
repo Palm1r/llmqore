@@ -36,6 +36,9 @@ running commands). `options` are agent-supplied choices, each with a `kind`:
 `allow_once`, `allow_always`, `reject_once`, `reject_always`. The provider surfaces
 them to the user and resolves with either `{ selected, optionId }` or `{ cancelled }`.
 
+The request's `toolCall` is merged with the stored call like a `tool_call_update`, and the
+argument `toolCall` is the merged call.
+
 - A `*_always` choice is the host's cue to **remember** the decision and auto-answer
   future matching requests without prompting (policy lives in the host, not the agent).
 - The default provider with no UI should resolve `cancelled` (safe default), not block.

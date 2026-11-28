@@ -462,8 +462,10 @@ TEST_F(AcpLoopbackTest, PromptDrivesHostCallbacksFsAndPermission)
 
     AcpClient client(clientTransport);
     DefaultFileSystemProvider fs;
+    ToolCall askedAbout;
     CallbackPermissionProvider perm(
-        [](const QString &, const ToolCall &, const QList<PermissionOption> &opts) {
+        [&askedAbout](const QString &, const ToolCall &call, const QList<PermissionOption> &opts) {
+            askedAbout = call;
             return RequestPermissionResult::selected(opts.first().optionId);
         });
     client.setFileSystemProvider(&fs);
@@ -490,11 +492,221 @@ TEST_F(AcpLoopbackTest, PromptDrivesHostCallbacksFsAndPermission)
     EXPECT_EQ(*capturedOutcome, "selected");
     EXPECT_EQ(*streamed, "read=hello-from-host;perm=selected");
 
+    EXPECT_EQ(askedAbout.toolCallId, "c1");
+    EXPECT_EQ(askedAbout.title, "write file");
+
     delete agentSession;
     delete serverTransport;
     delete clientTransport;
 }
 
+namespace {
+
+enum class ProviderSetup { Set, Unset, ResetOnUpdate };
+
+struct PermissionTurn
+{
+    ToolCall askedAbout;
+    QList<ToolCall> updates;
+    QString outcome;
+    int toolCallsStarted = 0;
+};
+
+PermissionTurn runPermissionTurn(
+    const QJsonObject &requestToolCall, ProviderSetup provider = ProviderSetup::Set)
+{
+    auto [serverTransport, clientTransport] = Rpc::PipeTransport::createPair();
+
+    auto *agentSession = new Rpc::JsonRpcSession(serverTransport);
+    agentSession->setRequestHandler(QLatin1String(Method::Initialize), [](const QJsonObject &) {
+        return resolvedJson(InitializeResult{}.toJson());
+    });
+    agentSession->setRequestHandler(QLatin1String(Method::NewSession), [](const QJsonObject &) {
+        NewSessionResult r;
+        r.sessionId = "s";
+        return resolvedJson(r.toJson());
+    });
+
+    auto outcome = std::make_shared<QString>();
+    agentSession->setRequestHandler(
+        QLatin1String(Method::Prompt),
+        [agentSession, requestToolCall, outcome](const QJsonObject &params) -> QFuture<QJsonValue> {
+            const QString sid = params.value("sessionId").toString();
+
+            agentSession->sendNotification(
+                QLatin1String(Method::SessionUpdate),
+                QJsonObject{
+                    {"sessionId", sid},
+                    {"update",
+                     QJsonObject{
+                         {"sessionUpdate", "tool_call"},
+                         {"toolCallId", "call_001"},
+                         {"title", "Reading configuration file"},
+                         {"kind", "read"},
+                         {"status", "in_progress"},
+                         {"rawInput", QJsonObject{{"path", "/work/config.json"}}},
+                         {"locations", QJsonArray{QJsonObject{{"path", "/work/config.json"}}}}}}});
+
+            const QJsonObject request{
+                {"sessionId", sid},
+                {"toolCall", requestToolCall},
+                {"options",
+                 QJsonArray{QJsonObject{
+                     {"optionId", "allow-once"}, {"name", "Allow once"}, {"kind", "allow_once"}}}}};
+            return LLMQore::compat(
+                       agentSession->sendRequest(QLatin1String(Method::RequestPermission), request))
+                .then(
+                    agentSession,
+                    [agentSession, requestToolCall, sid, outcome](
+                        const QJsonValue &pv) -> QJsonValue {
+                        *outcome = RequestPermissionResult::fromJson(pv.toObject()).outcome;
+                        agentSession->sendNotification(
+                            QLatin1String(Method::SessionUpdate),
+                            QJsonObject{
+                                {"sessionId", sid},
+                                {"update",
+                                 QJsonObject{
+                                     {"sessionUpdate", "tool_call_update"},
+                                     {"toolCallId", requestToolCall.value("toolCallId")},
+                                     {"status", "completed"}}}});
+                        PromptResult pr;
+                        pr.stopReason = QString::fromLatin1(StopReason::EndTurn);
+                        return pr.toJson();
+                    });
+        });
+
+    serverTransport->start();
+
+    PermissionTurn turn;
+    {
+        AcpClient client(clientTransport);
+        CallbackPermissionProvider perm(
+            [&turn](const QString &, const ToolCall &call, const QList<PermissionOption> &opts) {
+                turn.askedAbout = call;
+                return RequestPermissionResult::selected(opts.first().optionId);
+            });
+        if (provider != ProviderSetup::Unset)
+            client.setPermissionProvider(&perm);
+        QObject::connect(
+            &client,
+            &AcpClient::toolCallStarted,
+            &client,
+            [&turn](const QString &, const ToolCall &) { ++turn.toolCallsStarted; });
+        QObject::connect(
+            &client,
+            &AcpClient::toolCallUpdated,
+            &client,
+            [&turn, &client, provider](const QString &, const ToolCall &call) {
+                turn.updates.append(call);
+                if (provider == ProviderSetup::ResetOnUpdate)
+                    client.setPermissionProvider(nullptr);
+            });
+
+        waitForFuture(client.connectAndInitialize());
+        const NewSessionResult ns = waitForFuture(client.newSession(NewSessionParams{}));
+        waitForFuture(
+            client.prompt(ns.sessionId, {ContentBlock::makeText("go")}), std::chrono::seconds(8));
+        turn.outcome = *outcome;
+    }
+
+    delete agentSession;
+    delete serverTransport;
+    delete clientTransport;
+    return turn;
+}
+
+} // namespace
+
+TEST_F(AcpLoopbackTest, PermissionRequestNamingOnlyTheIdGetsTheReportedCall)
+{
+    const PermissionTurn turn = runPermissionTurn(QJsonObject{{"toolCallId", "call_001"}});
+
+    EXPECT_EQ(turn.outcome, "selected");
+    EXPECT_EQ(turn.askedAbout.toolCallId, "call_001");
+    EXPECT_EQ(turn.askedAbout.title, "Reading configuration file");
+    EXPECT_EQ(turn.askedAbout.kind, "read");
+    EXPECT_EQ(turn.askedAbout.status, "in_progress");
+    EXPECT_EQ(turn.askedAbout.rawInput, (QJsonObject{{"path", "/work/config.json"}}));
+    ASSERT_EQ(turn.askedAbout.locations.size(), 1);
+    EXPECT_EQ(turn.askedAbout.locations.first().path, "/work/config.json");
+}
+
+TEST_F(AcpLoopbackTest, PermissionRequestFieldsReplaceTheReportedOnes)
+{
+    const PermissionTurn turn = runPermissionTurn(
+        QJsonObject{{"toolCallId", "call_001"}, {"kind", "execute"}, {"status", "pending"}});
+
+    EXPECT_EQ(turn.outcome, "selected");
+    EXPECT_EQ(turn.askedAbout.kind, "execute");
+    EXPECT_EQ(turn.askedAbout.status, "pending");
+    EXPECT_EQ(turn.askedAbout.title, "Reading configuration file");
+    EXPECT_EQ(turn.askedAbout.rawInput, (QJsonObject{{"path", "/work/config.json"}}));
+}
+
+TEST_F(AcpLoopbackTest, PermissionRequestUpdatesTheStoredCall)
+{
+    const PermissionTurn turn = runPermissionTurn(
+        QJsonObject{{"toolCallId", "call_001"}, {"kind", "execute"}, {"status", "pending"}});
+
+    EXPECT_EQ(turn.toolCallsStarted, 1);
+    ASSERT_EQ(turn.updates.size(), 2);
+    EXPECT_EQ(turn.updates.first().toolCallId, "call_001");
+    EXPECT_EQ(turn.updates.first().kind, "execute");
+    EXPECT_EQ(turn.updates.first().status, "pending");
+    EXPECT_EQ(turn.updates.first().title, "Reading configuration file");
+    EXPECT_EQ(turn.updates.last().status, "completed");
+    EXPECT_EQ(turn.updates.last().kind, "execute");
+    EXPECT_EQ(turn.updates.last().title, "Reading configuration file");
+}
+
+TEST_F(AcpLoopbackTest, PermissionRequestForAnUnknownCallStoresIt)
+{
+    const PermissionTurn turn = runPermissionTurn(
+        QJsonObject{
+            {"toolCallId", "call_002"},
+            {"title", "Writing report"},
+            {"kind", "edit"},
+            {"status", "pending"}});
+
+    EXPECT_EQ(turn.outcome, "selected");
+    EXPECT_EQ(turn.askedAbout.toolCallId, "call_002");
+    EXPECT_EQ(turn.askedAbout.title, "Writing report");
+    EXPECT_TRUE(turn.askedAbout.rawInput.isEmpty());
+
+    EXPECT_EQ(turn.toolCallsStarted, 1);
+    ASSERT_EQ(turn.updates.size(), 2);
+    EXPECT_EQ(turn.updates.first().toolCallId, "call_002");
+    EXPECT_EQ(turn.updates.first().status, "pending");
+    EXPECT_EQ(turn.updates.last().toolCallId, "call_002");
+    EXPECT_EQ(turn.updates.last().status, "completed");
+    EXPECT_EQ(turn.updates.last().title, "Writing report");
+    EXPECT_EQ(turn.updates.last().kind, "edit");
+}
+
+TEST_F(AcpLoopbackTest, PermissionRequestWithoutAProviderUpdatesTheStoredCall)
+{
+    const PermissionTurn turn = runPermissionTurn(
+        QJsonObject{{"toolCallId", "call_001"}, {"kind", "execute"}, {"status", "pending"}},
+        ProviderSetup::Unset);
+
+    EXPECT_EQ(turn.outcome, "cancelled");
+    ASSERT_EQ(turn.updates.size(), 2);
+    EXPECT_EQ(turn.updates.first().kind, "execute");
+    EXPECT_EQ(turn.updates.first().status, "pending");
+    EXPECT_EQ(turn.updates.last().status, "completed");
+    EXPECT_EQ(turn.updates.last().kind, "execute");
+}
+
+TEST_F(AcpLoopbackTest, PermissionRequestIsCancelledWhenASlotResetsTheProvider)
+{
+    const PermissionTurn turn = runPermissionTurn(
+        QJsonObject{{"toolCallId", "call_001"}, {"kind", "execute"}, {"status", "pending"}},
+        ProviderSetup::ResetOnUpdate);
+
+    EXPECT_EQ(turn.outcome, "cancelled");
+    EXPECT_TRUE(turn.askedAbout.toolCallId.isEmpty());
+    EXPECT_EQ(turn.updates.size(), 2);
+}
 
 namespace {
 
