@@ -17,6 +17,10 @@ on:
       - 'docs/**'
   workflow_dispatch:
     inputs:
+      extended:
+        description: "Also build Qt 6.8.3 and 6.10.2 compatibility configurations"
+        type: boolean
+        default: false
       package:
         description: "Build and upload mcp-bridge artifacts"
         type: boolean
@@ -28,142 +32,35 @@ env:
 
 jobs:
   build:
-    name: ${{ matrix.name }} (Qt ${{ matrix.qt_version }})
+    name: ${{ matrix.name }}${{ matrix.os == 'ubuntu-22.04' && matrix.qt_version == '6.8.3' && ' Debug' || '' }} (Qt ${{ matrix.qt_version }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        # PRs and main build only the latest Qt 6. Extended manual runs also
+        # check older versions; packaging keeps its existing Qt 6.10.2 runtime.
+        qt_version: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.extended && '["6.8.3", "6.10.2", "6.12.1"]' || (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.package)) && '["6.10.2", "6.12.1"]' || '["6.12.1"]') }}
+        os: [windows-2022, ubuntu-22.04, macos-latest]
         include:
-        # ── Qt 6.5.3 ──
-        # - {
-        #     name: "Windows MSVC 2019", os: windows-latest,
-        #     cc: "cl", cxx: "cl",
-        #     environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat",
-        #     qt_version: "6.5.3",
-        #     url_os: "windows_x86",
-        #     qt_repo_path: "qt6_653",
-        #     qt_arch_suffix: "win64_msvc2019_64",
-        #     qt_dir_prefix: "6.5.3/msvc2019_64",
-        #     qt_pkg_suffix: "-Windows-Windows_10_22H2-MSVC2019-Windows-Windows_10_22H2-X86_64",
-        #     qt_addon_infix: "",
-        #     qt_icu_suffix: "",
-        #     qt_icu_workdir: "",
-        #   }
-        # - {
-        #     name: "Ubuntu 22.04 GCC", os: ubuntu-22.04,
-        #     cc: "gcc", cxx: "g++",
-        #     environment_script: "",
-        #     qt_version: "6.5.3",
-        #     url_os: "linux_x64",
-        #     qt_repo_path: "qt6_653",
-        #     qt_arch_suffix: "gcc_64",
-        #     qt_dir_prefix: "6.5.3/gcc_64",
-        #     qt_pkg_suffix: "-Linux-RHEL_8_4-GCC-Linux-RHEL_8_4-X86_64",
-        #     qt_addon_infix: "",
-        #     qt_icu_suffix: "Rhel7.2-x64",
-        #     qt_icu_workdir: "qt6",
-        #   }
-        # - {
-        #     name: "macOS Clang", os: macos-latest,
-        #     cc: "clang", cxx: "clang++",
-        #     environment_script: "",
-        #     qt_version: "6.5.3",
-        #     url_os: "mac_x64",
-        #     qt_repo_path: "qt6_653",
-        #     qt_arch_suffix: "clang_64",
-        #     qt_dir_prefix: "6.5.3/macos",
-        #     qt_pkg_suffix: "-MacOS-MacOS_12-Clang-MacOS-MacOS_12-X86_64-ARM64",
-        #     qt_addon_infix: "",
-        #     qt_icu_suffix: "",
-        #     qt_icu_workdir: "",
-        #   }
-        # ── Qt 6.8.3 ──
-        - {
-            name: "Windows MSVC 2022", os: windows-2022,
-            cc: "cl", cxx: "cl",
-            environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat",
-            qt_version: "6.8.3",
-            url_os: "windows_x86",
-            qt_repo_path: "qt6_683/qt6_683",
-            qt_arch_suffix: "win64_msvc2022_64",
-            qt_dir_prefix: "",
-            qt_pkg_suffix: "-Windows-Windows_11_23H2-MSVC2022-Windows-Windows_11_23H2-X86_64",
-            qt_addon_infix: "addons.",
-            qt_icu_suffix: "",
-            qt_icu_workdir: "",
-          }
-        - {
-            name: "Ubuntu 22.04 GCC Debug", os: ubuntu-22.04,
-            cc: "gcc", cxx: "g++",
-            environment_script: "",
-            build_type: "Debug",
-            qt_version: "6.8.3",
-            url_os: "linux_x64",
-            qt_repo_path: "qt6_683/qt6_683",
-            qt_arch_suffix: "linux_gcc_64",
-            qt_dir_prefix: "",
-            qt_pkg_suffix: "-Linux-RHEL_8_10-GCC-Linux-RHEL_8_10-X86_64",
-            qt_addon_infix: "addons.",
-            qt_icu_suffix: "Rhel8.6-x86_64",
-            qt_icu_workdir: "qt6/lib",
-          }
-        - {
-            name: "macOS Clang", os: macos-latest,
-            cc: "clang", cxx: "clang++",
-            environment_script: "",
-            qt_version: "6.8.3",
-            url_os: "mac_x64",
-            qt_repo_path: "qt6_683/qt6_683",
-            qt_arch_suffix: "clang_64",
-            qt_dir_prefix: "",
-            qt_pkg_suffix: "-MacOS-MacOS_14-Clang-MacOS-MacOS_14-X86_64-ARM64",
-            qt_addon_infix: "addons.",
-            qt_icu_suffix: "",
-            qt_icu_workdir: "",
-          }
-        # ── Qt 6.10.2 ──
-        - {
-            name: "Windows MSVC 2022", os: windows-2022,
-            cc: "cl", cxx: "cl",
-            environment_script: "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat",
-            qt_version: "6.10.2",
-            url_os: "windows_x86",
-            qt_repo_path: "qt6_6102/qt6_6102",
-            qt_arch_suffix: "win64_msvc2022_64",
-            qt_dir_prefix: "",
-            qt_pkg_suffix: "-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64",
-            qt_addon_infix: "addons.",
-            qt_icu_suffix: "",
-            qt_icu_workdir: "",
-          }
-        - {
-            name: "Ubuntu 22.04 GCC", os: ubuntu-22.04,
-            cc: "gcc", cxx: "g++",
-            environment_script: "",
-            qt_version: "6.10.2",
-            url_os: "linux_x64",
-            qt_repo_path: "qt6_6102/qt6_6102",
-            qt_arch_suffix: "linux_gcc_64",
-            qt_dir_prefix: "",
-            qt_pkg_suffix: "-Linux-RHEL_9_4-GCC-Linux-RHEL_9_4-X86_64",
-            qt_addon_infix: "addons.",
-            qt_icu_suffix: "Rhel8.6-x86_64",
-            qt_icu_workdir: "qt6/lib",
-          }
-        - {
-            name: "macOS Clang", os: macos-latest,
-            cc: "clang", cxx: "clang++",
-            environment_script: "",
-            qt_version: "6.10.2",
-            url_os: "mac_x64",
-            qt_repo_path: "qt6_6102/qt6_6102",
-            qt_arch_suffix: "clang_64",
-            qt_dir_prefix: "",
-            qt_pkg_suffix: "-MacOS-MacOS_15-Clang-MacOS-MacOS_15-X86_64-ARM64",
-            qt_addon_infix: "addons.",
-            qt_icu_suffix: "",
-            qt_icu_workdir: "",
-          }
+          - os: windows-2022
+            name: Windows MSVC 2022
+            cc: cl
+            cxx: cl
+            environment_script: C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Auxiliary/Build/vcvars64.bat
+            url_os: windows_x86
+            qt_arch_suffix: win64_msvc2022_64
+          - os: ubuntu-22.04
+            name: Ubuntu 22.04 GCC
+            cc: gcc
+            cxx: g++
+            url_os: linux_x64
+            qt_arch_suffix: linux_gcc_64
+          - os: macos-latest
+            name: macOS Clang
+            cc: clang
+            cxx: clang++
+            url_os: mac_x64
+            qt_arch_suffix: clang_64
 
     steps:
     - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
@@ -200,7 +97,11 @@ jobs:
         set(qt_version "${{ matrix.qt_version }}")
         string(REPLACE "." "" qt_version_dotless "${qt_version}")
 
-        set(qt_base_url "https://download.qt.io/online/qtsdkrepository/${{ matrix.url_os }}/desktop/${{ matrix.qt_repo_path }}")
+        set(qt_repo_path "qt6_${qt_version_dotless}/qt6_${qt_version_dotless}")
+        if ("${{ runner.os }}" STREQUAL "Windows" AND qt_version VERSION_GREATER_EQUAL "6.12.0")
+          string(APPEND qt_repo_path "_msvc2022_64")
+        endif()
+        set(qt_base_url "https://download.qt.io/online/qtsdkrepository/${{ matrix.url_os }}/desktop/${qt_repo_path}")
         file(DOWNLOAD "${qt_base_url}/Updates.xml" ./Updates.xml SHOW_PROGRESS STATUS updates_status)
         list(GET updates_status 0 updates_status_code)
         if (NOT updates_status_code EQUAL 0)
@@ -217,11 +118,30 @@ jobs:
 
         file(MAKE_DIRECTORY qt6)
 
-        set(qt_dir_suffix "${{ matrix.qt_dir_prefix }}")
-        if (qt_dir_suffix)
-          file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/qt6/${qt_dir_suffix}" qt_dir)
+        file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/qt6" qt_dir)
+
+        # Platform archive names from the Qt online repository's Updates.xml.
+        if ("${{ runner.os }}" STREQUAL "Windows")
+          set(qt_pkg_suffix "-Windows-Windows_11_24H2-MSVC2022-Windows-Windows_11_24H2-X86_64")
+          if (qt_version VERSION_EQUAL "6.8.3")
+            set(qt_pkg_suffix "-Windows-Windows_11_23H2-MSVC2022-Windows-Windows_11_23H2-X86_64")
+          endif()
+        elseif ("${{ runner.os }}" STREQUAL "Linux")
+          if (qt_version VERSION_EQUAL "6.8.3")
+            set(qt_pkg_suffix "-Linux-RHEL_8_10-GCC-Linux-RHEL_8_10-X86_64")
+          elseif (qt_version VERSION_EQUAL "6.10.2")
+            set(qt_pkg_suffix "-Linux-RHEL_9_4-GCC-Linux-RHEL_9_4-X86_64")
+          else()
+            set(qt_pkg_suffix "-Linux-RHEL_9_6-GCC-Linux-RHEL_9_6-X86_64")
+          endif()
         else()
-          file(TO_CMAKE_PATH "$ENV{GITHUB_WORKSPACE}/qt6" qt_dir)
+          if (qt_version VERSION_EQUAL "6.8.3")
+            set(qt_pkg_suffix "-MacOS-MacOS_14-Clang-MacOS-MacOS_14-X86_64-ARM64")
+          elseif (qt_version VERSION_EQUAL "6.10.2")
+            set(qt_pkg_suffix "-MacOS-MacOS_15-Clang-MacOS-MacOS_15-X86_64-ARM64")
+          else()
+            set(qt_pkg_suffix "-MacOS-MacOS_26-Clang-MacOS-MacOS_26-X86_64-ARM64")
+          endif()
         endif()
         file(APPEND "$ENV{GITHUB_OUTPUT}" "qt_dir=${qt_dir}\n")
 
@@ -252,25 +172,25 @@ jobs:
 
         foreach(package qtbase qtdeclarative qttools qtsvg)
           downloadAndExtract(
-            "${qt_base_url}/qt.qt6.${qt_version_dotless}.${{ matrix.qt_arch_suffix }}/${qt_package_version}${package}${{ matrix.qt_pkg_suffix }}.7z"
+            "${qt_base_url}/qt.qt6.${qt_version_dotless}.${{ matrix.qt_arch_suffix }}/${qt_package_version}${package}${qt_pkg_suffix}.7z"
             ${package}.7z
           )
         endforeach()
 
         foreach(package qt5compat qtshadertools)
           downloadAndExtract(
-            "${qt_base_url}/qt.qt6.${qt_version_dotless}.${{ matrix.qt_addon_infix }}${package}.${{ matrix.qt_arch_suffix }}/${qt_package_version}${package}${{ matrix.qt_pkg_suffix }}.7z"
+            "${qt_base_url}/qt.qt6.${qt_version_dotless}.addons.${package}.${{ matrix.qt_arch_suffix }}/${qt_package_version}${package}${qt_pkg_suffix}.7z"
             ${package}.7z
           )
         endforeach()
 
         # uic and Qt libs depend on libicu*.so
-        if (NOT "${{ matrix.qt_icu_suffix }}" STREQUAL "")
+        if ("${{ runner.os }}" STREQUAL "Linux")
           set(icu_archive "$ENV{GITHUB_WORKSPACE}/icu.7z")
-          set(icu_workdir "$ENV{GITHUB_WORKSPACE}/${{ matrix.qt_icu_workdir }}")
+          set(icu_workdir "$ENV{GITHUB_WORKSPACE}/qt6/lib")
           message("Downloading ICU to ${icu_archive}, extracting to ${icu_workdir}")
           file(DOWNLOAD
-            "${qt_base_url}/qt.qt6.${qt_version_dotless}.${{ matrix.qt_arch_suffix }}/${qt_package_version}icu-linux-${{ matrix.qt_icu_suffix }}.7z"
+            "${qt_base_url}/qt.qt6.${qt_version_dotless}.${{ matrix.qt_arch_suffix }}/${qt_package_version}icu-linux-Rhel8.6-x86_64.7z"
             "${icu_archive}"
             SHOW_PROGRESS
             STATUS icu_status
@@ -326,7 +246,7 @@ jobs:
             -S .
             -B build
             -G Ninja
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type || 'Release' }}
+            -DCMAKE_BUILD_TYPE=${{ matrix.os == 'ubuntu-22.04' && matrix.qt_version == '6.8.3' && 'Debug' || 'Release' }}
             "-DCMAKE_PREFIX_PATH=${{ steps.qt.outputs.qt_dir }}"
             "-DCMAKE_EXE_LINKER_FLAGS=${linker_flags}"
             -DLLMQORE_BUILD_TESTS=ON
