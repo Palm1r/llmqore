@@ -60,6 +60,8 @@ compile_commands.json
 .qodeassist/
 .qtcreator/
 .claude/
+.agents/
+.codex/
 .cursor/
 .vscode/
 
