@@ -73,11 +73,12 @@ Three design choices to note:
 - **Permission has no capability flag.** `session/request_permission` is always handled;
   with no `AcpPermissionProvider` the host answers `outcome: cancelled`. Only `fs.*` and
   `terminal` are gated by provider presence in `initialize`.
-- **The permission provider gets the merged call.** The request's `toolCall` is a
+- **A permission request updates the tool call.** The request's `toolCall` is a
   `ToolCallUpdate` and may carry only the `toolCallId`; codex-acp 2.11.0 sends
-  `toolCallId`, `kind` and `status` for an MCP call it has already reported. The provider
-  receives the stored call with the request's fields applied. The stored call is not
-  updated and no signal is emitted.
+  `toolCallId`, `kind` and `status` for an MCP call it has already reported. It takes
+  the same path as a `tool_call_update`, so the host's signals show the call the
+  provider is asked about: the stored call is updated, `toolCallUpdated` is emitted,
+  and the provider receives the merged call.
 
 ## Method coverage
 
@@ -221,8 +222,8 @@ See the ACP path in [`example/ChatController.cpp`](../../example/ChatController.
 
 `tst_AcpTypes` (round-trip of every wire struct), `tst_AcpLoopback` (handshake,
 streaming, cancel, a full prompt turn where the agent calls back into the host for
-`fs/read_text_file` + `session/request_permission`, and permission requests completed
-from the stored tool call), `tst_AcpProviders`
+`fs/read_text_file` + `session/request_permission`, and permission requests merged
+into the stored tool call), `tst_AcpProviders`
 (`DefaultFileSystemProvider`, `TerminalManager`, `CallbackPermissionProvider`),
 `tst_AcpAgentConfig` (launch config + JSON round-trip), `tst_AcpAgentRegistry`
 (catalogue load/merge/lookup). All run under the standard

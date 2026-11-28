@@ -49,7 +49,8 @@ sequenceDiagram
 
     EA->>JS: request "session/request_permission"<br/>(toolCall, options[])
     JS->>AC: incoming request
-    AC->>AC: merge the request with the stored toolCall
+    AC->>AC: merge into the stored ToolCall
+    AC-->>App: toolCallUpdated(ToolCall)
     AC->>PP: requestPermission(sessionId, toolCall, options)
     PP-->>App: show prompt, await user
     App-->>PP: user picks optionId
@@ -113,9 +114,10 @@ plus growing `content` and `locations`). The host UI renders one evolving card p
 authoritative merged state, cleared when the turn ends.
 
 The `toolCall` of a `session/request_permission` is a `ToolCallUpdate` as well and may
-carry only the `toolCallId`. The permission provider receives the stored call with the
-request's fields applied, or the request's call as it is when none is stored. The
-stored call itself is not updated and no signal is emitted.
+carry only the `toolCallId`. It is handled as a `tool_call_update`: merged into the
+stored call, or stored when the id is unknown, and `toolCallUpdated` is emitted. The
+permission provider then receives the merged call. The merge and the signal do not
+depend on a provider being set.
 
 ## Invariants
 

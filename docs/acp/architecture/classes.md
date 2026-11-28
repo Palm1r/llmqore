@@ -110,8 +110,8 @@ classDiagram
   destruction (each `QProcess` is killed).
 - **Session state** — `AcpClient` holds a `QHash<QString sessionId, SessionState>`.
   A `SessionState` tracks the outstanding `prompt` promise and the live tool calls so
-  `tool_call_update` notifications can be merged into the right `ToolCall`, and the
-  `toolCall` of a permission request can be completed from it.
+  `tool_call_update` notifications and permission requests can be merged into the right
+  `ToolCall`.
 
 ## Why no `BaseClient` / `ToolsManager` here
 

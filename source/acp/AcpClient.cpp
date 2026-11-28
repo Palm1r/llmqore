@@ -244,13 +244,8 @@ void AcpClient::handleSessionUpdate(const QJsonObject &params)
             emit toolCallStarted(sid, *u.toolCall);
         }
     } else if (kind == QLatin1String(SessionUpdateKind::ToolCallUpdate)) {
-        if (u.toolCall) {
-            SessionState &st = m_sessions[sid];
-            const ToolCall merged
-                = mergeToolCall(st.tools.value(u.toolCall->toolCallId), *u.toolCall);
-            st.tools.insert(merged.toolCallId, merged);
-            emit toolCallUpdated(sid, merged);
-        }
+        if (u.toolCall)
+            updateToolCall(sid, *u.toolCall);
     } else if (kind == QLatin1String(SessionUpdateKind::Plan)) {
         if (u.plan)
             emit planUpdated(sid, *u.plan);
@@ -269,6 +264,15 @@ void AcpClient::handleSessionUpdate(const QJsonObject &params)
     }
 }
 
+ToolCall AcpClient::updateToolCall(const QString &sessionId, const ToolCall &update)
+{
+    SessionState &st = m_sessions[sessionId];
+    const ToolCall merged = mergeToolCall(st.tools.value(update.toolCallId), update);
+    st.tools.insert(merged.toolCallId, merged);
+    emit toolCallUpdated(sessionId, merged);
+    return merged;
+}
+
 void AcpClient::installHandlers()
 {
     m_peer->bindNotification(
@@ -281,12 +285,11 @@ void AcpClient::installHandlers()
         []() { return true; },
         [this](const QJsonObject &params) -> QFuture<QJsonValue> {
             const RequestPermissionParams p = RequestPermissionParams::fromJson(params);
+            const ToolCall toolCall = updateToolCall(p.sessionId, p.toolCall);
             if (m_permissionProvider.isNull()) {
                 return LLMQore::readyFuture<QJsonValue>(
                     RequestPermissionResult::cancelled().toJson());
             }
-            const ToolCall toolCall = mergeToolCall(
-                m_sessions.value(p.sessionId).tools.value(p.toolCall.toolCallId), p.toolCall);
             return LLMQore::compat(
                        m_permissionProvider->requestPermission(p.sessionId, toolCall, p.options))
                 .then(this, [](const RequestPermissionResult &r) { return QJsonValue(r.toJson()); });

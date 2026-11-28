@@ -123,6 +123,7 @@ signals:
 private:
     void installHandlers();
     void handleSessionUpdate(const QJsonObject &params);
+    ToolCall updateToolCall(const QString &sessionId, const ToolCall &update);
 
     struct SessionState
     {
