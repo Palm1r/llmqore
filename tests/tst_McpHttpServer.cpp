@@ -21,6 +21,7 @@
 
 #include <LLMQore/BaseTool.hpp>
 #include <LLMQore/HttpClient.hpp>
+#include <LLMQore/HttpStream.hpp>
 #include <LLMQore/McpClient.hpp>
 #include <LLMQore/McpHttpServerTransport.hpp>
 #include <LLMQore/McpHttpTransport.hpp>
@@ -2746,6 +2747,34 @@ TEST_F(McpHttpServerTest, ServerRefusesToDeleteASessionItDoesNotKnow)
     const HttpResponse other = server.request("PUT", session);
     EXPECT_EQ(other.statusCode, 405);
     EXPECT_EQ(other.rawHeader(QByteArrayView("Allow")), QByteArray("POST, DELETE"));
+}
+
+TEST_F(McpHttpServerTest, AbortingARefusedListenStreamDoesNotEmitWarnings)
+{
+    ServerUnderTest server;
+    server.transport.start();
+    ASSERT_TRUE(server.transport.isOpen());
+
+    QNetworkRequest request(server.endpoint());
+    QtWarningCapture capture;
+    auto *stream = server.http.openStream(request, QByteArrayView("GET"));
+    ASSERT_NE(stream, nullptr);
+    QSignalSpy finished(stream, &HttpStream::finished);
+    int errors = 0;
+    QObject::connect(stream, &HttpStream::errorOccurred, stream, [&errors]() { ++errors; });
+    QObject::connect(stream, &HttpStream::headersReceived, stream, [stream]() {
+        EXPECT_EQ(stream->statusCode(), 405);
+        stream->abort();
+    });
+    for (int i = 0; i < 100 && !stream->isFinished(); ++i)
+        pumpEventLoop(std::chrono::milliseconds(20));
+    ASSERT_TRUE(stream->isFinished());
+    EXPECT_EQ(stream->statusCode(), 405);
+    pumpEventLoop(std::chrono::milliseconds(100));
+    EXPECT_EQ(finished.size(), 0);
+    EXPECT_EQ(errors, 0);
+    EXPECT_TRUE(capture.warnings().isEmpty()) << capture.warnings().join('\n').toStdString();
+    stream->deleteLater();
 }
 
 TEST_F(McpHttpServerTest, ClientStopEndsTheSessionOnAnLlmqoreServer)

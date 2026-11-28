@@ -28,7 +28,7 @@ bool isTransportLevelError(QNetworkReply::NetworkError code) noexcept
 
 struct HttpStream::Impl
 {
-    QNetworkReply *reply = nullptr;
+    QPointer<QNetworkReply> reply;
     bool headersFired = false;
     bool terminalFired = false;
     bool aborted = false;
@@ -60,6 +60,8 @@ HttpStream::HttpStream(QNetworkReply *reply, QObject *parent)
             return;
         if (!m_impl->headersFired)
             fireHeaders();
+        if (m_impl->aborted)
+            return;
         const QByteArray chunk = m_impl->reply->readAll();
         if (!chunk.isEmpty())
             emit chunkReceived(chunk);
@@ -73,7 +75,11 @@ HttpStream::HttpStream(QNetworkReply *reply, QObject *parent)
         if (!trailing.isEmpty()) {
             if (!m_impl->headersFired)
                 fireHeaders();
+            if (m_impl->aborted)
+                return;
             emit chunkReceived(trailing);
+            if (m_impl->aborted)
+                return;
         }
 
         const QNetworkReply::NetworkError code = m_impl->reply->error();
@@ -88,6 +94,8 @@ HttpStream::HttpStream(QNetworkReply *reply, QObject *parent)
 
         if (!m_impl->headersFired)
             fireHeaders();
+        if (m_impl->aborted)
+            return;
 
         m_impl->terminalFired = true;
         emit finished();
@@ -98,7 +106,10 @@ HttpStream::~HttpStream()
 {
     if (m_impl->reply && !m_impl->aborted) {
         m_impl->reply->disconnect(this);
-        m_impl->reply->abort();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        if (!m_impl->reply->isFinished())
+            m_impl->reply->abort();
+#endif
     }
 }
 
@@ -136,12 +147,17 @@ bool HttpStream::isFinished() const noexcept
 
 void HttpStream::abort()
 {
-    if (m_impl->aborted)
+    if (m_impl->aborted || m_impl->terminalFired)
         return;
     m_impl->aborted = true;
     if (m_impl->reply) {
         m_impl->reply->disconnect(this);
-        m_impl->reply->abort();
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+        m_impl->reply->deleteLater();
+#else
+        if (!m_impl->reply->isFinished())
+            m_impl->reply->abort();
+#endif
     }
 }
 
