@@ -40,6 +40,62 @@ inline constexpr const char *RejectOnce  = "reject_once";
 inline constexpr const char *RejectAlways = "reject_always";
 } // namespace PermissionOptionKind
 
+namespace ContentBlockType {
+inline constexpr const char *Text         = "text";
+inline constexpr const char *Image        = "image";
+inline constexpr const char *Audio        = "audio";
+inline constexpr const char *ResourceLink = "resource_link";
+inline constexpr const char *Resource     = "resource";
+} // namespace ContentBlockType
+
+namespace ToolCallStatus {
+inline constexpr const char *Pending    = "pending";
+inline constexpr const char *InProgress = "in_progress";
+inline constexpr const char *Completed  = "completed";
+inline constexpr const char *Failed     = "failed";
+} // namespace ToolCallStatus
+
+namespace ToolKind {
+inline constexpr const char *Read       = "read";
+inline constexpr const char *Edit       = "edit";
+inline constexpr const char *Delete     = "delete";
+inline constexpr const char *Move       = "move";
+inline constexpr const char *Search     = "search";
+inline constexpr const char *Execute    = "execute";
+inline constexpr const char *Think      = "think";
+inline constexpr const char *Fetch      = "fetch";
+inline constexpr const char *SwitchMode = "switch_mode";
+inline constexpr const char *Other      = "other";
+} // namespace ToolKind
+
+namespace ToolCallContentType {
+inline constexpr const char *Content  = "content";
+inline constexpr const char *Diff     = "diff";
+inline constexpr const char *Terminal = "terminal";
+} // namespace ToolCallContentType
+
+namespace PlanEntryStatus {
+inline constexpr const char *Pending    = "pending";
+inline constexpr const char *InProgress = "in_progress";
+inline constexpr const char *Completed  = "completed";
+} // namespace PlanEntryStatus
+
+namespace PlanEntryPriority {
+inline constexpr const char *High   = "high";
+inline constexpr const char *Medium = "medium";
+inline constexpr const char *Low    = "low";
+} // namespace PlanEntryPriority
+
+namespace SessionConfigOptionType {
+inline constexpr const char *Select  = "select";
+inline constexpr const char *Boolean = "boolean";
+} // namespace SessionConfigOptionType
+
+namespace ErrorCode {
+inline constexpr int AuthRequired     = -32000;
+inline constexpr int ResourceNotFound = -32002;
+} // namespace ErrorCode
+
 namespace Method {
 inline constexpr const char *Initialize        = "initialize";
 inline constexpr const char *Authenticate      = "authenticate";
@@ -368,7 +424,7 @@ struct LLMQORE_EXPORT ToolCallLocation
 
 struct LLMQORE_EXPORT ToolCallContent
 {
-    QString type = QStringLiteral("content");
+    QString type = QString::fromLatin1(ToolCallContentType::Content);
     std::optional<ContentBlock> content;
     QString path;
     QString oldText;
