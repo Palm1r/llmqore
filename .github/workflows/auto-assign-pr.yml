@@ -1,0 +1,22 @@
+name: Auto-assign pull requests
+
+on:
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  assign:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assign pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ASSIGNEE_ID: '9195189'
+        run: |
+          login=$(gh api "user/${ASSIGNEE_ID}" --jq '.login')
+          test -n "$login" && test "$login" != null
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/assignees" -f "assignees[]=$login"
